@@ -18,7 +18,7 @@ import Core.Value
 -- reduce
 export
 normalisePis : {auto c : Ref Ctxt Defs} ->
-               {vars : ScopedList Name} ->
+               {vars : SnocList Name} ->
                Defs -> Env Term vars -> Term vars -> Core (Term vars)
 normalisePis defs env tm
     = do tmnf <- nf defs env tm
@@ -238,7 +238,7 @@ logEnv s n msg env
 
   where
 
-    dumpEnv : {vs : ScopedList Name} -> Env Term vs -> Core ()
+    dumpEnv : {vs : SnocList Name} -> Env Term vs -> Core ()
     dumpEnv [] = pure ()
     dumpEnv {vs = x :%: _} (Let _ c val ty :: bs)
         = do logTermNF' s n (msg ++ ": let " ++ show x) bs val
@@ -334,7 +334,7 @@ normalisePrims : {auto c : Ref Ctxt Defs} -> {vs : _} ->
                  List Name ->
                  -- view of the potential redex
                  (n : Name) ->          -- function name
-                 (args : ScopedList arg) ->   -- arguments from inside out (arg1, ..., argk)
+                 (args : SnocList arg) ->   -- arguments from inside out (arg1, ..., argk)
                  -- actual term to evaluate if needed
                  (tm : Term vs) ->      -- original term (n arg1 ... argk)
                  Env Term vs ->         -- evaluation environment
