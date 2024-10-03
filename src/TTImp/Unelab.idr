@@ -13,6 +13,8 @@ import TTImp.TTImp
 import Data.List
 import Data.String
 
+import Libraries.Data.SnocList.SizeOf
+
 %default covering
 
 used : (idx : Nat) -> Term vars -> Bool
@@ -240,13 +242,13 @@ mutual
       = case umode of
           NoSugar True => do
             let x' = uniqueLocal vars x
-            let sc : Term (x' :: vars) = compat sc
-            (sc', scty) <- unelabTy umode nest (b :: env) sc
+            let sc : Term (vars :< x') = compat sc
+            (sc', scty) <- unelabTy umode nest (env :< b) sc
             unelabBinder umode nest fc env x' b
                          (compat sc) sc'
                          (compat !(getTerm scty))
           _ => do
-            (sc', scty) <- unelabTy umode nest (b :: env) sc
+            (sc', scty) <- unelabTy umode nest (env :< b) sc
             unelabBinder umode nest fc env x b sc sc' !(getTerm scty)
     where
       next : Name -> Name
