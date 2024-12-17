@@ -93,6 +93,7 @@ elabScript : {vars : _} ->
 elabScript rig fc nest env script@(VDCon nfc nm t ar args) exp
     = do defs <- get Ctxt
          fnm <- toFullNames nm
+         -- log "reflection.reify" 10 $ "elabScript fnm: \{show fnm}, args: \{show $ toList $ map snd args}"
          case fnm of
               NS ns (UN (Basic n))
                  => if ns == reflectionNS
@@ -374,6 +375,8 @@ checkRunElab rig elabinfo nest env fc reqExt script exp
                            check rig elabinfo nest env script (Just !(nf env elabtt))
          solveConstraints inTerm Normal
          defs <- get Ctxt -- checking might have resolved some holes
+         logTerm "reflection.reify" 10 "checkRunElab stm" stm
+         -- logEnv "reflection.reify" 10 "checkRunElab env" env
          ntm <- elabScript rig fc nest env
                            !(expand !(nf env stm)) (Just !(nf env expected))
          defs <- get Ctxt -- might have updated as part of the script

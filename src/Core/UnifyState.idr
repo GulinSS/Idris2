@@ -375,8 +375,10 @@ newMetaLets {vars} fc rig env n ty def nocyc lets
          log "unify.meta" 5 $ "Adding new meta " ++ show (n, fc, rig)
          logTerm "unify.meta" 10 ("New meta type " ++ show n) hty
          idx <- addDef n hole
+         let app = Meta fc n idx envArgs
+         logTerm "unify.meta" 10 ("New meta app " ++ show n) app
          addHoleName fc n idx
-         pure (idx, Meta fc n idx envArgs)
+         pure (idx, app)
   where
     envArgs : List (RigCount, Term vars)
     envArgs = let args = reverse (mkConstantAppArgs {done = ScopeEmpty} lets fc env [<]) in
@@ -608,11 +610,12 @@ dumpHole : {auto u : Ref UST UState} ->
 dumpHole s n hole
     = do ust <- get UST
          defs <- get Ctxt
+         depth <- getDepth
          case !(lookupCtxtExact (Resolved hole) (gamma defs)) of
           Nothing => pure ()
           Just gdef => case (definition gdef, type gdef) of
              (Guess tm envb constraints, ty) =>
-                  do logString s.topic n $
+                  do logString depth s.topic n $
                        "!" ++ show !(getFullName (Resolved hole)) ++ " : "
                            ++ show !(toFullNames !(normaliseHoles ScopeEmpty ty))
                        ++ "\n\t  = "
@@ -620,13 +623,13 @@ dumpHole s n hole
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
-                  logString s.topic n $
+                  logString depth s.topic n $
                     "?" ++ show (fullname gdef) ++ " : "
                         ++ show !(normaliseHoles ScopeEmpty ty)
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
-                  logString s.topic n $
+                  logString depth s.topic n $
                      "Search " ++ show hole ++ " : " ++
                      show !(toFullNames !(normaliseHoles ScopeEmpty ty))
              (Function _ t _ _, ty) =>
@@ -648,15 +651,16 @@ dumpHole s n hole
     dumpConstraint cid
         = do ust <- get UST
              defs <- get Ctxt
+             depth <- getDepth
              case lookup cid (constraints ust) of
                Nothing => pure ()
-               Just Resolved => logString s.topic n "\tResolved"
+               Just Resolved => logString depth s.topic n "\tResolved"
                Just (MkConstraint _ lazy env x y) =>
-                    logString s.topic n $
+                    logString depth s.topic n $
                          "\t  " ++ show !(toFullNames x)
                               ++ " =?= " ++ show !(toFullNames y)
                Just (MkSeqConstraint _ _ xs ys) =>
-                    logString s.topic n $ "\t\t" ++ show xs ++ " =?= " ++ show ys
+                    logString depth s.topic n $ "\t\t" ++ show xs ++ " =?= " ++ show ys
 
 export
 dumpConstraints : {auto u : Ref UST UState} ->
@@ -669,5 +673,6 @@ dumpConstraints s n all
            let hs = toList (guesses ust) ++
                     toList (if all then holes ust else currentHoles ust)
            unless (isNil hs) $
-             do logString s.topic n "--- CONSTRAINTS AND HOLES ---"
+             do depth <- getDepth
+                logString depth s.topic n "--- CONSTRAINTS AND HOLES ---"
                 traverse_ (dumpHole s n) (map fst hs)

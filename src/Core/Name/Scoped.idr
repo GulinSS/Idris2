@@ -4,6 +4,7 @@ import Core.Name
 import Core.Name.CompatibleVars
 
 import Data.SnocList
+import Data.String
 import Libraries.Data.SnocList.HasLength
 import Libraries.Data.SnocList.SizeOf
 import Libraries.Data.List.SizeOf
@@ -67,6 +68,16 @@ namespace Thin
   export
   embed : Thin xs ys -> Thin (outer ++ xs) (outer ++ ys)
   embed = believe_me
+
+export
+covering
+{xs, ys : _} -> Show (Thin xs ys) where
+  show x = joinBy " " $ showAll [] x
+    where
+      showAll : {free, vars : _} -> List String -> Thin free vars -> List String
+      showAll str Refl = str ++ ["ThinRefl"]
+      showAll str (Drop t) = showAll ("ThinDrop" :: str) t
+      showAll str (Keep t) = showAll ("ThinKeep" :: str) t
 
 export
 none : {xs : SnocList a} -> Thin [<] xs
