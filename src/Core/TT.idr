@@ -399,6 +399,12 @@ cons n xn None = Add n xn None
 cons n xn (Add n' xn' b) = Add n' xn' (cons n xn b)
 
 export
+covering
+{vars : _} -> Show (Bounds vars) where
+  show None = "None"
+  show (Add x n b) = show x ++ " " ++ show n ++ " + " ++ show b
+
+export
 addVars : SizeOf outer -> Bounds bound ->
           NVar name (vars ++ outer) ->
           NVar name (vars ++ bound ++ outer)

@@ -297,6 +297,9 @@ findLinear top bound rig tm
               => do defs <- get Ctxt
                     Just nty <- lookupTyExact n (gamma defs)
                          | Nothing => pure []
+                    logTerm "declare.def.lhs" 5 ("Type of " ++ show !(toFullNames n)) nty
+                    -- log "declare.def.lhs" 5 ("Type NF of " ++ show !(toFullNames n) ++ ": " ++ show !(nf [<] nty))
+                    log "declare.def.lhs" 5 ("Args: " ++ show !(traverse toFullNames args))
                     findLinArg (accessible nt rig) !(expand !(nf ScopeEmpty nty)) args
            _ => pure []
     where
@@ -312,6 +315,7 @@ findLinear top bound rig tm
                then case u of
                          UseLeft => findLinArg rig ty (p :: as)
                          UseRight => findLinArg rig ty (a :: as)
+               -- Yaffle: else findLinArg rig ty (as :< p :< a)
                else pure $ !(findLinArg rig ty [a]) ++ !(findLinArg rig ty (p :: as))
       findLinArg rig (VBind _ x (Pi _ c _ _) sc) (Local {name=a} fc _ idx prf :: as)
           = do defs <- get Ctxt
@@ -434,10 +438,12 @@ checkLHS {vars} trans mult n opts nest env fc lhs_in
          lhstm <- normaliseHoles lhsenv lhstm
          linvars_in <- findLinear True 0 linear lhstm
          logTerm "declare.def.lhs" 10 "Checked LHS term after normalise" lhstm
+         linvars_in <- findLinear True 0 linear lhstm
          log "declare.def.lhs" 5 $ "Linearity of names in " ++ show n ++ ": " ++
                  show linvars_in
 
          lhsty <- normaliseHoles env lhsty
+         logTerm "declare.def.lhs" 10 "lhsty" lhsty
 
          linvars <- combineLinear fc linvars_in
          let lhstm_lin = setLinear linvars lhstm
@@ -1001,7 +1007,7 @@ processDef opts nest env fc n_in cs_in
 
          -- Dynamically rebind default totality requirement to this function's totality requirement
          -- and use this requirement when processing `with` blocks
-         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult
+         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult ++ " in " ++ show cs_in
          let treq = fromMaybe !getDefaultTotalityOption (findSetTotal (flags gdef))
          cs <- withTotality treq $
                traverse (checkClause mult (collapseDefault $ visibility gdef) treq
