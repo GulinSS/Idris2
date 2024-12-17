@@ -612,13 +612,18 @@ toCDef : {auto c : Ref Ctxt Defs} ->
 toCDef n ty _ None
     = pure $ MkError $ CCrash emptyFC ("Encountered undefined name " ++ show !(getFullName n))
 toCDef n ty erased (Function fi _ tree _)
-    = do s <- newRef NextMN 0
+    = do log "compiler.newtype.world" 25 "toCDef Function ty: \{show ty}, n: \{show n}, erased: \{show erased}, tree: \{show tree}"
+         s <- newRef NextMN 0
          t <- toCExp n tree
          let (args ** comptree) = mergeLambdas [<] t
          let (args' ** p) = mkSub args erased
-         pure $ toLam (externalDecl fi) $ if isNil erased
-            then MkFun args comptree
-            else MkFun args' (shrinkCExp p comptree)
+         log "compiler.newtype.world" 25 "toCDef Function comptree \{show comptree}, p: \{show p}, is_ext: \{show $ (externalDecl fi)}"
+         let lam = toLam (externalDecl fi) $
+            if isNil erased
+                then MkFun args comptree
+                else MkFun args' (shrinkCExp p comptree)
+         log "compiler.newtype.world" 25 "toCDef Function is_erased: \{show $ isNil erased}, lam \{show lam}, args': \{show $ toList args'}"
+         pure lam
   where
     toLam : Bool -> CDef -> CDef
     toLam True (MkFun args rhs) = MkFun [<] (lamRHS args rhs)
@@ -690,8 +695,9 @@ compileDef n
            -- traversing everything from the main expression.
            -- For now, consider it an incentive not to have cycles :).
             then recordWarning (GenericWarn emptyFC ("Compiling hole " ++ show n))
-            else do s <- newRef NextMN 0
-                    ce <- toCDef n (type gdef) (eraseArgs gdef)
+            else do log "compiler.newtype.world" 25 "compileDef name \{show n}, type gdef: \{show $ type gdef}"
+                    s <- newRef NextMN 0
+                    ce <- logDepth $ toCDef n (type gdef) (eraseArgs gdef)
                            !(toFullNames (definition gdef))
                     ce <- constructorCDef ce
                     setCompiled n ce

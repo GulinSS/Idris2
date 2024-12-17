@@ -96,6 +96,13 @@ record UnifyResult where
   namesSolved : List Int -- which ones did we solve (as name indices)
   addLazy : AddLazy
 
+export
+Show UnifyResult where
+  show a = "constraints: " ++ show a.constraints
+    ++ ", holesSolved: " ++ show a.holesSolved
+    ++ ", namesSolved: " ++ show a.namesSolved
+    ++ ", addLazy: " ++ show a.addLazy
+
 union : UnifyResult -> UnifyResult -> UnifyResult
 union u1 u2 = MkUnifyResult (union (constraints u1) (constraints u2))
                             (holesSolved u1 || holesSolved u2)
@@ -283,7 +290,9 @@ unifyArgs mode loc env (cx :: cxs) (cy :: cys)
          -- reduce any newly solved holes
          cx' <- nf env !(quote env !cx)
          cy' <- nf env !(quote env !cy)
+         logC "unify" 20 $ pure $ "unifyArgs done: " ++ show cs
          res <- unify (lower mode) loc env cx' cy'
+         logC "unify" 20 $ pure $ "unify done: " ++ show res
          pure (union res cs)
 unifyArgs mode loc env _ _ = ufail loc ""
 
@@ -299,8 +308,10 @@ unifySpine mode fc env (cxs :< ex) (cys :< ey)
          -- reduce any newly solved holes
          cx' <- nf env !(quote env !(value ex))
          cy' <- nf env !(quote env !(value ey))
-         cs <- unify (lower mode) fc env cx' cy'
-         res <- unifySpine mode fc env cxs cys
+         res <- unify (lower mode) fc env cx' cy'
+         logC "unify" 20 $ pure $ "unify done: " ++ show res
+         cs <- unifySpine mode fc env cxs cys
+         logC "unify" 20 $ pure $ "unifySpine done: " ++ show cs
          pure (union cs res)
 unifySpine mode fc env _ _ = ufail fc ""
 
@@ -393,7 +404,8 @@ patternEnv : {auto c : Ref Ctxt Defs} ->
 patternEnv {vars} env args
     = do defs <- get Ctxt
          empty <- clearDefs defs
-         args' <- traverse expand args
+         -- [Note] Restore logging sequence
+         args' <- traverseSnocList expand args
          pure $
            case getVars [] args' of
              Nothing => Nothing
@@ -490,7 +502,7 @@ tryInstantiate : {auto c : Ref Ctxt Defs} ->
               Term newvars -> -- shrunk environment
               Core Bool -- postpone if the type is yet unknown
 tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
-    = do logTerm "unify.instantiate" 5 ("Instantiating in " ++ show newvars) tm
+    = do logTerm "unify.instantiate" 5 ("Instantiating in " ++ show !(traverse toFullNames (asList newvars))) !(toFullNames tm)
 --          let Hole _ _ = definition mdef
 --              | def => ufail {a=()} loc (show mname ++ " already resolved as " ++ show def)
          case fullname mdef of
@@ -500,10 +512,10 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
          ty <- quoteBinders [<] !(nf [<] (type mdef))
                      -- make sure we have all the pi binders we need in the
                      -- type to make the metavariable definition
-         logTerm "unify.instantiate" 5 ("Type: " ++ show mname) (type mdef)
+         logTerm "unify.instantiate" 5 ("Type: " ++ show !(toFullNames mname)) (type mdef)
          logTerm "unify.instantiate" 5 ("Type: " ++ show mname) ty
          log "unify.instantiate" 5 ("With locs: " ++ show locs)
-         log "unify.instantiate" 5 ("From vars: " ++ show newvars)
+         log "unify.instantiate" 5 ("From vars: " ++ show (asList newvars))
 
          defs <- get Ctxt
          -- Try to instantiate the hole
@@ -793,6 +805,7 @@ mutual
                             (\ty => getArgTypes !(expand !(nf env (embed ty)))
                                                 $ reverse (map value args'))
                             nty
+           log "unify.invertible" 10 "Unifying invertible vty: \{show vty}, vargTys: \{show $ map (asList . map qshow) vargTys}, nargTys: \{show $ map (asList . map qshow) nargTys}"
            -- If the rightmost arguments have the same type, or we don't
            -- know the types of the arguments, we'll get on with it.
            if !(headsConvert mode fc env vargTys nargTys)
@@ -950,10 +963,17 @@ mutual
       = do let margs = cast !(traverse snd args)
            margs' <- traverseSnocList value sp
            let pargs = if isLin margs' then margs else margs ++ margs'
+           logC "unify.hole" 10
+                   (do -- [Note] Restore logging sequence
+                       qargs <- map reverse $ traverse (quote env) (reverse margs')
+                       qtm <- quote env tmnf
+                       pure $ "Unifying: " ++ show !(toFullNames mname) ++ " " ++ show !(traverse toFullNames $ toList qargs) ++
+                              " with " ++ show !(toFullNames qtm)) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
            defs <- get Ctxt
            case !(patternEnv env pargs) of
                 Nothing =>
-                  do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
+                  do log "unify.hole" 10 $ "unifyHole patEnv: Nothing"
+                     Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
                         | _ => postponePatVar swap mode fc env mname mref args sp tmnf
                      let Hole _ _ = definition hdef
                         | _ => postponePatVar swap mode fc env mname mref args sp tmnf
@@ -961,7 +981,8 @@ mutual
                         then unifyHoleApp swap mode fc env mname mref args sp !(expand tmnf)
                         else postponePatVar swap mode fc env mname mref args sp tmnf
                 Just (newvars ** (locs, submv)) =>
-                  do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
+                  do log "unify.hole" 10 $ "unifyHole patEnv newvars: \{show $ asList newvars}, locs: \{show $ toList locs}, submv: \{show submv}"
+                     Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
                          | _ => postponePatVar swap mode fc env mname mref args sp tmnf
                      let Hole _ _ = definition hdef
                          | wat => postponeS {f=Normal} swap fc mode "Delayed hole" env
@@ -1214,6 +1235,7 @@ mutual
                                (refsToLocals (Add nx var None) tmx)
                                (refsToLocals (Add nx var None) tmy)
                   pure (union ct cs')
+
   -- Eta rules
   unifyWithEta mode fc env tmx@(VLam fcx x cx ix tx scx) tmy
         = do if isHoleApp tmy
@@ -1335,12 +1357,12 @@ mutual
 
   -- The interesting top level case, for unifying values
   Core.Unify.Value.unify mode fc env x y
-     = unifyVal mode fc env (asGlued x) (asGlued y)
+     = logDepth $ unifyVal mode fc env (asGlued x) (asGlued y)
 
   -- The interesting top level case, for unifying values and inserting laziness
   -- coercions if appropriate
   Core.Unify.Value.unifyWithLazy mode fc env x y
-     = unifyValLazy mode fc env (asGlued x) (asGlued y)
+     = logDepth $ unifyValLazy mode fc env (asGlued x) (asGlued y)
 
   Core.Unify.Term.unify umode fc env x y
      = do x' <- nf env x
@@ -1355,10 +1377,10 @@ mutual
   export
   Unify NF where
     unifyD _ _ mode fc env x y
-      = unifyVal mode fc env (asGlued x) (asGlued y)
+      = logDepth $ unifyVal mode fc env (asGlued x) (asGlued y)
 
     unifyWithLazyD _ _ mode fc env x y
-      = unifyValLazy mode fc env (asGlued x) (asGlued y)
+      = logDepth $ unifyValLazy mode fc env (asGlued x) (asGlued y)
 
   export
   Unify Term where
@@ -1373,8 +1395,11 @@ mutual
 
   export
   Unify Glued where
-    unifyD _ _ = unifyVal
-    unifyWithLazyD _ _ = unifyValLazy
+    unifyD _ _ mode fc env x y
+      = logDepth $ unifyVal mode fc env x y
+
+    unifyWithLazyD _ _ mode fc env x y
+      = logDepth $ unifyValLazy mode fc env x y
 
 export
 setInvertible : {auto c : Ref Ctxt Defs} ->

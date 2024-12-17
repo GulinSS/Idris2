@@ -67,6 +67,9 @@ record ArgInfo (vars : Scope) where
   metaApp : (RigCount, Term vars)
   argType : Term vars
 
+-- {vars: _} -> Show (ArgInfo vars) where
+--     show x = "{ArgInfo holeId: \{show $ holeID x}, argRig: \{show $ argRig x}, plicit: \{assert_total $ show $ plicit x}, metaApp: \{assert_total $ show $ metaApp x}, argType: \{assert_total $ show $ argType x}}"
+
 export
 mkArgs : {vars : _} ->
          {auto c : Ref Ctxt Defs} ->
@@ -297,7 +300,14 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                  Core (Term vars)
     findDirect defs p f ty target
         = do (args, appTy) <- mkArgs fc rigc env ty
+             -- log "auto" 10 $ "findDirect args" ++ show args
+             -- logNF "auto" 10 "findDirect appTy" env appTy
+             -- let fprf = f prf
+             -- logTermNF "auto" 10 "Trying" env fprf
+             -- logNF "auto" 10 "Type" env ty
+             -- logNF "auto" 10 "For target" env target
              ures <- unify inTerm fc env target appTy
+             log "auto" 10 $ "findDirect ures: " ++ show ures
              let [] = constraints ures
                  | _ => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
              -- We can only use the local if its type is not an unsolved hole
@@ -476,15 +486,16 @@ concreteDets {vars} fc defaults env top pos dets (arg :: args)
     concrete : NF vars -> (atTop : Bool) -> Core ()
     concrete (VBind nfc x b sc) atTop
         = do scnf <- expand !(sc (pure (VErased nfc Placeholder)))
-             concrete scnf False
+             logDepth $ concrete scnf False
     concrete (VTCon nfc n a args) atTop
         = do sd <- getSearchData nfc False n
              let args' = drop 0 (detArgs sd) (toList args)
+             -- log "auto" 10 $ "concrete-2 args: \{show $ toList args}, detArgs: \{show $ detArgs sd}, args': \{show $ args'}"
              traverse_ (\ parg => do argnf <- expand parg
-                                     concrete argnf False) !(traverse value args')
+                                     logDepth $ concrete argnf False) !(traverse value args')
     concrete (VDCon nfc n t a args) atTop
         = do traverse_ (\ parg => do argnf <- expand parg
-                                     concrete argnf False)
+                                     logDepth $ concrete argnf False)
                        !(Core.Core.traverse value (toList args))
     concrete (VMeta _ n i _ _ _) True
         = do defs <- get Ctxt
@@ -554,10 +565,13 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
          abandonIfCycle env target trying
          let trying' = target :: trying
          nty <- expand !(nf env target)
+         -- logDepth $ logNF "auto" 3 "searchType-3 nty" env nty
          case nty of
               VTCon tfc tyn a args =>
                   if a == length args
-                     then do sd <- getSearchData fc defaults tyn
+                     then do -- logNF "auto" 10 "Next target NTCon" env nty
+                             sd <- getSearchData fc defaults tyn
+                             log "auto" 10 $ "Next target NTCon search result detArgs: " ++ show (detArgs sd) ++ ", hintGroups: " ++ show (hintGroups sd)
                              -- Check determining arguments are okay for 'args'
                              when checkdets $
                                  checkConcreteDets fc defaults env top
@@ -570,7 +584,10 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                                                  then throw e
                                                  else tryGroups Nothing nty (hintGroups sd))
                      else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-              _ => searchLocalVars fc rigc defaults trying' depth def top env nty
+              _ => do -- logNF "auto" 10 "Next target other: " env nty
+                      result <- searchLocalVars fc rigc defaults trying' depth def top env nty
+                      logTerm "auto" 10 "Next target other result" result
+                      pure result
   where
     ambig : Error -> Bool
     ambig (AmbiguousSearch _ _ _ _) = True
@@ -603,6 +620,9 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
 --          Core (Term vars)
 Core.Unify.search fc rigc defaults depth def top env
     = do log "auto" 3 $ "Running search with defaults " ++ show defaults
-         searchType fc rigc defaults [] depth def
+         -- logDepth $ logTermNF "auto" 3 "Initial target: " env top
+         tm <- logDepth $ searchType fc rigc defaults [] depth def
                           True (abstractEnvType fc env top) env
                           top
+         -- logTermNF "auto" 3 "Result" env tm
+         pure tm

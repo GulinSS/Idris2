@@ -200,7 +200,7 @@ export
 covering
 Show Clause where
   show (MkClause {vars} env lhs rhs)
-      = show vars ++ ": " ++ show lhs ++ " = " ++ show rhs
+      = show (asList vars) ++ ": " ++ show lhs ++ " = " ++ show rhs
 
 public export
 data DefFlag
