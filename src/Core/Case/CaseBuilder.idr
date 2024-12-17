@@ -520,7 +520,7 @@ groupCons fc fn pvars (x :: xs) {isCons = p :: ps}
                               Just t <- lookupTyExact n (gamma defs)
                                    | Nothing => pure (NErased fc Placeholder)
                               nf defs (mkEnv fc vars') (embed t)
-             (patnames ** (l, newargs)) <- nextNames fc "e" pargs (Just cty)
+             (patnames ** (l, newargs)) <- logDepth $ nextNames fc "e" pargs (Just cty)
              -- Update non-linear names in remaining patterns (to keep
              -- explicit dependencies in types accurate)
              let pats' = updatePatNames (updateNames (zip patnames pargs))
@@ -1046,7 +1046,7 @@ mkPatClause fc fn args ty pid (ps, rhs)
             (\eq =>
                do defs <- get Ctxt
                   nty <- nf defs Env.empty ty
-                  ns <- mkNames args ps eq (Just nty)
+                  ns <- logDepth $ mkNames args ps eq (Just nty)
                   log "compile.casetree" 20 $
                     "Make pat clause for names " ++ show ns
                      ++ " in LHS " ++ show ps
