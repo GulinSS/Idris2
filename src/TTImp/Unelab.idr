@@ -138,7 +138,8 @@ mutual
       mkClause fc argpos args (vs ** (clauseEnv, lhs, rhs))
           = do logTerm "unelab.case.clause" 20 "Unelaborating clause" lhs
                let patArgs = snd (getFnArgs lhs)
-                   Just pat = idxOrMaybe argpos patArgs
+                   -- TODO: replace reverse with recalculated argpos
+                   Just pat = idxOrMaybe argpos (reverse patArgs)
                      | _ => pure Nothing
                    rhs = substArgs (mkSizeOf vs) (zip (map argVars patArgs) args) rhs
                logTerm "unelab.case.clause" 20 "Unelaborating LHS" pat
@@ -159,7 +160,8 @@ mutual
       mkCase pats argpos args
           = do unless (null args) $ log "unelab.case.clause" 20 $
                  unwords $ "Ignoring" :: map show (toList $ args)
-               let Just scrutinee = idxOrMaybe argpos args
+               -- TODO: replace reverse with recalculated argpos
+               let Just scrutinee = idxOrMaybe argpos (reverse args)
                      | _ => pure Nothing
                    fc = getLoc scrutinee
                (tm, _) <- unelabTy Full nest env scrutinee
