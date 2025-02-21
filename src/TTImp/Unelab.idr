@@ -81,8 +81,9 @@ mutual
                 | _ => pure Nothing
            let Just argpos = findArgPos treect
                 | _ => pure Nothing
-           if length args == length pargs
-              then mkCase pats argpos args
+           let len = length args
+           if len == length pargs
+              then mkCase pats (len `minus` argpos + 1) args
               else pure Nothing
     where
       -- Need to find the position of the scrutinee to rebuild original
@@ -138,8 +139,7 @@ mutual
       mkClause fc argpos args (vs ** (clauseEnv, lhs, rhs))
           = do logTerm "unelab.case.clause" 20 "Unelaborating clause" lhs
                let patArgs = snd (getFnArgs lhs)
-                   -- TODO: replace reverse with recalculated argpos
-                   Just pat = idxOrMaybe argpos (reverse patArgs)
+                   Just pat = idxOrMaybe argpos patArgs
                      | _ => pure Nothing
                    rhs = substArgs (mkSizeOf vs) (zip (map argVars patArgs) args) rhs
                logTerm "unelab.case.clause" 20 "Unelaborating LHS" pat
@@ -160,8 +160,7 @@ mutual
       mkCase pats argpos args
           = do unless (null args) $ log "unelab.case.clause" 20 $
                  unwords $ "Ignoring" :: map show (toList $ args)
-               -- TODO: replace reverse with recalculated argpos
-               let Just scrutinee = idxOrMaybe argpos (reverse args)
+               let Just scrutinee = idxOrMaybe argpos args
                      | _ => pure Nothing
                    fc = getLoc scrutinee
                (tm, _) <- unelabTy Full nest env scrutinee
