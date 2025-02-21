@@ -1,7 +1,7 @@
 1/1: Building IEdit (IEdit.idr)
 Main> my_cong x x Refl = Refl
 Main> my_curry f x y = f (x, y)
-Main> my_uncurry f x = f (fst x) (snd x)
+Main> my_uncurry f (x, y) = f x y
 Main> append [] ys = ys
 append (x :: xs) ys = x :: append xs ys
 Main> lappend [] ys = ys
