@@ -271,7 +271,7 @@ toANF (MkLFun args scope sc)
               rewrite snocAppendAsFish [<] args in vsNil
          (iargs', vs) <- bindAsFresh (cast scope) vs
          sc' <- anf (rewrite snocAppendAsFish args scope in vs) sc
-         pure $ MkAFun (iargs ++ reverse iargs') sc'
+         pure $ MkAFun (iargs ++ iargs') sc'
 toANF (MkLCon t a ns) = pure $ MkACon t a ns
 toANF (MkLForeign ccs fargs t) = pure $ MkAForeign ccs fargs t
 toANF (MkLError err)
