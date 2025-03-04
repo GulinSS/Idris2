@@ -230,7 +230,7 @@ logEnv s n msg env
     = when !(logging s n) $
         do depth <- getDepth
            logString depth s.topic n msg
-           dumpEnv s env
+           dumpEnv env
 
   where
 
