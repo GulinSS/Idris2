@@ -240,7 +240,7 @@ mutual
                           ns' <- reify defs !(evalClosure defs ns)
                           t' <- reify defs !(evalClosure defs t)
                           pure (IWithUnambigNames fc' ns' t')
-               _ => cantReify val "TTImp"
+               _ => cantReify val "TTImp NDCon"
     reify defs val = cantReify val "TTImp"
 
   export

@@ -58,6 +58,9 @@ record ArgInfo (vars : Scope) where
   metaApp : Term vars
   argType : Term vars
 
+{vars: _} -> Show (ArgInfo vars) where
+    show x = "{ArgInfo holeId: \{show $ holeID x}, argRig: \{show $ argRig x}, plicit: \{assert_total $ show $ plicit x}, metaApp: \{assert_total $ show $ metaApp x}, argType: \{assert_total $ show $ argType x}}"
+
 export
 mkArgs : {vars : _} ->
          {auto c : Ref Ctxt Defs} ->
@@ -288,10 +291,13 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
     findDirect defs f ty target
         = do (args, appTy) <- mkArgs fc rigc env ty
              fprf <- f prf
+             log "auto" 10 $ "findDirect args" ++ show args
+             logNF "auto" 10 "findDirect appTy" env appTy
              logTermNF "auto" 10 "Trying" env fprf
              logNF "auto" 10 "Type" env ty
              logNF "auto" 10 "For target" env target
              ures <- unify inTerm fc env target appTy
+             log "auto" 10 $ "findDirect ures: " ++ show ures
              let [] = constraints ures
                  | _ => throw (CantSolveGoal fc (gamma defs) Env.empty top Nothing)
              -- We can only use the local if its type is not an unsolved hole
@@ -456,15 +462,16 @@ concreteDets {vars} fc defaults env top pos dets (arg :: args)
     concrete : Defs -> NF vars -> (atTop : Bool) -> Core ()
     concrete defs (NBind nfc x b sc) atTop
         = do scnf <- sc defs (toClosure defaultOpts env (Erased nfc Placeholder))
-             concrete defs scnf False
+             logDepth $ concrete defs scnf False
     concrete defs (NTCon nfc n a args) atTop
         = do sd <- getSearchData nfc False n
              let args' = NatSet.take (detArgs sd) args
+             log "auto" 10 $ "concrete-2 args: \{show args}, detArgs: \{show $ detArgs sd}, args': \{show args'}"
              traverse_ (\ parg => do argnf <- evalClosure defs parg
-                                     concrete defs argnf False) (map snd args')
+                                     logDepth $ concrete defs argnf False) (map snd args')
     concrete defs (NDCon nfc n t a args) atTop
         = do traverse_ (\ parg => do argnf <- evalClosure defs parg
-                                     concrete defs argnf False) (map snd args)
+                                     logDepth $ concrete defs argnf False) (map snd args)
     concrete defs (NApp _ (NMeta n i _) _) True
         = do Just (Hole _ b) <- lookupDefExact n (gamma defs)
                   | _ => throw (DeterminingArg fc n i Env.empty top)
@@ -517,22 +524,24 @@ abandonIfCycle env tm (ty :: tys)
 -- Declared at the top
 searchType fc rigc defaults trying depth def checkdets top env (Bind nfc x b@(Pi fc' c p ty) sc)
     = pure (Bind nfc x (Lam fc' c p ty)
-             !(searchType fc rigc defaults [] depth def checkdets top
+             !(logDepth $ searchType fc rigc defaults [] depth def checkdets top
                           (b :: env) sc))
 searchType fc rigc defaults trying depth def checkdets top env (Bind nfc x b@(Let fc' c val ty) sc)
     = pure (Bind nfc x b
-             !(searchType fc rigc defaults [] depth def checkdets top
+             !(logDepth $ searchType fc rigc defaults [] depth def checkdets top
                           (b :: env) sc))
 searchType {vars} fc rigc defaults trying depth def checkdets top env target
     = do defs <- get Ctxt
          abandonIfCycle env target trying
          let trying' = target :: trying
          nty <- nf defs env target
+         logDepth $ logNF "auto" 3 "searchType-3 nty" env nty
          case nty of
               NTCon tfc tyn a args =>
                   if a == length args
-                     then do logNF "auto" 10 "Next target" env nty
+                     then do logNF "auto" 10 "Next target NTCon" env nty
                              sd <- getSearchData fc defaults tyn
+                             log "auto" 10 $ "Next target NTCon search result detArgs: " ++ show (detArgs sd) ++ ", hintGroups: " ++ show (hintGroups sd)
                              -- Check determining arguments are okay for 'args'
                              when checkdets $
                                  checkConcreteDets fc defaults env top
@@ -543,8 +552,10 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                                        (searchLocalVars fc rigc defaults trying' depth def top env nty)
                                        (tryGroups Nothing nty (hintGroups sd))
                      else throw (CantSolveGoal fc (gamma defs) Env.empty top Nothing)
-              _ => do logNF "auto" 10 "Next target: " env nty
-                      searchLocalVars fc rigc defaults trying' depth def top env nty
+              _ => do logNF "auto" 10 "Next target other: " env nty
+                      result <- searchLocalVars fc rigc defaults trying' depth def top env nty
+                      logTerm "auto" 10 "Next target other result" result
+                      pure result
   where
     -- Take the earliest error message (that's when we look inside pairs,
     -- typically, and it's best to be more precise)
@@ -572,9 +583,9 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
 --          (defining : Name) -> (topTy : Term vars) -> Env Term vars ->
 --          Core (Term vars)
 Core.Unify.search fc rigc defaults depth def top env
-    = do logTermNF "auto" 3 "Initial target: " env top
-         log "auto" 3 $ "Running search with defaults " ++ show defaults
-         tm <- searchType fc rigc defaults [] depth def
+    = do log "auto" 3 $ "Running search with defaults " ++ show defaults
+         logDepth $ logTermNF "auto" 3 "Initial target: " env top
+         tm <- logDepth $ searchType fc rigc defaults [] depth def
                           True (abstractEnvType fc env top) env
                           top
          logTermNF "auto" 3 "Result" env tm
