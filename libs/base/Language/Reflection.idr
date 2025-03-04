@@ -74,7 +74,7 @@ data Elab : Type -> Type where
      -- (it might need to be inferred from the solution)
      Goal : Elab (Maybe TTImp)
      -- Get the names of local variables in scope
-     LocalVars : Elab (SnocList Name)
+     LocalVars : Elab (List Name)
      -- Generate a new unique name, based on the given string
      GenSym : String -> Elab Name
      -- Put a name in the current namespace
@@ -169,7 +169,7 @@ interface Monad m => Elaboration m where
   goal : m (Maybe TTImp)
 
   ||| Get the names of the local variables in scope
-  localVars : m (SnocList Name)
+  localVars : m (List Name)
 
   ||| Generate a new unique name
   genSym : String -> m Name
