@@ -216,7 +216,8 @@ mutual
              Core (List (CConAlt vars))
   conCases n [] = pure []
   conCases {vars} n (ConCase x tag args sc :: ns)
-      = do defs <- get Ctxt
+      = do log "compiler.newtype.world" 50 "conCases-2 on \{show n} x: \{show x}, args: \{show args}, sc: \{show sc}"
+           defs <- get Ctxt
            Just gdef <- lookupCtxtExact x (gamma defs)
                 | Nothing => -- primitive type match
                      do xn <- getFullName x
@@ -225,11 +226,14 @@ mutual
            case (definition gdef) of
                 DCon _ arity (Just pos) => conCases n ns -- skip it
                 _ => do xn <- getFullName x
+                        let erased = eraseArgs gdef
+                        log "compiler.newtype.world" 50 "conCases-2 on \{show n} args: \{show args}, erased: \{show erased}"
                         let (args' ** sub)
                             = mkDropSubst (eraseArgs gdef) vars (cast args) (mkSizeOf $ cast args)
                         let subList = rewrite fishAsSnocAppend vars args in sub
                         sc' <- toCExpTree n sc
                         ns' <- conCases n ns
+                        log "compiler.newtype.world" 50 "conCases-2 on \{show n} sc': \{show sc'}, ns': \{show ns'}, args': \{show args'}, sub: \{show sub}"
                         if dcon (definition gdef)
                            then pure $ MkConAlt xn !(dconFlag xn) (Just tag) (cast args') (rewrite sym $ snocAppendAsFish vars args' in shrinkCExp subList sc') :: ns'
                            else pure $ MkConAlt xn !(dconFlag xn) Nothing (cast args') (rewrite sym $ snocAppendAsFish vars args' in shrinkCExp subList sc') :: ns'
@@ -296,6 +300,7 @@ mutual
                              let (s, env) : (_, SubstCEnv (cast args) (vars :< MN "eff" 0))
                                      = mkSubst 0 (CLocal fc First) pos args in
                              do sc' <- toCExpTree n sc
+                                log "compiler.newtype.world" 25 "Kept the scrutinee \{show pos} sc': \{show sc'}, env: \{show @{CompileExpr} env}"
                                 let sc'' : CExp (Scope.addInner vars (cast args))
                                     := rewrite sym $ fishAsSnocAppend vars args in sc'
 
@@ -349,11 +354,14 @@ mutual
                 Core (CExp vars)
   toCExpTree' n (Case _ x scTy alts@(ConCase _ _ _ _ :: _))
       = let fc = getLoc scTy in
-            do Nothing <- getNewType fc (CLocal fc x) n alts
-                   | Just def => pure def
+            do log "compiler.newtype.world" 50 "toCExpTree'-1 on \{show n} x: \{show $ MkVar x}, scTy: \{show scTy}, alts: \{show alts}"
+               Nothing <- getNewType fc (CLocal fc x) n alts
+                   | Just def => do log "compiler.newtype.world" 50 "toCExpTree'-1 on \{show n} getNewType def: \{show def}"
+                                    pure def
                defs <- get Ctxt
                cases <- conCases n alts
                def <- getDef n alts
+               log "compiler.newtype.world" 50 "toCExpTree'-1 on \{show n} cases: \{show cases}, def: \{show def}"
                if isNil cases
                   then pure $ fromMaybe (CErased fc) def
                   else pure $ CConCase fc (CLocal fc x) cases def
@@ -554,8 +562,10 @@ toCDef : Ref Ctxt Defs => Ref NextMN Int =>
 toCDef n ty _ None
     = pure $ MkError $ CCrash emptyFC ("Encountered undefined name " ++ show !(getFullName n))
 toCDef n ty erased (PMDef pi args _ tree _)
-    = do let (args' ** p) = fromNatSet erased args
+    = do log "compiler.newtype.world" 25 "toCDef PMDef args \{show args}, ty: \{show ty}, n: \{show n}, erased: \{show erased}, tree: \{show tree}"
+         let (args' ** p) = fromNatSet erased args
          comptree <- toCExpTree n tree
+         log "compiler.newtype.world" 25 "toCDef PMDef comptree \{show comptree}, p: \{show p}, is_ext: \{show $ (externalDecl pi)}"
          pure $ toLam (externalDecl pi) $ if isEmpty erased
             then MkFun args comptree
             else MkFun (cast args') (shrinkCExp p comptree)
@@ -633,9 +643,11 @@ compileDef n
            -- traversing everything from the main expression.
            -- For now, consider it an incentive not to have cycles :).
             then recordWarning (GenericWarn emptyFC ("Compiling hole " ++ show n))
-            else do s <- newRef NextMN 0
+            else do log "compiler.newtype.world" 25 "compileDef name \{show n}, type gdef: \{show $ type gdef}"
+                    s <- newRef NextMN 0
                     ce <- logDepth $ toCDef n (type gdef) (eraseArgs gdef)
                            !(toFullNames (definition gdef))
+                    -- log "compiler.newtype.world" 25 "compileDef, name \{show n}, eraseArgs: \{show $ eraseArgs gdef}, cdef: \{show ce}"
                     ce <- constructorCDef ce
                     setCompiled n ce
   where
