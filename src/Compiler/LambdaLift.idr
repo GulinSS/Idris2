@@ -12,6 +12,7 @@ module Compiler.LambdaLift
 
 import Core.CompileExpr
 import Core.Context
+import Core.Context.Log
 import Core.Core
 import Core.TT
 
@@ -520,7 +521,8 @@ dropUnused {vars} {outer} unused (LConstCase fc sc alts def) =
     dropConstCase (MkLConstAlt c val) = MkLConstAlt c (dropUnused unused val)
 
 mutual
-  makeLam : {auto l : Ref Lifts LDefs} ->
+  makeLam : {auto c : Ref Ctxt Defs} ->
+            {auto l : Ref Lifts LDefs} ->
             {vars : _} ->
             {doLazyAnnots : Bool} ->
             {default Nothing lazy : Maybe LazyReason} ->
@@ -536,6 +538,7 @@ mutual
                unused = getUnused unusedContracted
                scl' = dropUnused {outer=bound} unused scl
            n <- genName
+           log "compile.execute" 40 $ "LambdaLift.makeLam \{show scl} |=>| \{show scl'}"
            update Lifts { defs $= ((n, MkLFun (dropped vars unused) bound scl') ::) }
            pure $ LUnderApp fc n (length bound) (allVars fc vars unused)
     where
@@ -553,7 +556,8 @@ mutual
 
 -- if doLazyAnnots = True then annotate function application with laziness
 -- otherwise use old behaviour (thunk is a function)
-  liftExp : {vars : _} ->
+  liftExp : {auto c : Ref Ctxt Defs} ->
+            {vars : _} ->
             {auto l : Ref Lifts LDefs} ->
             {doLazyAnnots : Bool} ->
             {default Nothing lazy : Maybe LazyReason} ->
@@ -599,16 +603,17 @@ mutual
   liftExp (CCrash fc str) = pure $ LCrash fc str
 
 export
-liftBody : {vars : _} -> {doLazyAnnots : Bool} ->
+liftBody : {auto c : Ref Ctxt Defs} -> {vars : _} -> {doLazyAnnots : Bool} ->
            Name -> CExp vars -> Core (Lifted vars, List (Name, LiftedDef))
 liftBody n tm
     = do l <- newRef Lifts (MkLDefs n [] 0)
          tml <- liftExp {doLazyAnnots} {l} tm
+         log "compile.execute" 40 $ "LambdaLift.liftBody \{show n}: \{show tm} |->| \{show tml}"
          ldata <- get Lifts
          pure (tml, defs ldata)
 
 export
-lambdaLiftDef : (doLazyAnnots : Bool) -> Name -> CDef -> Core (List (Name, LiftedDef))
+lambdaLiftDef : {auto c : Ref Ctxt Defs} -> (doLazyAnnots : Bool) -> Name -> CDef -> Core (List (Name, LiftedDef))
 lambdaLiftDef doLazyAnnots n (MkFun args exp)
     = do (expl, defs) <- liftBody {doLazyAnnots} n exp
          pure ((n, MkLFun args Scope.empty expl) :: defs)
@@ -624,7 +629,7 @@ lambdaLiftDef doLazyAnnots n (MkError exp)
 -- An empty list an error, because on success you will always get at least
 -- one definition, the lifted definition for the given name.
 export
-lambdaLift :  (doLazyAnnots : Bool)
+lambdaLift : {auto c : Ref Ctxt Defs} -> (doLazyAnnots : Bool)
            -> (Name,FC,CDef)
            -> Core (List (Name, LiftedDef))
 lambdaLift doLazyAnnots (n,_,def) = lambdaLiftDef doLazyAnnots n def

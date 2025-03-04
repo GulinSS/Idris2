@@ -24,6 +24,22 @@ import Libraries.Data.SnocList.SizeOf
 Usage : Scoped
 Usage vars = List (Var vars)
 
+Show (Usage vars) where
+  show xs = "[" ++ showAll xs ++ "]"
+    where
+      showAll : Usage vs -> String
+      showAll [] = ""
+      showAll [el] = show el
+      showAll (x :: xs) = show x ++ ", " ++ showAll xs
+
+[UglyHackConflictsWithPrelude] Show (Usage vars) where
+  show xs = "[" ++ showAll xs ++ "]"
+    where
+      showAll : Usage vs -> String
+      showAll [] = ""
+      showAll [el] = show el
+      showAll (x :: xs) = show x ++ ", " ++ showAll xs
+
 doneScope : Usage (n :: vars) -> Usage vars
 doneScope = mapMaybe isLater
 
@@ -521,7 +537,7 @@ mutual
                logTerm "quantity" 10 "LHS" lhs
                logTerm "quantity" 5 "Linear check in case RHS" rhs
                (rhs', _, used) <- lcheck rig False penv rhs
-               log "quantity" 10 $ "Used: " ++ show used
+               log "quantity" 10 $ "Used: " ++ show @{UglyHackConflictsWithPrelude} used
                let args = getArgs lhs
                checkEnvUsage [<] rig penv used args rhs'
                ause <- getCaseUsage ty penv args used rhs
@@ -704,6 +720,6 @@ linearCheck fc rig erase env tm
     = do logTerm "quantity" 5 "Linearity check on " tm
          logEnv "quantity" 5 "In env" env
          (tm', _, used) <- lcheck rig erase env tm
-         log "quantity" 5 $ "Used: " ++ show used
+         log "quantity" 5 $ "Used: " ++ show @{UglyHackConflictsWithPrelude} used
          when (not erase) $ checkEnvUsage fc [<] rig env used tm'
          pure tm'
