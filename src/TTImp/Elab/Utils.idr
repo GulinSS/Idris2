@@ -2,6 +2,7 @@ module TTImp.Elab.Utils
 
 import Core.Case.CaseTree
 import Core.Context
+import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Normalise
@@ -126,9 +127,24 @@ data ArgUsed = Used1 -- been used
              | Used0 -- not used
              | LocalVar -- don't care if it's used
 
+Show ArgUsed where
+  show Used1 = "Used1"
+  show Used0 = "Used0"
+  show LocalVar = "LocalVar"
+
 data Usage : List Name -> Type where
      Nil : Usage []
      (::) : ArgUsed -> Usage xs -> Usage (x :: xs)
+
+public export
+covering
+{vars : _} -> Show (Usage vars) where
+    show x = "Usage [" ++ showAll x ++ "]{vars = " ++ show vars ++ "}"
+        where
+            showAll : {vars : _} -> Usage vars -> String
+            showAll Nil = ""
+            showAll (x :: Nil) = show x
+            showAll (x :: xx) = show x ++ ", " ++ showAll xx
 
 initUsed : (xs : List Name) -> Usage xs
 initUsed [] = []
@@ -280,4 +296,9 @@ canInlineCaseBlock n
          Just (PMDef _ vars _ rtree _) <- lookupDefExact n (gamma defs)
              | _ => pure False
          u <- newRef Used (initUsedCase vars)
-         caseInlineSafe rtree
+         log "compiler.inline.eval" 5 "canInlineCaseBlock init n: \{show n}, u: \{show (initUsedCase vars)}"
+         result <- caseInlineSafe rtree
+         u' <- get Used
+         log "compiler.inline.eval" 5 "canInlineCaseBlock updated n: \{show n}, result: \{show result}, u': \{show u'}"
+         -- pure False
+         pure result

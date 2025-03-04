@@ -29,7 +29,7 @@ Show (Usage vars) where
       showAll : Usage vs -> String
       showAll [] = ""
       showAll [el] = show el
-      showAll (x :: xs) = show x ++ ", " ++ show xs
+      showAll (x :: xs) = show x ++ ", " ++ showAll xs
 
 doneScope : Usage (n :: vars) -> Usage vars
 doneScope [] = []
