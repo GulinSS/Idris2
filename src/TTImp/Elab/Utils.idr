@@ -2,6 +2,7 @@ module TTImp.Elab.Utils
 
 import Core.Case.CaseTree
 import Core.Context
+import Core.Context.Log
 import Core.Env
 import Core.Normalise
 import Core.Value
@@ -136,6 +137,14 @@ record Usage (vs : Scope) where
   constructor MkUsage
   isUsedSet : VarSet vs -- whether it's been used
   isLocalSet : VarSet vs -- don't care if it's used
+
+public export
+covering
+{vars : _} -> Show (Usage vars) where
+    show x = "Usage [" ++ showAll x ++ "]{vars = " ++ show vars ++ "}"
+        where
+            showAll : {vars : _} -> Usage vars -> String
+            showAll (MkUsage used local) = "{MkUsage used=\{show $ Libraries.Data.VarSet.Core.toList used}, local=\{show $ Libraries.Data.VarSet.Core.toList local}"
 
 initUsed : Usage vs
 initUsed = MkUsage
@@ -304,4 +313,9 @@ canInlineCaseBlock n
          Just (PMDef _ vars _ rtree _) <- lookupDefExact n (gamma defs)
              | _ => pure False
          u <- newRef Used (initUsedCase (mkSizeOf vars))
-         caseInlineSafe rtree
+         log "compiler.inline.eval" 5 "canInlineCaseBlock init n: \{show n}, u: \{show (initUsedCase (mkSizeOf vars))}"
+         result <- caseInlineSafe rtree
+         u' <- get Used
+         log "compiler.inline.eval" 5 "canInlineCaseBlock updated n: \{show n}, result: \{show result}, u': \{show u'}"
+         -- pure False
+         pure result
