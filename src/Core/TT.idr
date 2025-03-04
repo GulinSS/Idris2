@@ -405,6 +405,12 @@ namespace Bounds
   sizeOf (Add _ _ b) = suc (sizeOf b)
 
 export
+covering
+{vars : _} -> Show (Bounds vars) where
+  show None = "None"
+  show {vars = xs :< x} (Add x n b) = show x ++ " " ++ show n ++ " + " ++ show b
+
+export
 cons : (x : Name) -> Name -> Bounds xs -> Bounds (x `cons` xs)
 cons n xn None = Add n xn None
 cons n xn (Add n' xn' b) = Add n' xn' (cons n xn b)
