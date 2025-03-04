@@ -20,3 +20,8 @@ export
 toList : IMaybe b a -> List a
 toList Nothing = []
 toList (Just x) = [x]
+
+export
+Show a => Show (IMaybe b a) where
+  showPrec d Nothing  = "Nothing"
+  showPrec d (Just x) = showCon d "Just" (showArg x)

@@ -14,6 +14,13 @@ data Thin : List a -> List a -> Type where
   Keep : Thin xs ys -> Thin (x :: xs) (x :: ys)
 
 export
+covering
+{xs, ys : _} -> Show (Thin xs ys) where
+  show Refl = "ThinRefl"
+  show (Drop t) = "ThinDrop \{show t}"
+  show (Keep t) = "ThinKeep \{show t}"
+
+export
 none : {xs : List a} -> Thin [] xs
 none {xs = []} = Refl
 none {xs = _ :: _} = Drop none
