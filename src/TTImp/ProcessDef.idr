@@ -196,6 +196,9 @@ findLinear top bound rig tm
               => do defs <- get Ctxt
                     Just nty <- lookupTyExact n (gamma defs)
                          | Nothing => pure []
+                    logTerm "declare.def.lhs" 5 ("Type of " ++ show !(toFullNames n)) nty
+                    log "declare.def.lhs" 5 ("Type NF of " ++ show !(toFullNames n) ++ ": " ++ show !(nf defs Env.empty nty))
+                    log "declare.def.lhs" 5 ("Args: " ++ show !(traverse toFullNames args))
                     findLinArg (accessible nt rig) !(nf defs Env.empty nty) args
            _ => pure []
     where
@@ -334,11 +337,13 @@ checkLHS {vars} trans mult n opts nest env fc lhs_in
          -- so we only need to do the holes. If there's a lot of type level
          -- computation, this is a huge saving!
          lhstm <- normaliseHoles defs lhsenv lhstm
-         lhsty <- normaliseHoles defs env lhsty
-         linvars_in <- findLinear True 0 linear lhstm
          logTerm "declare.def.lhs" 10 "Checked LHS term after normalise" lhstm
+         linvars_in <- findLinear True 0 linear lhstm
          log "declare.def.lhs" 5 $ "Linearity of names in " ++ show n ++ ": " ++
                  show linvars_in
+
+         lhsty <- normaliseHoles defs env lhsty
+         logTerm "declare.def.lhs" 10 "lhsty" lhsty
 
          linvars <- combineLinear fc linvars_in
          let lhstm_lin = setLinear linvars lhstm
@@ -725,8 +730,9 @@ mkRunTime fc n
                [ show cov ++ ":"
                , "Runtime tree for " ++ show (fullname gdef) ++ ":"
                , show (indent 2 $ prettyTree tree_rt)
+               , show rargs
                ]
-           log "compile.casetree" 10 $ show tree_rt
+           log "compile.casetree" 10 $ "tree_rt " ++ show tree_rt
            log "compile.casetree.measure" 15 $ show (measure tree_rt)
 
            let Just Refl = scopeEq cargs rargs
@@ -908,7 +914,7 @@ processDef opts nest env fc n_in cs_in
 
          -- Dynamically rebind default totality requirement to this function's totality requirement
          -- and use this requirement when processing `with` blocks
-         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult
+         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult ++ " in " ++ show cs_in
          let treq = fromMaybe !getDefaultTotalityOption (findSetTotal (flags gdef))
          cs <- withTotality treq $
                traverse (checkClause mult (collapseDefault $ visibility gdef) treq
