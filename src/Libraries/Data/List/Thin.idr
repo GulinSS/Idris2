@@ -11,6 +11,13 @@ data Thin : SnocList a -> SnocList a -> Type where
   Drop : Thin xs ys -> Thin xs (ys :< y)
   Keep : Thin xs ys -> Thin (xs :< x) (ys :< x)
 
+export
+covering
+{xs, ys : _} -> Show (Thin xs ys) where
+  show Refl = "ThinRefl"
+  show (Drop t) = "ThinDrop \{show t}"
+  show (Keep t) = "ThinKeep \{show t}"
+
 -- At runtime, Thin's `Refl` does not carry any additional
 -- information. So this is safe!
 export
