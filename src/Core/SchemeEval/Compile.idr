@@ -92,6 +92,13 @@ Show (SchVars ns) where
       toSnocList (xs :< Bound x) = toSnocList xs :< x
       toSnocList (xs :< Free x) = toSnocList xs :< "'x"
 
+reverseOnto : SchVars varsl -> SchVars varsr -> SchVars (reverseOnto varsl varsr)
+reverseOnto acc [<]       = acc
+reverseOnto acc (sx :< x) = reverseOnto (acc :< x) sx
+
+reverse : SchVars vars -> SchVars (reverse vars)
+reverse sx = reverseOnto [<] sx
+
 getSchVar : {idx : _} -> (0 _ : IsVar n idx vars) -> SchVars vars -> String
 getSchVar First (xs :< Bound x) = x
 getSchVar First (xs :< Free x) = "'" ++ x
@@ -506,7 +513,8 @@ compileBody _ n None = pure $ blockedAppWith n []
 compileBody redok n (PMDef pminfo args treeCT treeRT pats)
     = do i <- newRef Sym 0
          let argvs = mkArgs args
-         let blk = blockedAppWith n (varObjs argvs)
+         let argvsr = reverse argvs
+         let blk = blockedAppWith n (varObjs argvsr)
          body <- compileCase blk argvs treeCT
          let body' = if redok
                         then If (Apply (Var "ct-isBlockAll") []) blk body
@@ -514,8 +522,8 @@ compileBody redok n (PMDef pminfo args treeCT treeRT pats)
          -- If it arose from a hole, we need to take an extra argument for
          -- the arity since that's what Meta gets applied to
          case holeInfo pminfo of
-              NotHole => pure (bindArgs n argvs [] body')
-              SolvedHole _ => pure (Lambda ["h-0"] (bindArgs n argvs [] body'))
+              NotHole => pure (bindArgs n argvsr [] body')
+              SolvedHole _ => pure (Lambda ["h-0"] (bindArgs n argvsr [] body'))
 compileBody _ n (ExternDef arity) = pure $ blockedAppWith n []
 compileBody _ n (ForeignDef arity xs) = pure $ blockedAppWith n []
 compileBody _ n (Builtin x) = pure $ compileBuiltin n x
