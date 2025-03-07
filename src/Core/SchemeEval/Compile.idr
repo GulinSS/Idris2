@@ -85,7 +85,7 @@ data SchVars : Scoped where
 
 export
 Show (SchVars ns) where
-  show xs = show (reverse $ toSnocList xs <>> [])
+  show xs = show (toSnocList xs)
     where
       toSnocList : forall ns . SchVars ns -> SnocList String
       toSnocList [<] = [<]
