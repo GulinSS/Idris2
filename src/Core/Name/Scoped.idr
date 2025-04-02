@@ -30,8 +30,25 @@ Scope : Type
 Scope = Scopeable Name
 
 public export
-ScopeEmpty : {a: Type} -> Scopeable a
+ScopeEmpty : Scopeable a
 ScopeEmpty = []
+
+{-
+public export
+ScopeExt : Scopeable a -> List a -> Scopeable a
+ScopeExt vars ns = ns ++ vars
+--- TODO replace by `vars <>< ns`
+-}
+
+public export
+AddInner : Scopeable a -> Scopeable a -> Scopeable a
+AddInner vars inner = inner ++ vars
+--- TODO replace by `vars ++ inner`
+
+public export
+ScopeBind : Scopeable a -> a -> Scopeable a
+ScopeBind vars n = n :: vars
+--- TODO replace with `<:`
 
 public export
 ScopeSingle : a -> Scopeable a

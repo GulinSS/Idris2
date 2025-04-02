@@ -173,7 +173,7 @@ mutual
   ||| @ vars is the list of names accessible within the current scope of the
   |||   lambda-lifted code.
   public export
-  data LiftedConAlt : (vars : Scope) -> Type where
+  data LiftedConAlt : Scoped where
 
        ||| Constructs a branch of an "LCon" (constructor tag) case statement.
        |||
@@ -199,7 +199,7 @@ mutual
   ||| @ vars is the list of names accessible within the current scope of the
   |||   lambda-lifted code.
   public export
-  data LiftedConstAlt : (vars : Scope) -> Type where
+  data LiftedConstAlt : Scoped where
 
        ||| Constructs a branch of an "LConst" (constant expression) case
        ||| statement.
@@ -229,7 +229,7 @@ data LiftedDef : Type where
      -- arranged for the variables, and it could be expensive to reshuffle them!
      -- See Compiler.ANF for an example of how they get resolved to names)
      MkLFun : (args : Scope) -> (scope : Scope) ->
-              (body : Lifted (scope ++ args)) -> LiftedDef
+              (body : Lifted (AddInner args scope)) -> LiftedDef
 
      ||| Constructs a definition of a constructor for a compound data type.
      |||
@@ -360,8 +360,9 @@ record Used (vars : Scope) where
 initUsed : {vars : _} -> Used vars
 initUsed {vars} = MkUsed (replicate (length vars) False)
 
+-- TODO upstream
 lengthDistributesOverAppend
-  : (xs, ys : Scopeable a)
+  : (xs, ys : List a)
   -> length (xs ++ ys) = length xs + length ys
 lengthDistributesOverAppend [] ys = Refl
 lengthDistributesOverAppend (x :: xs) ys =

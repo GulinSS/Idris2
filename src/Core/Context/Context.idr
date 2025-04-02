@@ -101,7 +101,7 @@ data Def : Type where
            (parampos : List Nat) -> -- parameters
            (detpos : List Nat) -> -- determining arguments
            (flags : TypeFlags) -> -- should 'auto' implicits check
-           (mutwith : List Name) ->
+           (mutwith : List Name) -> -- TODO morally `Set Name`
            (datacons : Maybe (List Name)) ->
            (detagabbleBy : Maybe (List Nat)) ->
                     -- argument positions which can be used for

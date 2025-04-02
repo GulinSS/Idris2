@@ -32,11 +32,11 @@ data EEnv : Scope -> Scope -> Type where
      Nil : EEnv free ScopeEmpty
      (::) : CExp free -> EEnv free vars -> EEnv free (x :: vars)
 public export
-ScopeEmpty : {tm: _} -> EEnv tm ScopeEmpty
+ScopeEmpty : EEnv tm ScopeEmpty
 ScopeEmpty = []
 
 extend : EEnv free vars -> (args : List (CExp free)) -> (args' : List Name) ->
-         LengthMatch args args' -> EEnv free (args' ++ vars)
+         LengthMatch args args' -> EEnv free (AddInner vars args')
 extend env [] [] NilMatch = env
 extend env (a :: xs) (n :: ns) (ConsMatch w)
     = a :: extend env xs ns w
@@ -58,7 +58,7 @@ getArity (MkForeign _ args _) = length args
 getArity (MkError _) = 0
 
 takeFromStack : EEnv free vars -> Stack free -> (args : Scope) ->
-                Maybe (EEnv free (args ++ vars), Stack free)
+                Maybe (EEnv free (AddInner vars args), Stack free)
 takeFromStack env (e :: es) (a :: as)
   = do (env', stk') <- takeFromStack env es as
        pure (e :: env', stk')
@@ -433,6 +433,7 @@ mkBounds : (xs : _) -> Bounds xs
 mkBounds [] = None
 mkBounds (x :: xs) = Add x x (mkBounds xs)
 
+-- TODO `getNewArgs` is always used in reverse, revisit!
 getNewArgs : {done : _} ->
              SubstCEnv done args -> Scope
 getNewArgs [] = []

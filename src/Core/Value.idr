@@ -58,7 +58,7 @@ cbv = { strategy := CBV } defaultOpts
 mutual
   public export
   data LocalEnv : Scope -> Scope -> Type where
-       Nil  : LocalEnv free ScopeEmpty
+       Nil  : LocalEnv free []
        (::) : Closure free -> LocalEnv free vars -> LocalEnv free (x :: vars)
 
   public export
@@ -67,7 +67,7 @@ mutual
                    (opts : EvalOpts) ->
                    LocalEnv free vars ->
                    Env Term free ->
-                   Term (vars ++ free) -> Closure free
+                   Term (AddInner free vars) -> Closure free
        MkNFClosure : EvalOpts -> Env Term free -> NF free -> Closure free
 
   -- The head of a value: things you can apply arguments to
@@ -76,7 +76,7 @@ mutual
        NLocal : Maybe Bool -> (idx : Nat) -> (0 p : IsVar nm idx vars) ->
                 NHead vars
        NRef   : NameType -> Name -> NHead vars
-       NMeta  : Name -> Int -> Scopeable (Closure vars) -> NHead vars
+       NMeta  : Name -> Int -> List (Closure vars) -> NHead vars
 
 
   -- Values themselves. 'Closure' is an unevaluated thunk, which means
@@ -88,15 +88,16 @@ mutual
        -- Each closure is associated with the file context of the App node that
        -- had it as an argument. It's necessary so as to not lose file context
        -- information when creating the normal form.
-       NApp     : FC -> NHead vars -> Scopeable (FC, Closure vars) -> NF vars
+       NApp     : FC -> NHead vars -> List (FC, Closure vars) -> NF vars
        NDCon    : FC -> Name -> (tag : Int) -> (arity : Nat) ->
-                  Scopeable (FC, Closure vars) -> NF vars
+                  List (FC, Closure vars) -> NF vars
+                  -- TODO it looks like the list of closures is stored in spine order, c.f. `getCaseBounds`
        NTCon    : FC -> Name -> (tag : Int) -> (arity : Nat) ->
-                  Scopeable (FC, Closure vars) -> NF vars
+                  List (FC, Closure vars) -> NF vars
        NAs      : FC -> UseSide -> NF vars -> NF vars -> NF vars
        NDelayed : FC -> LazyReason -> NF vars -> NF vars
        NDelay   : FC -> LazyReason -> Closure vars -> Closure vars -> NF vars
-       NForce   : FC -> LazyReason -> NF vars -> Scopeable (FC, Closure vars) -> NF vars
+       NForce   : FC -> LazyReason -> NF vars -> List (FC, Closure vars) -> NF vars
        NPrimVal : FC -> Constant -> NF vars
        NErased  : FC -> WhyErased (NF vars) -> NF vars
        NType    : FC -> Name -> NF vars
@@ -119,7 +120,7 @@ ScopeEmpty : LocalEnv free []
 ScopeEmpty = []
 
 export
-ntCon : FC -> Name -> Int -> Nat -> Scopeable (FC, Closure vars) -> NF vars
+ntCon : FC -> Name -> Int -> Nat -> List (FC, Closure vars) -> NF vars
 -- Part of the machinery for matching on types - I believe this won't affect
 -- universe checking so put a dummy name.
 ntCon fc (UN (Basic "Type")) tag Z [] = NType fc (MN "top" 0)

@@ -10,6 +10,7 @@ import Data.Vect
 import Libraries.Data.List.SizeOf
 import Libraries.Data.SnocList.SizeOf
 
+-- TODO reduce quadratic weakening
 makeArgs : (args : Scope) -> List (Var (args ++ vars))
 makeArgs args = makeArgs' args id
   where

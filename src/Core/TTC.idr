@@ -273,11 +273,6 @@ mkPrf : (idx : Nat) -> IsVar n idx ns
 mkPrf {n} {ns} Z = believe_me (First {n} {ns = n :: ns})
 mkPrf {n} {ns} (S k) = believe_me (Later {m=n} (mkPrf {n} {ns} k))
 
-getName : (idx : Nat) -> Scope -> Maybe Name
-getName Z (x :: xs) = Just x
-getName (S k) (x :: xs) = getName k xs
-getName _ [] = Nothing
-
 mutual
   export
   {vars : _} -> TTC (Binder (Term vars)) where
@@ -363,7 +358,7 @@ mutual
                0 => do c <- fromBuf b
                        idx <- fromBuf b
                        name <- maybe (corrupt "Term") pure
-                                     (getName idx vars)
+                                     (getAt idx vars)
                        pure (Local {name} emptyFC c idx (mkPrf idx))
                1 => do nt <- fromBuf b; name <- fromBuf b
                        pure (Ref emptyFC nt name)
@@ -394,7 +389,7 @@ mutual
                         pure (apply emptyFC fn args)
                idxp => do c <- fromBuf b
                           let idx : Nat = fromInteger (cast (idxp - 13))
-                          let Just name = getName idx vars
+                          let Just name = getAt idx vars
                               | Nothing => corrupt "Term"
                           pure (Local {name} emptyFC c idx (mkPrf idx))
 
@@ -498,7 +493,7 @@ export
       = do toBuf b bnd; toBuf b env
 
   -- Length has to correspond to length of 'vars'
-  fromBuf {vars = []} b = pure ScopeEmpty
+  fromBuf {vars = []} b = pure []
   fromBuf {vars = x :: xs} b
       = do bnd <- fromBuf b
            env <- fromBuf b
@@ -736,7 +731,7 @@ mutual
         = assert_total $ case !getTag of
                0 => do fc <- fromBuf b
                        idx <- fromBuf b
-                       let Just x = getName idx vars
+                       let Just x = getAt idx vars
                            | Nothing => corrupt "CExp"
                        pure (CLocal {x} fc (mkPrf idx))
                1 => do fc <- fromBuf b

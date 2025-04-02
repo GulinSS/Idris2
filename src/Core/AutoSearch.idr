@@ -231,7 +231,7 @@ usableLocal loc defaults env (NApp fc (NMeta _ _ _) args)
     = pure False
 usableLocal {vars} loc defaults env (NTCon _ n _ _ args)
     = do sd <- getSearchData loc (not defaults) n
-         usableLocalArg 0 (detArgs sd) (toList $ map snd args)
+         usableLocalArg 0 (detArgs sd) (map snd args)
   -- usable if none of the determining arguments of the local's type are
   -- holes
   where
@@ -509,13 +509,13 @@ checkConcreteDets fc defaults env top (NTCon tfc tyn t a args)
                              checkConcreteDets fc defaults env top anf
                              checkConcreteDets fc defaults env top bnf
                       _ => do sd <- getSearchData fc defaults tyn
-                              concreteDets fc defaults env top 0 (detArgs sd) (toList $ map snd args)
+                              concreteDets fc defaults env top 0 (detArgs sd) (map snd args)
             else
               do sd <- getSearchData fc defaults tyn
                  log "auto.determining" 10 $
                    "Determining arguments for " ++ show !(toFullNames tyn)
                    ++ " " ++ show (detArgs sd)
-                 concreteDets fc defaults env top 0 (detArgs sd) (toList $ map snd args)
+                 concreteDets fc defaults env top 0 (detArgs sd) (map snd args)
 checkConcreteDets fc defaults env top _
     = pure ()
 

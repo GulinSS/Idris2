@@ -60,5 +60,5 @@ substs : SizeOf dropped -> SubstEnv dropped vars -> Term (dropped ++ vars) -> Te
 substs dropped env tm = substTerm zero dropped env tm
 
 export
-subst : Term vars -> Term (x :: vars) -> Term vars
+subst : Term vars -> Term (ScopeBind vars x) -> Term vars
 subst val tm = substs (suc zero) (ScopeSingle val) tm

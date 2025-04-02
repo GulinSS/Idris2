@@ -482,7 +482,7 @@ nfToCFType _ True (NBind fc _ _ _)
 nfToCFType _ s (NTCon fc n_in _ _ args)
     = do defs <- get Ctxt
          n <- toFullNames n_in
-         case !(getNArgs defs n $ toList (map snd args)) of
+         case !(getNArgs defs n $ map snd args) of
               User un uargs =>
                 do nargs <- traverse (evalClosure defs) uargs
                    cargs <- traverse (nfToCFType fc s) nargs

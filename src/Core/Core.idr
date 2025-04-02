@@ -764,14 +764,14 @@ traverse f xs = traverse' f xs []
 namespace SnocList
   -- Traversable (specialised)
   traverse' : (a -> Core b) -> SnocList a -> SnocList b -> Core (SnocList b)
-  traverse' f [<] acc = pure (reverse acc)
+  traverse' f [<] acc = pure acc
   traverse' f (xs :< x) acc
       = traverse' f xs (acc :< !(f x))
 
   %inline
   export
   traverse : (a -> Core b) -> SnocList a -> Core (SnocList b)
-  traverse f xs = traverse' f xs [<]
+  traverse f xs = traverse' f (reverse xs) [<]
 
 export
 mapMaybeM : (a -> Core (Maybe b)) -> List a -> Core (List b)
@@ -844,12 +844,15 @@ traverseList1_ f xxs
          traverse_ f xs
 
 namespace SnocList
+  traverse_' : (a -> Core b) -> SnocList a -> Core ()
+  traverse_' f [<] = pure ()
+  traverse_' f (xs :< x)
+      = Core.do _ <- f x
+                traverse_' f xs
+
   export
   traverse_ : (a -> Core b) -> SnocList a -> Core ()
-  traverse_ f [<] = pure ()
-  traverse_ f (xs :< x)
-      = Core.do ignore (f x)
-                traverse_ f xs
+  traverse_ f xs = traverse_' f (reverse xs)
 
 %inline export
 traverseFC : (a -> Core b) -> WithFC a -> Core (WithFC b)
@@ -902,13 +905,16 @@ anyM f (x :: xs)
          else anyM f xs
 
 namespace SnocList
-  export
-  anyM : (a -> Core Bool) -> SnocList a -> Core Bool
-  anyM f [<] = pure False
-  anyM f (xs :< x)
+  anyM' : (a -> Core Bool) -> SnocList a -> Core Bool
+  anyM' f [<] = pure False
+  anyM' f (xs :< x)
       = if !(f x)
           then pure True
-          else anyM f xs
+          else anyM' f xs
+
+  export
+  anyM : (a -> Core Bool) -> SnocList a -> Core Bool
+  anyM f xs = anyM' f (reverse xs)
 
 export
 allM : (a -> Core Bool) -> List a -> Core Bool

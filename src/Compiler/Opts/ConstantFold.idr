@@ -30,7 +30,7 @@ foldableOp (Cast from to)   = isJust (intKind from) && isJust (intKind to)
 foldableOp _                = True
 
 
-data Subst : Scope -> Scope -> Type where
+data Subst : Scope -> Scoped where
   Nil  : Subst ScopeEmpty vars
   (::) : CExp vars -> Subst ds vars -> Subst (d :: ds) vars
   Wk   : SizeOf ws -> Subst ds vars -> Subst (ws ++ ds) (ws ++ vars)
