@@ -4,10 +4,10 @@ import Core.Context
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -51,7 +51,7 @@ checkDelay rig elabinfo nest env fc tm mexpected
     = do expected <- maybe (do nm <- genName "delayTy"
                                u <- uniVar fc
                                ty <- metaVar fc erased env nm (TType fc u)
-                               pure (gnf env ty))
+                               nf env ty)
                            pure mexpected
          let solvemode = case elabMode elabinfo of
                               InLHS c => inLHS
@@ -61,16 +61,19 @@ checkDelay rig elabinfo nest env fc tm mexpected
          -- need to infer the delay reason
          delayOnFailure fc rig env (Just expected) delayError LazyDelay
             (\delayed =>
-                 case !(getNF expected) of
-                      NDelayed _ r expnf =>
+                do expected <- ifThenElse delayed
+                                 (do exp <- quote env expected
+                                     nf env exp)
+                                 (pure expected)
+                   case !(expand expected) of
+                      VDelayed _ r expnf =>
                          do defs <- get Ctxt
                             (tm', gty) <- check rig elabinfo nest env tm
-                                                (Just (glueBack defs env expnf))
-                            tynf <- getNF gty
-                            ty <- getTerm gty
+                                                (Just expnf)
+                            ty <- quote env gty
                             pure (TDelay fc r ty tm',
-                                  glueBack defs env (NDelayed fc r tynf))
-                      ty => do logNF "elab.delay" 5 "Expected delay type" env ty
+                                  VDelayed fc r gty)
+                      ty => do -- logNF "elab.delay" 5 "Expected delay type" env ty
                                throw (GenericMsg fc ("Can't infer delay type")))
   where
     delayError : Error -> Bool
@@ -91,14 +94,12 @@ checkForce : {vars : _} ->
              Core (Term vars, Glued vars)
 checkForce rig elabinfo nest env fc tm exp
     = do defs <- get Ctxt
-         expf <- maybe (pure Nothing)
-                       (\gty => do tynf <- getNF gty
-                                   pure (Just (glueBack defs env
-                                         (NDelayed fc LUnknown tynf))))
+         let expf = maybe Nothing
+                       (\gty => Just (VDelayed fc LUnknown gty))
                        exp
          (tm', gty) <- check rig elabinfo nest env tm expf
-         tynf <- getNF gty
+         tynf <- expand gty
          case tynf of
-              NDelayed _ r expnf =>
-                 pure (TForce fc r tm', glueBack defs env expnf)
+              VDelayed _ r expnf =>
+                 pure (TForce fc r tm', expnf)
               _ => throw (GenericMsg fc "Forcing a non-delayed type")

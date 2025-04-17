@@ -7,6 +7,9 @@ import Core.Env
 import Core.Metadata
 import Core.TT
 import Core.Unify
+import Core.Evaluate.Value
+import Core.Evaluate.Convert
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -203,9 +206,9 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                                       (IBindHere vfc (PI erased) impTy)
                                       (Just (gType vfc u))
                    let fullty = abstractFullEnvType vfc env ty
-                   ok <- convert defs ScopeEmpty fullty (type gdef)
-                   unless ok $ do logTermNF "elab.implementation" 1 "Previous" ScopeEmpty (type gdef)
-                                  logTermNF "elab.implementation" 1 "Now" ScopeEmpty fullty
+                   ok <- convert ScopeEmpty fullty (type gdef)
+                   unless ok $ do -- logTermNF "elab.implementation" 1 "Previous" ScopeEmpty (type gdef)
+                                  -- logTermNF "elab.implementation" 1 "Now" ScopeEmpty fullty
                                   throw (CantConvert (getFC impTy) (gamma defs) ScopeEmpty fullty (type gdef))
 
          -- If the body is empty, we're done for now (just declaring that
@@ -255,7 +258,7 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                -- RHS is the constructor applied to a search for the necessary
                -- parent constraints, then the method implementations
                defs <- get Ctxt
-               let fldTys = getFieldArgs !(normaliseHoles defs ScopeEmpty conty)
+               let fldTys = getFieldArgs !(normaliseHoles ScopeEmpty conty)
                log "elab.implementation" 5 $ "Field types " ++ show fldTys
                let irhs = apply (autoImpsApply (IVar vfc con) $ map (const (ISearch vfc 500)) (parents cdata))
                                   (map (mkMethField methImps fldTys) fns)

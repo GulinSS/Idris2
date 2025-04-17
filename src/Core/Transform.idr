@@ -4,6 +4,8 @@ import Core.Context
 import Core.Env
 import Core.TT
 
+import Data.Vect
+
 import Libraries.Data.NameMap
 
 %default total
@@ -79,6 +81,9 @@ tryReplace ms (TForce fc r tm)
     = do tm' <- tryReplace ms tm
          pure (TForce fc r tm')
 tryReplace ms (PrimVal fc c) = pure (PrimVal fc c)
+tryReplace ms (PrimOp fc fn args)
+    = do args' <- traverse (tryReplace ms) args
+         pure (PrimOp fc fn args')
 tryReplace ms (Erased fc Impossible) = pure (Erased fc Impossible)
 tryReplace ms (Erased fc Placeholder) = pure (Erased fc Placeholder)
 tryReplace ms (Erased fc (Dotted t)) = Erased fc . Dotted <$> tryReplace ms t

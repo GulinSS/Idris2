@@ -5,8 +5,9 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.UnifyState
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -34,7 +35,8 @@ processTransform eopts nest env fc tn_in lhs rhs
              checkLHS True top tidx eopts nest env fc lhs
          logTerm "transform.lhs" 3 "Transform LHS" lhstm
          rhstm <- wrapError (InRHS fc tn_in) $
-                       checkTermSub tidx InExpr (InTrans :: eopts) nest' env' env sub' rhs (gnf env' lhsty)
+                       checkTermSub tidx InExpr (InTrans :: eopts) nest' env' env sub' rhs
+                       !(nf env' lhsty)
          clearHoleLHS
          logTerm "transform.rhs" 3 "Transform RHS" rhstm
          addTransform fc (MkTransform tn env' lhstm rhstm)

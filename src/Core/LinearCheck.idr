@@ -10,10 +10,10 @@ module Core.LinearCheck
 import Core.Context
 import Core.Context.Log
 import Core.Env
-import Core.Normalise
 import Core.TT
 
 import Data.SnocList
+import Data.Vect
 
 -- List of variable usages - we'll count the contents of specific variables
 -- when discharging binders, to ensure that linear names are only used once
@@ -285,7 +285,7 @@ parameters {auto c : Ref Ctxt Defs}
     where
       lcheckScope : {vars : _} -> Env Term vars -> CaseScope vars ->
                     Core (HoleUsage vars)
-      lcheckScope env (RHS tm)
+      lcheckScope env (RHS _ tm)
           = lcheck rig env tm
       lcheckScope env (Arg c x sc)
             -- We don't have the type of the argument, but the good news is
@@ -466,6 +466,9 @@ parameters {auto c : Ref Ctxt Defs}
   lcheck rig env (TDelay fc r ty arg) = lcheck rig env arg
   lcheck rig env (TForce fc r tm) = lcheck rig env tm
   lcheck rig env (PrimVal fc c) = hdone fc
+  lcheck rig env (PrimOp fc fn args)
+     = do us <- traverseVect (lcheck rig env) args
+          pure (concat fc (toList us))
   lcheck rig env (Erased _ (Dotted t)) = lcheck rig env t
   lcheck rig env (Erased fc _) = hdone fc
   lcheck rig env (Unmatched fc _) = hdone fc
@@ -499,6 +502,6 @@ parameters {auto c : Ref Ctxt Defs}
                 FC -> RigCount -> Env Term vars -> Term vars -> Core ()
   linearCheck fc rig env tm
       = do logTerm "quantity" 10 "Checking linearity" tm
-           logEnv "quantity" 10 "In env" env
+           -- logEnv "quantity" 10 "In env" env
            used <- lcheck rig env tm
            checkEnvUsage {done = [<]} fc rig env used tm

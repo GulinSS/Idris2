@@ -7,7 +7,6 @@ import Core.Context.Log
 import Core.Directory
 import Core.Options
 import Core.Env
-import Core.Normalise
 import Data.List1
 import Data.String
 import Compiler.ES.Ast
@@ -25,6 +24,8 @@ import Idris.Syntax
 import Idris.Doc.String
 
 import Data.Vect
+
+%hide Core.TT.Term.Tag
 
 --------------------------------------------------------------------------------
 --          Utilities

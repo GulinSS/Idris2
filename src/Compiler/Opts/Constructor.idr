@@ -96,6 +96,7 @@ natHack =
     ]
 
 -- get all builtin transformations
+export
 builtinMagic : forall vars. CExp vars -> Maybe (CExp vars)
 builtinMagic = magic natHack
 
@@ -147,6 +148,7 @@ nat _ = pure Nothing
 =========
 -}
 
+export
 enumTag : Nat -> Int -> Constant
 enumTag k i =
   if      k <= 0xff   then B8 (cast i)

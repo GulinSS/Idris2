@@ -2,7 +2,7 @@ module Core.Context.Log
 
 import Core.Context
 import Core.Options
-import Core.Value
+import Core.Evaluate.Value
 
 import Data.String
 import Data.List1
@@ -108,22 +108,22 @@ logTerm s n msg tm
              tm' <- toFullNames tm
              logString depth s.topic n $ msg ++ ": " ++ show tm'
 
-export
-logLocalEnv : {free, vars : _} ->
-         {auto c : Ref Ctxt Defs} ->
-         LogTopic -> Nat -> String -> LocalEnv free vars -> Core ()
-logLocalEnv s n msg env
-    = when !(logging s n) $
-        do depth <- getDepth
-           logString depth s.topic n msg
-           dumpEnv s env
-  where
-    dumpEnv : {free, vs : SnocList Name} -> LogTopic -> LocalEnv free vs -> Core ()
-    dumpEnv _ [<] = pure ()
-    dumpEnv {vs = _ :< x} s (bs :< closure)
-        = do depth <- getDepth
-             logString depth s.topic n $ msg ++ ": " ++ show x ++ " :: " ++ show closure
-             dumpEnv s bs
+-- export
+-- logLocalEnv : {free, vars : _} ->
+--          {auto c : Ref Ctxt Defs} ->
+--          LogTopic -> Nat -> String -> LocalEnv free vars -> Core ()
+-- logLocalEnv s n msg env
+--     = when !(logging s n) $
+--         do depth <- getDepth
+--            logString depth s.topic n msg
+--            dumpEnv s env
+--   where
+--     dumpEnv : {free, vs : SnocList Name} -> LogTopic -> LocalEnv free vs -> Core ()
+--     dumpEnv _ [<] = pure ()
+--     dumpEnv {vs = _ :< x} s (bs :< closure)
+--         = do depth <- getDepth
+--              logString depth s.topic n $ msg ++ ": " ++ show x ++ " :: " ++ show closure
+--              dumpEnv s bs
 
 
 export

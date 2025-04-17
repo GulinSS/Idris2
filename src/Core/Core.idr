@@ -894,8 +894,13 @@ mapTermM f = goTerm where
     goTerm (Case fc t c sc sct alts)
         = f =<< Case fc t c <$> goTerm sc <*> goTerm sct <*> traverse goAlt alts
       where
+        goForced : {vars : _} -> (Var vars, Term vars) ->
+                   Core (Var vars, Term vars)
+        goForced (v, tm) = pure (v, !(goTerm tm))
+
         goScope : {vars : _} -> CaseScope vars -> Core (CaseScope vars)
-        goScope (RHS tm) = pure $ RHS !(goTerm tm)
+        goScope (RHS fs tm)
+          = pure $ RHS !(traverse goForced fs) !(goTerm tm)
         goScope (Arg c x sc) = pure $ Arg c x !(goScope sc)
 
         goAlt : {vars : _} -> CaseAlt vars -> Core (CaseAlt vars)
@@ -907,6 +912,8 @@ mapTermM f = goTerm where
     goTerm (TDelay fc la ty arg) = f =<< TDelay fc la <$> goTerm ty <*> goTerm arg
     goTerm (TForce fc la t) = f =<< TForce fc la <$> goTerm t
     goTerm tm@(PrimVal _ _) = f tm
+    goTerm tm@(PrimOp fc op args)
+        = f =<< PrimOp fc op <$> (traverseVect goTerm args)
     goTerm tm@(Erased _ _) = f tm
     goTerm tm@(Unmatched _ _) = f tm
     goTerm tm@(TType _ _) = f tm

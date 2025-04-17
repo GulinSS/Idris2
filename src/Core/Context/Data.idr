@@ -4,9 +4,9 @@ module Core.Context.Data
 
 import Core.Context
 import Core.Context.Log
-import Core.Normalise
 import Core.Env
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate
 
 import Data.List
 import Data.Maybe
@@ -41,7 +41,7 @@ updateParams Nothing args = dropReps <$> traverse couldBeParam args
   where
     couldBeParam : Term vars -> Core (Maybe (Term vars))
     couldBeParam tm = pure $ case !(etaContract tm) of
-      Local fc r v p => Just (Local fc r v p)
+      Local fc i v p => Just (Local fc i v p)
       _ => Nothing
 updateParams (Just args) args' = pure $ dropReps $ zipWith mergeArg args args'
   where
@@ -121,9 +121,8 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
     conVisibility x = x
 
     readQs : NF [<] -> Core (List RigCount)
-    readQs (NBind fc x (Pi _ c _ _) sc)
-        = do defs <- get Ctxt
-             rest <- readQs !(sc defs (MkNFClosure defaultOpts [<] (NErased fc Placeholder)))
+    readQs (VBind fc x (Pi _ c _ _) sc)
+        = do rest <- readQs !(expand !(sc (pure (VErased fc Placeholder))))
              pure (c :: rest)
     readQs _ = pure []
 
@@ -131,8 +130,7 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
                           Context -> Core Context
     addDataConstructors tag [] gam = pure gam
     addDataConstructors tag (MkCon fc n a ty :: cs) gam
-        = do defs <- get Ctxt
-             qs <- readQs !(nf defs [<] ty)
+        = do qs <- readQs !(expand !(nf [<] ty))
              let condef = newDef fc n top vars ty (specified $ conVisibility vis)
                                  (DCon (defaultDataConInfo qs) tag a)
              -- Check 'n' is undefined

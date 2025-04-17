@@ -18,14 +18,13 @@ import TTImp.TTImp
 showDefType : Def -> String
 showDefType None = "undefined"
 showDefType (Function {}) = "function"
-showDefType (ExternDef {}) = "external function"
-showDefType (ForeignDef {}) = "foreign function"
-showDefType (Builtin {}) = "builtin function"
 showDefType (DCon {}) = "data constructor"
 showDefType (TCon {}) = "type constructor"
 showDefType (Hole {}) = "hole"
 showDefType (BySearch {}) = "search"
 showDefType (Guess {}) = "guess"
+showDefType (ExternDef {}) = "external function"
+showDefType (ForeignDef {}) = "foreign function"
 showDefType ImpBind = "bound name"
 showDefType (UniverseLevel {}) = "universe level"
 showDefType Delayed = "delayed"
@@ -130,7 +129,7 @@ isStrict (As _ _ a p) = isStrict a && isStrict p
 isStrict (Case _ _ _ _ _ alts) = all isStrictAlt alts
   where
     isStrictScope : forall vs . CaseScope vs -> Bool
-    isStrictScope (RHS tm) = isStrict tm
+    isStrictScope (RHS _ tm) = isStrict tm
     isStrictScope (Arg _ _ sc) = isStrictScope sc
 
     isStrictAlt : forall vs . CaseAlt vs -> Bool
@@ -142,6 +141,7 @@ isStrict (TDelayed _ _ _) = False
 isStrict (TDelay _ _ f x) = isStrict f && isStrict x
 isStrict (TForce _ _ tm) = isStrict tm
 isStrict (PrimVal _ _) = True
+isStrict (PrimOp _ _ _) = True
 isStrict (Erased _ _) = True
 isStrict (TType _ _) = True
 isStrict (Unmatched _ _) = True

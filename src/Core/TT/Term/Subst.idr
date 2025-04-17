@@ -11,6 +11,7 @@ import Core.TT.Var
 
 import Data.List
 import Data.SnocList
+import Data.Vect
 
 import Libraries.Data.List.SizeOf
 import Libraries.Data.SnocList.SizeOf
@@ -24,8 +25,27 @@ SubstEnv = Subst Term
 ScopeSingle : Term vars -> SubstEnv [<x] vars
 ScopeSingle n = [<n]
 
+findDropVar : Var (vars ++ dropped) ->
+              SubstEnv dropped vars ->
+              Maybe (Var vars)
+findDropVar (MkVar var) [<] = Just (MkVar var)
+findDropVar (MkVar First) (env :< tm) = Nothing
+findDropVar (MkVar (Later p)) (env :< tm)
+    = findDropVar (MkVar p) env
+
+findVar : SizeOf outer ->
+          Var ((vars ++ dropped) ++ outer) ->
+          SubstEnv dropped vars ->
+          Maybe (Var (vars ++ outer))
+findVar outer var env = case sizedView outer of
+  Z       => findDropVar var env
+  S outer => case var of
+    MkVar First     => Just (MkVar First)
+    MkVar (Later p) => map weaken (findVar outer (MkVar p) env)
+
 substTerm : Substitutable Term Term
 substTerms : Substitutable Term (List . Term)
+substVect : forall a. Substitutable Term (Vect a . Term)
 substBinder : Substitutable Term (Binder . Term)
 substTaggedTerms : forall a. Substitutable Term (List . (a,) . Term)
 substAlt : Substitutable Term CaseAlt
@@ -52,6 +72,8 @@ substTerm outer dropped env (TDelay fc x t y)
     = TDelay fc x (substTerm outer dropped env t) (substTerm outer dropped env y)
 substTerm outer dropped env (TForce fc r x) = TForce fc r (substTerm outer dropped env x)
 substTerm outer dropped env (PrimVal fc c) = PrimVal fc c
+substTerm outer dropped env (PrimOp fc x args)
+    = PrimOp fc x (substVect outer dropped env args)
 substTerm outer dropped env (Erased fc Impossible) = Erased fc Impossible
 substTerm outer dropped env (Erased fc Placeholder) = Erased fc Placeholder
 substTerm outer dropped env (Erased fc (Dotted t)) = Erased fc (Dotted (substTerm outer dropped env t))
@@ -61,13 +83,27 @@ substTerm outer dropped env (TType fc u) = TType fc u
 substTerms outer dropped env xs
   = assert_total $ map (substTerm outer dropped env) xs
 
+substVect outer dropped env xs
+  = assert_total $ map (substTerm outer dropped env) xs
+
 substBinder outer dropped env b
   = assert_total $ map (substTerm outer dropped env) b
 
 substTaggedTerms outer dropped env b
   = assert_total $ map @{Compose} (substTerm outer dropped env) b
 
-substCaseScope outer dropped env (RHS tm) = RHS (substTerm outer dropped env tm)
+substCaseScope outer' dropped' env (RHS fs tm)
+  = RHS (substForced fs) (substTerm outer' dropped' env tm)
+  where
+    -- If we substitute in the vars, the equality is no longer useful
+    substForced : List (Var ((vars ++ dropped) ++ outer), Term ((vars ++ dropped) ++ outer)) ->
+                  List (Var (vars ++ outer), Term (vars ++ outer))
+    substForced [] = []
+    substForced ((v, tm) :: fs)
+        = case findVar outer' v env of
+              Nothing => substForced fs
+              Just v' => ((v', substTerm outer' dropped' env tm) :: substForced fs)
+
 substCaseScope outer dropped env (Arg c x sc) = Arg c x (substCaseScope (suc outer) dropped env sc)
 
 substAlt outer dropped env (ConCase fc n t sc) = ConCase fc n t (substCaseScope outer dropped env sc)
