@@ -4,7 +4,10 @@ module Core.Context.Data
 
 import Core.Context
 import Core.Context.Log
-import Core.Normalise
+import Core.Env
+import Core.Evaluate.Value
+import Core.Evaluate.Expand
+import Core.Evaluate
 
 import Data.List
 import Data.Maybe
@@ -39,7 +42,7 @@ updateParams Nothing args = dropReps <$> traverse couldBeParam args
   where
     couldBeParam : Term vars -> Core (Maybe (Term vars))
     couldBeParam tm = pure $ case !(etaContract tm) of
-      Local fc r v p => Just (Local fc r v p)
+      Local fc i v p => Just (Local fc i v p)
       _ => Nothing
 updateParams (Just args) args' = pure $ dropReps $ zipWith mergeArg args args'
   where
@@ -118,11 +121,19 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
     conVisibility Export = Private
     conVisibility x = x
 
+    readQs : NF [<] -> Core (List RigCount)
+    readQs (VBind fc x (Pi _ c _ _) sc)
+        = do rest <- readQs !(expand !(sc (pure (VErased fc Placeholder))))
+             pure (c :: rest)
+    readQs _ = pure []
+
     addDataConstructors : (tag : Int) -> List Constructor ->
                           Context -> Core Context
     addDataConstructors tag [] gam = pure gam
     addDataConstructors tag (MkCon fc n a ty :: cs) gam
-        = do let condef = newDef fc n top vars ty (specified $ conVisibility vis) (DCon tag a Nothing)
+        = do qs <- readQs !(expand !(nf [<] ty))
+             let condef = newDef fc n top vars ty (specified $ conVisibility vis)
+                                 (DCon (defaultDataConInfo qs) tag a)
              -- Check 'n' is undefined
              Nothing <- lookupCtxtExact n gam
                  | Just gdef => throw (AlreadyDefined fc n)

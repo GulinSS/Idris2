@@ -4,6 +4,7 @@ import Core.Core
 import Core.Context
 import Core.Env
 import Core.Options
+import Core.Evaluate
 
 import Idris.Doc.String
 import Idris.REPL.Opts
@@ -153,8 +154,7 @@ pshow : {vars : _} ->
         {auto s : Ref Syn SyntaxInfo} ->
         Env Term vars -> Term vars -> Core (Doc IdrisAnn)
 pshow env tm
-    = do defs <- get Ctxt
-         ntm <- normaliseHoles defs env tm
+    = do ntm <- normaliseHoles env tm
          itm <- resugar env ntm
          pure (pShowMN ntm env $ prettyBy Syntax itm)
 
@@ -425,6 +425,17 @@ perrorRaw (LinearMisuse fc n exp ctx)
     prettyRel = elimSemi "irrelevant"
                          "relevant"
                          (const "non-linear")
+perrorRaw (InconsistentUse fc ns)
+    = pure $ errorDesc (hsep
+                (reflow "Inconsistent usage of names in case branches:"
+                   :: !(traverse branch ns)))
+  where
+    branch : (FC, List Name) -> Core (Doc IdrisAnn)
+    branch (fc, [])
+        = pure $ reflow "No linear usage in " <++> !(ploc fc)
+    branch (fc, ns)
+        = pure $ concatWith (surround ",") (map pretty0 ns) <++>
+                 reflow "used in" <++> !(ploc fc)
 perrorRaw (BorrowPartial fc env tm arg)
     = pure $ errorDesc (code !(pshow env tm) <++> reflow "borrows argument" <++> code !(pshow env arg)
         <++> reflow "so must be fully applied.")

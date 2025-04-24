@@ -3,7 +3,6 @@ module Idris.REPL
 import Compiler.Common
 import Compiler.Inline
 
-import Core.Case.CaseTree
 import Core.CompileExpr
 import Core.CompileExpr.Pretty
 import Core.Context
@@ -14,13 +13,13 @@ import Core.Env
 import Core.FC
 import Core.LinearCheck
 import Core.Metadata
-import Core.Normalise
 import Core.Options
 import Core.TT
 import Core.TT.Views
 import Core.Termination
 import Core.Unify
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate
 
 import Parser.Unlit
 
@@ -163,7 +162,7 @@ displayPatTerm : {auto c : Ref Ctxt Defs} ->
                  Defs -> ClosedTerm ->
                  Core String
 displayPatTerm defs tm
-    = do ptm <- resugarNoPatvars ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
+    = do ptm <- resugarNoPatvars ScopeEmpty !(normaliseHoles ScopeEmpty tm)
          pure (show ptm)
 
 setOpt : {auto c : Ref Ctxt Defs} ->
@@ -426,7 +425,7 @@ inferAndElab emode itm env
                  hide replFC (NS primIONS (UN $ Basic "Nil")))
              (\err => pure ())
        (tm , gty) <- elabTerm inidx emode [] (MkNested []) env ttimpWithIt Nothing
-       ty <- getTerm gty
+       ty <- quote env gty
        pure (tm `WithType` ty)
 
 processEdit : {auto c : Ref Ctxt Defs} ->
@@ -450,7 +449,7 @@ processEdit (TypeAt line col name)
          -- Get the Doc for the result
          globalResult <- case globals of
            [] => pure Nothing
-           ts => do tys <- traverse (displayType False defs) ts
+           ts => do tys <- traverse (displayType False) ts
                     pure $ Just (vsep $ map (reAnnotate Pretty.Syntax) tys)
 
          -- Lookup the name locally (The name at the specified position)
@@ -459,7 +458,7 @@ processEdit (TypeAt line col name)
          case (globalResult, localResult) of
               -- Give precedence to the local name, as it shadows the others
               (_, Just (n, _, type)) => pure $ DisplayEdit $
-                prettyLocalName n <++> colon <++> !(reAnnotate Syntax <$> displayTerm defs type)
+                prettyLocalName n <++> colon <++> !(reAnnotate Syntax <$> displayTerm type)
               (Just globalDoc, Nothing) => pure $ DisplayEdit $ globalDoc
               (Nothing, Nothing) => undefinedName replFC name
 
@@ -594,14 +593,14 @@ processEdit (Refine upd line hole e)
                     -- We're checking this term full of holes against the type of the hole
                     -- TODO: branch before checking the expression fits
                     --       so that we can cleanly recover in case of error
-                    let gty = gnf env htyInLhsCtxt
+                    let gty = !(nf env htyInLhsCtxt)
                     ccall <- checkTerm hidx {-is this correct?-} InExpr [] (MkNested []) env icall gty
 
                     -- And then we normalise, unelab, resugar the resulting term so
                     -- that solved holes are replaced with their solutions
                     -- (we need to re-read the context because elaboration may have added solutions to it)
                     defs <- get Ctxt
-                    ncall <- normaliseHoles defs env ccall
+                    ncall <- normaliseHoles env ccall
                     pcall <- resugar env ncall
                     syn <- get Syn
                     let brack = elemBy (\x, y => dropNS x == dropNS y) hole (bracketholes syn)
@@ -627,11 +626,11 @@ processEdit (ExprSearch upd line name hints)
                      if upd
                         then updateFile (proofSearch name (show itm') (integerToNat (cast (line - 1))))
                         else pure $ DisplayEdit (prettyBy Syntax itm')
-              [(n, nidx, PMDef pi [<] (STerm _ tm) _ _)] =>
+              [(n, nidx, Function pi tm _ _)] =>
                   case holeInfo pi of
                        NotHole => pure $ EditError "Not a searchable hole"
                        SolvedHole locs =>
-                          do let (_ ** (env, tm')) = dropLamsTm locs ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
+                          do let (_ ** (env, tm')) = dropLamsTm locs ScopeEmpty !(normaliseHoles ScopeEmpty tm)
                              itm <- resugar env tm'
                              let itm'= ifThenElse brack (addBracket replFC itm) itm
                              if upd
@@ -743,9 +742,9 @@ prepareExp ctm
          inidx <- resolveName (UN $ Basic "[input]")
          (tm, ty) <- elabTerm inidx InExpr [] (MkNested [])
                                  ScopeEmpty ttimpWithIt Nothing
-         tm_erased <- linearCheck replFC linear True ScopeEmpty tm
+         linearCheck replFC linear ScopeEmpty tm
          compileAndInlineAll
-         pure tm_erased
+         pure tm
 
 processLocal : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
@@ -841,8 +840,8 @@ loadMainFile f
 ||| using that evaluation mode
 replEval : {auto c : Ref Ctxt Defs} ->
   {vs : _} ->
-  REPLEval -> Defs -> Env Term vs -> Term vs -> Core (Term vs)
-replEval NormaliseAll = normaliseOpts ({ strategy := CBV } withAll)
+  REPLEval -> Env Term vs -> Term vs -> Core (Term vs)
+replEval NormaliseAll = normaliseAll
 replEval _ = normalise
 
 ||| Produce the normal form of a PTerm, along with its inferred type
@@ -859,7 +858,7 @@ inferAndNormalize emode itm
        logTerm "repl.eval" 10 "Elaborated input" tm
        defs <- get Ctxt
        let norm = replEval emode
-       ntm <- norm defs ScopeEmpty tm
+       ntm <- norm ScopeEmpty tm
        logTermNF "repl.eval" 5 "Normalised" ScopeEmpty ntm
        pure $ ntm `WithType` ty
   where
@@ -895,11 +894,11 @@ process (Eval itm)
                  evalResultName <- DN "it" <$> genName "evalResult"
                  ignore $ addDef evalResultName
                    $ newDef replFC evalResultName top ScopeEmpty ty defaulted
-                   $ PMDef defaultPI ScopeEmpty (STerm 0 ntm) (STerm 0 ntm) []
+                   $ Function defaultPI ntm ntm Nothing
                  addToSave evalResultName
                  put ROpts ({ evalResultName := Just evalResultName } opts)
                  if showTypes opts
-                    then do ity <- resugar ScopeEmpty !(norm defs ScopeEmpty ty)
+                    then do ity <- resugar ScopeEmpty !(norm ScopeEmpty ty)
                             pure (Evaluated itm (Just ity))
                     else pure (Evaluated itm Nothing)
 process (Check (PRef fc (UN (Basic "it"))))
@@ -911,14 +910,14 @@ process (Check (PRef fc fn))
     = do defs <- get Ctxt
          case !(lookupCtxtName fn (gamma defs)) of
               [] => undefinedName fc fn
-              ts => do tys <- traverse (displayType False defs) ts
+              ts => do tys <- traverse (displayType False) ts
                        pure (Printed $ vsep $ map (reAnnotate Syntax) tys)
 process (Check itm)
     = do (tm `WithType` ty) <- inferAndElab InExpr itm ScopeEmpty
          defs <- get Ctxt
-         itm <- resugar ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
-         -- ty <- getTerm gty
-         ity <- resugar ScopeEmpty !(normalise defs ScopeEmpty ty)
+         itm <- resugar ScopeEmpty !(normaliseHoles ScopeEmpty tm)
+         -- ty <- quote env gty
+         ity <- resugar ScopeEmpty !(normalise ScopeEmpty ty)
          pure (TermChecked itm ity)
 process (CheckWithImplicits itm)
     = do showImplicits <- showImplicits <$> getPPrint
@@ -930,7 +929,7 @@ process (PrintDef (PRef fc fn))
     = do defs <- get Ctxt
          case !(lookupCtxtName fn (gamma defs)) of
               [] => undefinedName fc fn
-              ts => do defs <- traverse (displayPats False defs) ts
+              ts => do defs <- traverse (displayPats False) ts
                        pure (Printed $ vsep $ map (reAnnotate Syntax) defs)
 process (PrintDef t)
     = case !(getDocsForImplementation t) of

@@ -4,6 +4,8 @@ import Core.Context
 import Core.Env
 import Core.TT
 
+import Data.Vect
+
 import Libraries.Data.NameMap
 
 %default total
@@ -65,9 +67,9 @@ tryReplace ms (App fc f c a)
          a' <- tryReplace ms a
          pure (App fc f' c a')
 tryReplace ms (As fc s a p)
-    = do a' <- tryReplace ms a
-         p' <- tryReplace ms p
-         pure (As fc s a' p')
+    = Nothing -- No 'As' on RHS of a rule
+tryReplace ms (Case{})
+    = Nothing -- As for 'Bind', can't do this yet
 tryReplace ms (TDelayed fc r tm)
     = do tm' <- tryReplace ms tm
          pure (TDelayed fc r tm')
@@ -79,9 +81,13 @@ tryReplace ms (TForce fc r tm)
     = do tm' <- tryReplace ms tm
          pure (TForce fc r tm')
 tryReplace ms (PrimVal fc c) = pure (PrimVal fc c)
+tryReplace ms (PrimOp fc fn args)
+    = do args' <- traverse (tryReplace ms) args
+         pure (PrimOp fc fn args')
 tryReplace ms (Erased fc Impossible) = pure (Erased fc Impossible)
 tryReplace ms (Erased fc Placeholder) = pure (Erased fc Placeholder)
 tryReplace ms (Erased fc (Dotted t)) = Erased fc . Dotted <$> tryReplace ms t
+tryReplace ms (Unmatched fc s) = pure (Unmatched fc s)
 tryReplace ms (TType fc u) = pure (TType fc u)
 
 covering

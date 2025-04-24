@@ -5,15 +5,17 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
+import Core.Evaluate
 
 import Idris.Syntax
 import Idris.REPL.Opts
 
-import TTImp.Elab.App
 import TTImp.Elab.Check
 import TTImp.Elab.Delayed
 import TTImp.Elab.ImplicitBind
@@ -29,29 +31,6 @@ import Libraries.Data.NameMap
 import Libraries.Data.WithDefault
 
 %default covering
-
-export
-changeVar : (old : Var vs) -> (new : Var vs) -> Term vs -> Term vs
-changeVar old (MkVar new) (Local fc r idx p)
-    = if old == MkVar p
-         then Local fc r _ new
-         else Local fc r _ p
-changeVar old new (Meta fc nm i args)
-    = Meta fc nm i (map @{Compose} (changeVar old new) args)
-changeVar (MkVar old) (MkVar new) (Bind fc x b sc)
-    = Bind fc x (assert_total (map (changeVar (MkVar old) (MkVar new)) b))
-           (changeVar (MkVar (Later old)) (MkVar (Later new)) sc)
-changeVar old new (App fc fn c arg)
-    = App fc (changeVar old new fn) c (changeVar old new arg)
-changeVar old new (As fc s nm p)
-    = As fc s (changeVar old new nm) (changeVar old new p)
-changeVar old new (TDelayed fc r p)
-    = TDelayed fc r (changeVar old new p)
-changeVar old new (TDelay fc r t p)
-    = TDelay fc r (changeVar old new t) (changeVar old new p)
-changeVar old new (TForce fc r p)
-    = TForce fc r (changeVar old new p)
-changeVar old new tm = tm
 
 findLater : (x : Name) -> (newer : Scope) -> Var (older :< x ++ newer)
 findLater x [<] = MkVar First
@@ -100,24 +79,6 @@ findImpsIn fc env ns (Bind _ n b sc)
 findImpsIn fc env ns ty
     = when (not (isNil ns)) $
            throw (TryWithImplicits fc env (reverse ns))
-
-merge : {vs : Scope} ->
-        Scopeable (Var vs) -> List (Var vs) -> List (Var vs)
-merge [<] xs = xs
-merge (vs :< v) xs
-    = merge vs (v :: filter (v /=) xs)
-
--- Extend the list of variables we need in the environment so far, removing
--- duplicates
-extendNeeded : {vs : _} ->
-               Binder (Term vs) ->
-               Env Term vs -> List (Var vs) -> List (Var vs)
-extendNeeded (Let _ _ ty val) env needed
-    = merge (findUsedLocs env ty) (merge (findUsedLocs env val) needed)
-extendNeeded (PLet _ _ ty val) env needed
-    = merge (findUsedLocs env ty) (merge (findUsedLocs env val) needed)
-extendNeeded b env needed
-    = merge (findUsedLocs env (binderType b)) needed
 
 findScrutinee : {vs : _} ->
                 Env Term vs -> RawImp -> Maybe (Var vs)
@@ -201,7 +162,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          let splitOn = findScrutinee env scr
 
          caseretty_in <- case expected of
-                           Just ty => getTerm ty
+                           Just ty => quote env ty
                            _ =>
                               do nmty <- genName "caseTy"
                                  u <- uniVar fc
@@ -215,10 +176,6 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
                             (maybe (Bind fc scrn (Pi fc caseRig Explicit scrty)
                                        (weaken caseretty))
                                    (const caseretty) splitOn)
-         -- If we can normalise the type without the result being excessively
-         -- big do it. It's the depth of stuck applications - 10 is already
-         -- pretty much unreadable!
-         casefnty <- normaliseSizeLimit defs 10 ScopeEmpty casefnty
          (erasedargs, _) <- findErased casefnty
 
          logEnv "elab.case" 10 "Case env" env
@@ -248,7 +205,10 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
 
          let applyEnv = applyToFull fc caseRef env
          let appTm : Term vars
-                   = maybe (App fc applyEnv caseRig scrtm)
+                   = maybe (Bind fc (MN "sc" 0)
+                                 (Let fc caseRig scrtm scrty)
+                                 (App fc (weaken applyEnv) caseRig
+                                         (Local fc Nothing _ First)))
                            (const applyEnv)
                            splitOn
 
@@ -268,20 +228,17 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          put UST ({ delayedElab := [] } ust)
          processDecl [InCase] nest' ScopeEmpty (IDef fc casen alts')
 
-         -- If there's no duplication of the scrutinee in the block,
-         -- flag it as inlinable.
-         -- This will be the case either if the scrutinee is a variable, in
-         -- which case the duplication won't hurt, or if there's no variable
-         -- duplicated in the body (what ghc calls W-safe)
-         -- We'll check that second condition later, after generating the
-         -- runtime (erased) case trees
-         let inlineOK = maybe False (const True) splitOn
-         when inlineOK $ setFlag fc casen Inline
+         -- Set the case block to always reduce, so we get the core 'Case'
+         updateDef casen
+            (\d => case d of
+                        Function fi ct rt cs =>
+                          Just (Function ({ alwaysReduce := True } fi) ct rt cs)
+                        _ => Nothing)
 
          ust <- get UST
          put UST ({ delayedElab := olddelayed } ust)
 
-         pure (appTm, gnf env caseretty)
+         pure (appTm, !(nf env caseretty))
   where
     mkLocalEnv : Env Term vs -> Env Term vs
     mkLocalEnv [<] = ScopeEmpty
@@ -375,7 +332,6 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
               lhs' = apply (IVar loc' casen) args' in
               ImpossibleClause loc' (applyNested nest lhs')
 
-
 export
 checkCase : {vars : _} ->
             {auto c : Ref Ctxt Defs} ->
@@ -405,49 +361,49 @@ checkCase rig elabinfo nest env fc opts scr scrty_in alts exp
            log "elab.case" 5 $ "Checking " ++ show scr ++ " at " ++ show chrig
 
            (scrtm_in, gscrty, caseRig) <- handle
-              (do c <- runDelays (const True) $ check chrig elabinfo nest env scr (Just (gnf env scrtyv))
+              (do c <- runDelays (const True) $ check chrig elabinfo nest env scr (Just !(nf env scrtyv))
                   pure (fst c, snd c, chrig))
             $ \case
                 e@(LinearMisuse _ _ r _)
                   => branchOne
                      (do c <- runDelays (const True) $ check linear elabinfo nest env scr
-                              (Just (gnf env scrtyv))
+                              (Just !(nf env scrtyv))
                          pure (fst c, snd c, linear))
                      (throw e)
                      r
                 e => throw e
 
-           scrty <- getTerm gscrty
+           scrty <- quote env gscrty
            logTermNF "elab.case" 5 "Scrutinee type" env scrty
            defs <- get Ctxt
-           checkConcrete !(nf defs env scrty)
+           checkConcrete !(expand !(nf env scrty))
            caseBlock rig elabinfo fc nest env opts scr scrtm_in scrty caseRig alts exp
   where
     -- For the moment, throw an error if we haven't been able to work out
     -- the type of the case scrutinee, because we'll need it to build the
     -- type of the case block. But (TODO) consider delaying on failure?
     checkConcrete : NF vs -> Core ()
-    checkConcrete (NApp _ (NMeta n i _) _)
+    checkConcrete (VMeta{})
         = throw (GenericMsg fc "Can't infer type for case scrutinee")
     checkConcrete _ = pure ()
 
     applyTo : Defs -> RawImp -> ClosedNF -> Core RawImp
-    applyTo defs ty (NBind fc _ (Pi _ _ Explicit _) sc)
+    applyTo defs ty (VBind fc _ (Pi _ _ Explicit _) sc)
         = applyTo defs (IApp fc ty (Implicit fc False))
-               !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
-    applyTo defs ty (NBind _ x (Pi _ _ _ _) sc)
+               !(expand !(sc (pure (VErased fc Placeholder))))
+    applyTo defs ty (VBind _ x (Pi _ _ _ _) sc)
         = applyTo defs (INamedApp fc ty x (Implicit fc False))
-               !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
+               !(expand !(sc (pure (VErased fc Placeholder))))
     applyTo defs ty _ = pure ty
 
     -- Get the name and type of the family the scrutinee is in
     getRetTy : Defs -> ClosedNF -> Core (Maybe (Name, ClosedNF))
-    getRetTy defs (NBind fc _ (Pi _ _ _ _) sc)
-        = getRetTy defs !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
-    getRetTy defs (NTCon _ n arity _)
+    getRetTy defs (VBind fc _ (Pi _ _ _ _) sc)
+        = getRetTy defs !(expand !(sc (pure (VErased fc Placeholder))))
+    getRetTy defs (VTCon _ n arity _)
         = do Just ty <- lookupTyExact n (gamma defs)
                   | Nothing => pure Nothing
-             pure (Just (n, !(nf defs ScopeEmpty ty)))
+             pure (Just (n, !(expand !(nf [<] ty))))
     getRetTy _ _ = pure Nothing
 
     -- Guess a scrutinee type by looking at the alternatives, so that we
@@ -460,7 +416,7 @@ checkCase rig elabinfo nest env fc opts scr scrty_in alts exp
                   do defs <- get Ctxt
                      [(_, (_, ty))] <- lookupTyName (mapNestedName nest n) (gamma defs)
                          | _ => guessScrType xs
-                     Just (tyn, tyty) <- getRetTy defs !(nf defs ScopeEmpty ty)
+                     Just (tyn, tyty) <- getRetTy defs !(expand !(nf [<] ty))
                          | _ => guessScrType xs
                      applyTo defs (IVar fc tyn) tyty
                _ => guessScrType xs

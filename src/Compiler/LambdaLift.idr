@@ -12,6 +12,7 @@ module Compiler.LambdaLift
 
 import Core.CompileExpr
 import Core.Context
+import Core.Context.Log
 import Core.Core
 import Core.TT
 
@@ -168,12 +169,17 @@ mutual
        |||   debugging.
        LCrash : FC -> (msg : String) -> Lifted vars
 
+  public export
+  data LiftedCaseScope : SnocList Name -> Type where
+       LRHS : Lifted vars -> LiftedCaseScope vars
+       LArg : (x : Name) -> LiftedCaseScope (vars :< x) -> LiftedCaseScope vars
+
   ||| A branch of an "LCon" (constructor tag) case statement.
   |||
   ||| @ vars is the list of names accessible within the current scope of the
   |||   lambda-lifted code.
   public export
-  data LiftedConAlt : (vars : Scope) -> Type where
+  data LiftedConAlt : (vars : SnocList Name) -> Type where
 
        ||| Constructs a branch of an "LCon" (constructor tag) case statement.
        |||
@@ -185,13 +191,10 @@ mutual
        ||| @ tag is a tag value, present if the type of the value
        |||   inspected is an algebraic data type (this can be matched against
        |||   instead of the constructor's name, if preferable).
-       ||| @ args is a list of new names that are bound to the inspected value's
-       |||   members before evaluation of this branch's body (this is similar
-       |||   to using a let binding for each member of the value).
-       ||| @ body is the expression that is evaluated as the consequence of
-       |||   this branch matching.
+       ||| @ scope is the scope of the case alternative, consisting of its
+       |||   arguments and right hand side
        MkLConAlt : (n : Name) -> (info : ConInfo) -> (tag : Maybe Int) ->
-                   (args : List Name) -> (body : Lifted (vars <>< args)) ->
+                   (body : LiftedCaseScope vars) ->
                    LiftedConAlt vars
 
   ||| A branch of an "LConst" (constant expression) case statement.
@@ -299,10 +302,16 @@ mutual
 
   export
   covering
+  {vs : _} -> Show (LiftedCaseScope vs) where
+    show (LRHS rhs) = ") => " ++ show rhs
+    show (LArg x sc) = show x ++ " " ++ show sc
+
+  export
+  covering
   {vs : _} -> Show (LiftedConAlt vs) where
-    show (MkLConAlt n _ t args sc)
+    show (MkLConAlt n _ t sc)
         = "%conalt " ++ show n ++
-             "(" ++ showSep ", " (map show args) ++ ") => " ++ show sc
+             "(" ++ show sc
 
   export
   covering
@@ -314,7 +323,7 @@ export
 covering
 Show LiftedDef where
   show (MkLFun args scope exp)
-      = show args ++ show (reverse scope) ++ ": " ++ show exp
+      = show (toList args) ++ show (toList scope) ++ ": " ++ show exp
   show (MkLCon tag arity pos)
       = "Constructor tag " ++ show tag ++ " arity " ++ show arity ++
         maybe "" (\n => " (newtype by " ++ show n ++ ")") pos
@@ -437,10 +446,16 @@ usedVars used (LConCase fc sc alts def) =
         scDefUsed = usedVars defUsed sc in
         foldl usedConAlt scDefUsed alts
   where
-    usedConAlt : {default Nothing lazy : Maybe LazyReason} ->
-                  Used vars -> LiftedConAlt vars -> Used vars
-    usedConAlt used (MkLConAlt n ci tag args sc) =
-      contractUsedManyFish {remove=args} (usedVars (weakenUsedFish used) sc)
+      usedConScope : {vars : _} ->
+                     {default Nothing lazy : Maybe LazyReason} ->
+                     Used vars -> LiftedCaseScope vars -> Used vars
+      usedConScope used (LRHS tm) = usedVars used tm
+      usedConScope used (LArg x sc)
+        = contractUsed $ usedConScope (weakenUsed {outer=[<x]} used) sc
+
+      usedConAlt : {default Nothing lazy : Maybe LazyReason} ->
+                   Used vars -> LiftedConAlt vars -> Used vars
+      usedConAlt used (MkLConAlt n ci tag sc) = usedConScope used sc
 
 usedVars used (LConstCase fc sc alts def) =
     let defUsed = maybe used (usedVars used {vars}) def
@@ -506,18 +521,18 @@ dropUnused {vars} {outer} unused (LConCase fc sc alts def) =
   let alts' = map dropConCase alts in
       LConCase fc (dropUnused unused sc) alts' (map (dropUnused unused) def)
   where
-    dropConCase : LiftedConAlt (vars ++ outer) ->
-                  LiftedConAlt (dropped vars unused ++ outer)
-    dropConCase (MkLConAlt n ci t args sc) =
-      MkLConAlt n ci t args droppedSc
-      where
-        sc' : Lifted (vars ++ (outer <>< args))
-        sc' = rewrite sym $ snocAppendFishAssociative vars outer args in sc
+      dropScope : {vars, outer : _} ->
+                  (unused : Vect (length vars) Bool) ->
+                  LiftedCaseScope (vars ++ outer) ->
+                  LiftedCaseScope (dropped vars unused ++ outer)
+      dropScope unused (LRHS sc) = LRHS (dropUnused unused sc)
+      dropScope {vars} {outer} unused (LArg x sc)
+        = LArg x (rewrite (appendAssociative (dropped vars unused) outer [<x]) in
+                 (dropScope {outer = outer :< x} unused sc))
 
-        droppedSc : Lifted ((dropped vars unused ++ outer) <>< args)
-        droppedSc = do
-          rewrite snocAppendFishAssociative (dropped vars unused) outer args
-          dropUnused {vars=vars} {outer=outer <>< args} unused sc'
+      dropConCase : LiftedConAlt (vars ++ outer) ->
+                    LiftedConAlt (dropped vars unused ++ outer)
+      dropConCase (MkLConAlt n ci t sc) = MkLConAlt n ci t (dropScope unused sc)
 dropUnused {vars} {outer} unused (LConstCase fc sc alts def) =
   let alts' = map dropConstCase alts in
       LConstCase fc (dropUnused unused sc) alts' (map (dropUnused unused) def)
@@ -527,7 +542,8 @@ dropUnused {vars} {outer} unused (LConstCase fc sc alts def) =
     dropConstCase (MkLConstAlt c val) = MkLConstAlt c (dropUnused unused val)
 
 mutual
-  makeLam : {auto l : Ref Lifts LDefs} ->
+  makeLam : {auto c : Ref Ctxt Defs} ->
+            {auto l : Ref Lifts LDefs} ->
             {vars : _} ->
             {doLazyAnnots : Bool} ->
             {default Nothing lazy : Maybe LazyReason} ->
@@ -543,6 +559,7 @@ mutual
                unused = getUnused unusedContracted
                scl' = dropUnused {outer=bound} unused scl
            n <- genName
+           log "compile.execute" 40 $ "LambdaLift.makeLam \{show scl} |=>| \{show scl'}"
            update Lifts { defs $= ((n, MkLFun (dropped vars unused) bound scl') ::) }
            pure $ LUnderApp fc n (length bound) (allVars fc vars unused)
     where
@@ -560,7 +577,8 @@ mutual
 
 -- if doLazyAnnots = True then annotate function application with laziness
 -- otherwise use old behaviour (thunk is a function)
-  liftExp : {vars : _} ->
+  liftExp : {auto c : Ref Ctxt Defs} ->
+            {vars : _} ->
             {auto l : Ref Lifts LDefs} ->
             {doLazyAnnots : Bool} ->
             {default Nothing lazy : Maybe LazyReason} ->
@@ -591,9 +609,16 @@ mutual
       = pure $ LConCase fc !(liftExp {doLazyAnnots} sc) !(traverse (liftConAlt {lazy}) alts)
                            !(traverseOpt (liftExp {doLazyAnnots}) def)
     where
+      liftCaseScope : {vars : _} ->
+                      {default Nothing lazy : Maybe LazyReason} ->
+                      CCaseScope vars -> Core (LiftedCaseScope vars)
+      liftCaseScope (CRHS tm) = pure $ LRHS !(liftExp {doLazyAnnots} tm)
+      liftCaseScope (CArg x sc) = pure $ LArg x !(liftCaseScope sc)
+
       liftConAlt : {default Nothing lazy : Maybe LazyReason} ->
                    CConAlt vars -> Core (LiftedConAlt vars)
-      liftConAlt (MkConAlt n ci t args sc) = pure $ MkLConAlt n ci t args !(liftExp {doLazyAnnots} {lazy} sc)
+      liftConAlt (MkConAlt n ci t sc)
+          = pure $ MkLConAlt n ci t !(liftCaseScope {lazy} sc)
   liftExp (CConstCase fc sc alts def)
       = pure $ LConstCase fc !(liftExp {doLazyAnnots} sc) !(traverse liftConstAlt alts)
                              !(traverseOpt (liftExp {doLazyAnnots}) def)
@@ -606,16 +631,17 @@ mutual
   liftExp (CCrash fc str) = pure $ LCrash fc str
 
 export
-liftBody : {vars : _} -> {doLazyAnnots : Bool} ->
+liftBody : {auto c : Ref Ctxt Defs} -> {vars : _} -> {doLazyAnnots : Bool} ->
            Name -> CExp vars -> Core (Lifted vars, List (Name, LiftedDef))
 liftBody n tm
     = do l <- newRef Lifts (MkLDefs n [] 0)
          tml <- liftExp {doLazyAnnots} {l} tm
+         log "compile.execute" 40 $ "LambdaLift.liftBody \{show n}: \{show tm} |->| \{show tml}"
          ldata <- get Lifts
          pure (tml, defs ldata)
 
 export
-lambdaLiftDef : (doLazyAnnots : Bool) -> Name -> CDef -> Core (List (Name, LiftedDef))
+lambdaLiftDef : {auto c : Ref Ctxt Defs} -> (doLazyAnnots : Bool) -> Name -> CDef -> Core (List (Name, LiftedDef))
 lambdaLiftDef doLazyAnnots n (MkFun args exp)
     = do (expl, defs) <- liftBody {doLazyAnnots} n exp
          pure ((n, MkLFun args ScopeEmpty expl) :: defs)
@@ -631,7 +657,7 @@ lambdaLiftDef doLazyAnnots n (MkError exp)
 -- An empty list an error, because on success you will always get at least
 -- one definition, the lifted definition for the given name.
 export
-lambdaLift :  (doLazyAnnots : Bool)
+lambdaLift : {auto c : Ref Ctxt Defs} -> (doLazyAnnots : Bool)
            -> (Name,FC,CDef)
            -> Core (List (Name, LiftedDef))
 lambdaLift doLazyAnnots (n,_,def) = lambdaLiftDef doLazyAnnots n def

@@ -1,12 +1,13 @@
 module TTImp.Elab.Utils
 
-import Core.Case.CaseTree
 import Core.Context
+import Core.Context.Log
 import Core.Core
 import Core.Env
-import Core.Normalise
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import TTImp.Elab.Check
 import TTImp.TTImp
@@ -17,32 +18,32 @@ import Data.SnocList
 
 detagSafe : {auto c : Ref Ctxt Defs} ->
             Defs -> ClosedNF -> Core Bool
-detagSafe defs (NTCon _ n _ args)
+detagSafe defs (VTCon _ n _ args)
     = do Just (TCon _ _ _ _ _ _ (Just detags)) <- lookupDefExact n (gamma defs)
               | _ => pure False
-         args' <- traverse (evalClosure defs . value) args
-         pure $ notErased 0 detags (toList args')
+         args' <- traverseSnocList spineVal (reverse args)
+         pure $ notErased 0 detags args'
   where
     -- if any argument positions are in the detaggable set, and unerased, then
     -- detagging is safe
-    notErased : Nat -> List Nat -> List ClosedNF -> Bool
+    notErased : Nat -> List Nat -> SnocList (NF [<]) -> Bool
     notErased i [] _ = True -- Don't need an index available
-    notErased i ns [] = False
-    notErased i ns (NErased _ Impossible :: rest)
+    notErased i ns [<] = False
+    notErased i ns (rest :< VErased _ Impossible)
         = notErased (i + 1) ns rest -- Can't detag here, look elsewhere
-    notErased i ns (_ :: rest) -- Safe to detag via this argument
+    notErased i ns (rest :< _) -- Safe to detag via this argument
         = elem i ns || notErased (i + 1) ns rest
 detagSafe defs _ = pure False
 
 findErasedFrom : {auto c : Ref Ctxt Defs} ->
-                 Defs -> Nat -> ClosedNF -> Core (List Nat, List Nat)
-findErasedFrom defs pos (NBind fc x (Pi _ c _ aty) scf)
-    = do -- In the scope, use 'Erased fc Impossible' to mean 'argument is erased'.
+                 Defs -> Nat -> NF [<] -> Core (List Nat, List Nat)
+findErasedFrom defs pos (VBind fc x (Pi _ c _ aty) scf)
+    = do -- In the scope, use 'Erased fc True' to mean 'argument is erased'.
          -- It's handy here, because we can use it to tell if a detaggable
          -- argument position is available
-         sc <- scf defs (toClosure defaultOpts ScopeEmpty (Erased fc (ifThenElse (isErased c) Impossible Placeholder)))
-         (erest, dtrest) <- findErasedFrom defs (1 + pos) sc
-         let dt' = if !(detagSafe defs !(evalClosure defs aty))
+         sc <- scf (pure (VErased fc (ifThenElse (isErased c) Impossible Placeholder)))
+         (erest, dtrest) <- findErasedFrom defs (1 + pos) !(expand sc)
+         let dt' = if !(detagSafe defs !(expand aty))
                       then (pos :: dtrest) else dtrest
          pure $ if isErased c
                    then (pos :: erest, dt')
@@ -56,8 +57,8 @@ findErased : {auto c : Ref Ctxt Defs} ->
              ClosedTerm -> Core (List Nat, List Nat)
 findErased tm
     = do defs <- get Ctxt
-         tmnf <- nf defs ScopeEmpty tm
-         findErasedFrom defs 0 tmnf
+         tmnf <- nf [<] tm
+         findErasedFrom defs 0 !(expand tmnf)
 
 export
 updateErasable : {auto c : Ref Ctxt Defs} ->
@@ -123,10 +124,18 @@ bindReq fc (env :< b) (Drop p) ns tm
 -- This machinery is to calculate whether any top level argument is used
 -- more than once in a case block, in which case inlining wouldn't be safe
 -- since it might duplicate work.
+-- TODO: Not sure the rest of this is needed any more. Will port if it turns
+-- out it is!
+{-
 
 data ArgUsed = Used1 -- been used
              | Used0 -- not used
              | LocalVar -- don't care if it's used
+
+Show ArgUsed where
+  show Used1 = "Used1"
+  show Used0 = "Used0"
+  show LocalVar = "LocalVar"
 
 data Usage : Scoped where
      Lin : Usage ScopeEmpty
@@ -136,6 +145,15 @@ public export
 ScopeEmpty : Usage ScopeEmpty
 ScopeEmpty = [<]
 
+public export
+covering
+{vars : _} -> Show (Usage vars) where
+    show x = "Usage [" ++ showAll x ++ "]{vars = " ++ show (toList vars) ++ "}"
+        where
+            showAll : {vars : _} -> Usage vars -> String
+            showAll Lin = ""
+            showAll (Lin :< x) = show x
+            showAll (xx :< x) = showAll xx ++ ", " ++ show x
 
 tail : Usage (xs :< x) -> Usage xs
 tail (us :< _) = us
@@ -256,8 +274,8 @@ mutual
   caseAltInlineSafe : {vars : _} ->
                       {auto u : Ref Used (Usage vars)} ->
                       CaseAlt vars -> Core Bool
-  caseAltInlineSafe (ConCase x tag args sc)
-      = inExtended Used0 args (\u' => caseInlineSafe sc)
+  caseAltInlineSafe (ConCase x tag sc)
+      = ?caseAltInlineSafe_ConCase
   caseAltInlineSafe (DelayCase ty arg sc)
       = inExtended Used0 [ty, arg] (\u' => caseInlineSafe sc)
   caseAltInlineSafe (ConstCase x sc) = caseInlineSafe sc
@@ -293,4 +311,8 @@ canInlineCaseBlock n
          Just (PMDef _ vars _ rtree _) <- lookupDefExact n (gamma defs)
              | _ => pure False
          u <- newRef Used (initUsedCase vars)
-         caseInlineSafe rtree
+         log "compiler.inline.eval" 5 "canInlineCaseBlock init n: \{show n}, u: \{show (initUsedCase vars)}"
+         result <- caseInlineSafe rtree
+         u' <- get Used
+         log "compiler.inline.eval" 5 "canInlineCaseBlock updated n: \{show n}, result: \{show result}, u': \{show u'}"
+         pure result

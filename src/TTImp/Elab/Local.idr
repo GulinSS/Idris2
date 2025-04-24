@@ -4,10 +4,11 @@ import Core.Context
 import Core.Context.Log
 import Core.Core
 import Core.Env
+import Core.Evaluate
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
+import Core.Evaluate.Value
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -55,9 +56,10 @@ localHelper {vars} nest env nestdecls_in func
               else nestdeclsVis
 
          let defNames = definedInBlock emptyNS nestdeclsMult
-         names' <- traverse (applyEnv f) defNames
-         let nest' = { names $= (names' ++) } nest
          let env' = dropLinear env
+
+         names' <- traverse (applyEnv env' f) defNames
+         let nest' = { names $= (names' ++) } nest
          -- We don't want to keep rechecking delayed elaborators in the
          -- locals  block, because they're not going to make progress until
          -- we come out again, so save them
@@ -89,9 +91,9 @@ localHelper {vars} nest env nestdecls_in func
              then dropLinear bs :< setMultiplicity b erased
              else dropLinear bs :< b
 
-    applyEnv : Int -> Name ->
+    applyEnv : Env Term vars -> Int -> Name ->
                Core (Name, (Maybe Name, List (Var vars), FC -> NameType -> Term vars))
-    applyEnv outer inner
+    applyEnv env outer inner
           = do ust <- get UST
                put UST ({ nextName $= (+1) } ust)
                let nestedName_in = Nested (outer, nextName ust) inner

@@ -4,6 +4,7 @@ import Compiler.LambdaLift
 
 import Core.CompileExpr
 import Core.Context
+import Core.Context.Log
 import Core.Core
 import Core.TT
 
@@ -251,12 +252,22 @@ mutual
   anf vs (LErased fc) = pure $ AErased fc
   anf vs (LCrash fc err) = pure $ ACrash fc err
 
+  anfConScope : {vars : _} ->
+                {auto v : Ref Next Int} ->
+                AVars vars -> LiftedCaseScope vars ->
+                Core (List Int, ANF)
+  anfConScope vs (LRHS sc) = pure ([], !(anf vs sc))
+  anfConScope vs (LArg x sc)
+      = do i <- nextVar
+           (args, sc') <- anfConScope (vs :< i) sc
+           pure (i :: args, sc')
+
   anfConAlt : {vars : _} ->
               {auto v : Ref Next Int} ->
               AVars vars -> LiftedConAlt vars -> Core AConAlt
-  anfConAlt vs (MkLConAlt n ci t args sc)
-      = do (is, vs') <- bindAsFresh args vs
-           pure $ MkAConAlt n ci t is !(anf vs' sc)
+  anfConAlt vs (MkLConAlt n ci t sc)
+      = do (args, sc') <- anfConScope vs sc
+           pure $ MkAConAlt n ci t args sc'
 
   anfConstAlt : {vars : _} ->
                 {auto v : Ref Next Int} ->
@@ -265,15 +276,17 @@ mutual
       = pure $ MkAConstAlt c !(anf vs sc)
 
 export
-toANF : LiftedDef -> Core ANFDef
+toANF : {auto c : Ref Ctxt Defs} -> LiftedDef -> Core ANFDef
 toANF (MkLFun args scope sc)
     = do v <- newRef Next (the Int 0)
+         log "compile.execute" 40 $ "toANF args: \{show $ toList args}, scope: \{show $ asList scope}, lifted: \{show sc}"
          (iargs, vsNil) <- bindAsFresh (cast args) [<]
          let vs : AVars args
            := rewrite sym $ appendLinLeftNeutral args in
               rewrite snocAppendAsFish [<] args in vsNil
          (iargs', vs) <- bindAsFresh (cast scope) vs
          sc' <- anf (rewrite snocAppendAsFish args scope in vs) sc
+         log "compile.execute" 40 $ "toANF iargs: \{show iargs}, iargs': \{show iargs'}, lifted: \{show sc'}"
          pure $ MkAFun (iargs ++ iargs') sc'
 toANF (MkLCon t a ns) = pure $ MkACon t a ns
 toANF (MkLForeign ccs fargs t) = pure $ MkAForeign ccs fargs t

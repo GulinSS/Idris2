@@ -1,7 +1,6 @@
 module Core.TTC
 
 import Core.Binary.Prims
-import Core.Case.CaseTree
 import Core.CompileExpr
 import Core.Context
 import Core.Core
@@ -278,307 +277,16 @@ getName Z (xs :< x) = Just x
 getName (S k) (xs :< x) = getName k xs
 getName _ [<] = Nothing
 
-mutual
-  export
-  {vars : _} -> TTC (Binder (Term vars)) where
-    toBuf b (Lam _ c x ty) = do tag 0; toBuf b c; toBuf b x; toBuf b ty
-    toBuf b (Let _ c val ty) = do tag 1; toBuf b c; toBuf b val -- ; toBuf b ty
-    toBuf b (Pi _ c x ty) = do tag 2; toBuf b c; toBuf b x; toBuf b ty
-    toBuf b (PVar _ c p ty) = do tag 3; toBuf b c; toBuf b p; toBuf b ty
-    toBuf b (PLet _ c val ty) = do tag 4; toBuf b c; toBuf b val -- ; toBuf b ty
-    toBuf b (PVTy _ c ty) = do tag 5; toBuf b c -- ; toBuf b ty
-
-    fromBuf b
-        = case !getTag of
-               0 => do c <- fromBuf b; x <- fromBuf b; ty <- fromBuf b; pure (Lam emptyFC c x ty)
-               1 => do c <- fromBuf b; x <- fromBuf b; pure (Let emptyFC c x (Erased emptyFC Placeholder))
-               2 => do c <- fromBuf b; x <- fromBuf b; y <- fromBuf b; pure (Pi emptyFC c x y)
-               3 => do c <- fromBuf b; p <- fromBuf b; ty <- fromBuf b; pure (PVar emptyFC c p ty)
-               4 => do c <- fromBuf b; x <- fromBuf b; pure (PLet emptyFC c x (Erased emptyFC Placeholder))
-               5 => do c <- fromBuf b; pure (PVTy emptyFC c (Erased emptyFC Placeholder))
-               _ => corrupt "Binder"
-
-  export
-  TTC UseSide where
-    toBuf b UseLeft = tag 0
-    toBuf b UseRight = tag 1
-
-    fromBuf b
-        = case !getTag of
-               0 => pure UseLeft
-               1 => pure UseRight
-               _ => corrupt "UseSide"
-
-
-  export
-  {vars : _} -> TTC (Term vars) where
-    toBuf b (Local {name} fc c idx y)
-        = if idx < 243
-             then do tag (13 + cast idx)
-                     toBuf b c
-             else do tag 0
-                     toBuf b c
-                     toBuf b idx
-    toBuf b (Ref fc nt name)
-        = do tag 1;
-             toBuf b nt; toBuf b name
-    toBuf b (Meta fc n i xs)
-        = do tag 2;
-             toBuf b n; toBuf b xs
-    toBuf b (Bind fc x bnd scope)
-        = do tag 3;
-             toBuf b x;
-             toBuf b bnd; toBuf b scope
-    toBuf b (App fc fn c arg)
-        = do let (fn, args) = getFnArgsWithCounts (App fc fn c arg)
-             case args of
-                  [(c, arg)] => do tag 4
-                                   toBuf b fn
-                                   toBuf b c
-                                   toBuf b arg
-                  args => do tag 12
-                             toBuf b fn
-                             toBuf b args
-    toBuf b (As fc s as tm)
-        = do tag 5;
-             toBuf b as; toBuf b s; toBuf b tm
-    toBuf b (TDelayed fc r tm)
-        = do tag 6;
-             toBuf b r; toBuf b tm
-    toBuf b (TDelay fc r ty tm)
-        = do tag 7;
-             toBuf b r; toBuf b ty; toBuf b tm
-    toBuf b (TForce fc r tm)
-        = do tag 8;
-             toBuf b r; toBuf b tm
-    toBuf b (PrimVal fc c)
-        = do tag 9;
-             toBuf b c
-    toBuf b (Erased fc _)
-        = tag 10
-    toBuf b (TType fc u)
-        = do tag 11; toBuf b u
-
-    fromBuf {vars} b
-        = case !getTag of
-               0 => do c <- fromBuf b
-                       idx <- fromBuf b
-                       name <- maybe (corrupt "Term") pure
-                                     (getName idx vars)
-                       pure (Local {name} emptyFC c idx (mkPrf idx))
-               1 => do nt <- fromBuf b; name <- fromBuf b
-                       pure (Ref emptyFC nt name)
-               2 => do n <- fromBuf b
-                       xs <- fromBuf b
-                       pure (Meta emptyFC n 0 xs) -- needs resolving
-               3 => do x <- fromBuf b
-                       bnd <- fromBuf b; scope <- fromBuf b
-                       pure (Bind emptyFC x bnd scope)
-               4 => do fn <- fromBuf b
-                       c <- fromBuf b
-                       arg <- fromBuf b
-                       pure (App emptyFC fn c arg)
-               5 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
-                       pure (As emptyFC s as tm)
-               6 => do lr <- fromBuf b; tm <- fromBuf b
-                       pure (TDelayed emptyFC lr tm)
-               7 => do lr <- fromBuf b;
-                       ty <- fromBuf b; tm <- fromBuf b
-                       pure (TDelay emptyFC lr ty tm)
-               8 => do lr <- fromBuf b; tm <- fromBuf b
-                       pure (TForce emptyFC lr tm)
-               9 => do c <- fromBuf b
-                       pure (PrimVal emptyFC c)
-               10 => pure (Erased emptyFC Placeholder)
-               11 => do u <- fromBuf b; pure (TType emptyFC u)
-               12 => do fn <- fromBuf b
-                        args <- fromBuf b
-                        pure (apply emptyFC fn args)
-               idxp => do c <- fromBuf b
-                          let idx : Nat = fromInteger (cast (idxp - 13))
-                          let Just name = getName idx vars
-                              | Nothing => corrupt "Term"
-                          pure (Local {name} emptyFC c idx (mkPrf idx))
-
 export
-TTC Pat where
-  toBuf b (PAs fc x y)
-      = do tag 0; toBuf b fc; toBuf b x; toBuf b y
-  toBuf b (PCon fc x t arity xs)
-      = do tag 1; toBuf b fc; toBuf b x; toBuf b t; toBuf b arity; toBuf b xs
-  toBuf b (PTyCon fc x arity xs)
-      = do tag 2; toBuf b fc; toBuf b x; toBuf b arity; toBuf b xs
-  toBuf b (PConst fc c)
-      = do tag 3; toBuf b fc; toBuf b c
-  toBuf b (PArrow fc x s t)
-      = do tag 4; toBuf b fc; toBuf b x; toBuf b s; toBuf b t
-  toBuf b (PDelay fc x t y)
-      = do tag 5; toBuf b fc; toBuf b x; toBuf b t; toBuf b y
-  toBuf b (PLoc fc x)
-      = do tag 6; toBuf b fc; toBuf b x
-  toBuf b (PUnmatchable fc x)
-      = do tag 7; toBuf b fc; toBuf b x
+TTC CaseType where
+  toBuf b PatMatch = tag 0
+  toBuf b (CaseBlock n) = do tag 1; toBuf b n
 
   fromBuf b
       = case !getTag of
-             0 => do fc <- fromBuf b; x <- fromBuf b;
-                     y <- fromBuf b
-                     pure (PAs fc x y)
-             1 => do fc <- fromBuf b; x <- fromBuf b
-                     t <- fromBuf b; arity <- fromBuf b
-                     xs <- fromBuf b
-                     pure (PCon fc x t arity xs)
-             2 => do fc <- fromBuf b; x <- fromBuf b
-                     arity <- fromBuf b
-                     xs <- fromBuf b
-                     pure (PTyCon fc x arity xs)
-             3 => do fc <- fromBuf b; c <- fromBuf b
-                     pure (PConst fc c)
-             4 => do fc <- fromBuf b; x <- fromBuf b
-                     s <- fromBuf b; t <- fromBuf b
-                     pure (PArrow fc x s t)
-             5 => do fc <- fromBuf b; x <- fromBuf b;
-                     t <- fromBuf b; y <- fromBuf b
-                     pure (PDelay fc x t y)
-             6 => do fc <- fromBuf b; x <- fromBuf b
-                     pure (PLoc fc x)
-             7 => do fc <- fromBuf b; x <- fromBuf b
-                     pure (PUnmatchable fc x)
-             _ => corrupt "Pat"
-
-mutual
-  export
-  {vars : _} -> TTC (CaseTree vars) where
-    toBuf b (Case {name} idx x scTy xs)
-        = do tag 0; toBuf b name; toBuf b idx; toBuf b xs
-    toBuf b (STerm _ x)
-        = do tag 1; toBuf b x
-    toBuf b (Unmatched msg)
-        = do tag 2; toBuf b msg
-    toBuf b Impossible = tag 3
-
-    fromBuf b
-        = case !getTag of
-               0 => do name <- fromBuf b; idx <- fromBuf b
-                       xs <- fromBuf b
-                       pure (Case {name} idx (mkPrf idx) (Erased emptyFC Placeholder) xs)
-               1 => do x <- fromBuf b
-                       pure (STerm 0 x)
-               2 => do msg <- fromBuf b
-                       pure (Unmatched msg)
-               3 => pure Impossible
-               _ => corrupt "CaseTree"
-
-  export
-  {vars : _} -> TTC (CaseAlt vars) where
-    toBuf b (ConCase x t args y)
-        = do tag 0; toBuf b x; toBuf b t; toBuf b args; toBuf b y
-    toBuf b (DelayCase ty arg y)
-        = do tag 1; toBuf b ty; toBuf b arg; toBuf b y
-    toBuf b (ConstCase x y)
-        = do tag 2; toBuf b x; toBuf b y
-    toBuf b (DefaultCase x)
-        = do tag 3; toBuf b x
-
-    fromBuf b
-        = case !getTag of
-               0 => do x <- fromBuf b; t <- fromBuf b
-                       args <- fromBuf b; y <- fromBuf b
-                       pure (ConCase x t args y)
-               1 => do ty <- fromBuf b; arg <- fromBuf b; y <- fromBuf b
-                       pure (DelayCase ty arg y)
-               2 => do x <- fromBuf b; y <- fromBuf b
-                       pure (ConstCase x y)
-               3 => do x <- fromBuf b
-                       pure (DefaultCase x)
-               _ => corrupt "CaseAlt"
-
-export
-{vars : _} -> TTC (Env Term vars) where
-  toBuf b [<] = pure ()
-  toBuf b (env :< bnd)
-      = do toBuf b bnd; toBuf b env
-
-  -- Length has to correspond to length of 'vars'
-  fromBuf {vars = [<]} b = pure ScopeEmpty
-  fromBuf {vars = xs :< x} b
-      = do bnd <- fromBuf b
-           env <- fromBuf b
-           pure (env :< bnd)
-
-export
-TTC Visibility where
-  toBuf b Private = tag 0
-  toBuf b Export = tag 1
-  toBuf b Public = tag 2
-
-  fromBuf b
-      = case !getTag of
-             0 => pure Private
-             1 => pure Export
-             2 => pure Public
-             _ => corrupt "Visibility"
-
-export
-TTC PartialReason where
-  toBuf b NotStrictlyPositive = tag 0
-  toBuf b (BadCall xs) = do tag 1; toBuf b xs
-  toBuf b (BadPath xs n) = do tag 2; toBuf b xs; toBuf b n
-  toBuf b (RecPath xs) = do tag 3; toBuf b xs
-
-  fromBuf b
-      = case !getTag of
-             0 => pure NotStrictlyPositive
-             1 => do xs <- fromBuf b
-                     pure (BadCall xs)
-             2 => do xs <- fromBuf b
-                     n <- fromBuf b
-                     pure (BadPath xs n)
-             3 => do xs <- fromBuf b
-                     pure (RecPath xs)
-             _ => corrupt "PartialReason"
-
-export
-TTC Terminating where
-  toBuf b Unchecked = tag 0
-  toBuf b IsTerminating = tag 1
-  toBuf b (NotTerminating p) = do tag 2; toBuf b p
-
-  fromBuf b
-      = case !getTag of
-             0 => pure Unchecked
-             1 => pure IsTerminating
-             2 => do p <- fromBuf b
-                     pure (NotTerminating p)
-             _ => corrupt "Terminating"
-
-export
-TTC Covering where
-  toBuf b IsCovering = tag 0
-  toBuf b (MissingCases ms)
-      = do tag 1
-           toBuf b ms
-  toBuf b (NonCoveringCall ns)
-      = do tag 2
-           toBuf b ns
-
-  fromBuf b
-      = case !getTag of
-             0 => pure IsCovering
-             1 => do ms <- fromBuf b
-                     pure (MissingCases ms)
-             2 => do ns <- fromBuf b
-                     pure (NonCoveringCall ns)
-             _ => corrupt "Covering"
-
-export
-TTC Totality where
-  toBuf b (MkTotality term cov) = do toBuf b term; toBuf b cov
-
-  fromBuf b
-      = do term <- fromBuf b
-           cov <- fromBuf b
-           pure (MkTotality term cov)
+              0 => pure PatMatch
+              1 => do n <- fromBuf b; pure (CaseBlock n)
+              _ => corrupt "CaseType"
 
 export
 {n : _} -> TTC (PrimFn n) where
@@ -686,6 +394,279 @@ export
                  100 => pure BelieveMe
                  _ => corrupt "PrimFn 3"
 
+mutual
+  export
+  {vars : _} -> TTC (Binder (Term vars)) where
+    toBuf b (Lam _ c x ty) = do tag 0; toBuf b c; toBuf b x; toBuf b ty
+    toBuf b (Let _ c val ty) = do tag 1; toBuf b c; toBuf b val -- ; toBuf b ty
+    toBuf b (Pi _ c x ty) = do tag 2; toBuf b c; toBuf b x; toBuf b ty
+    toBuf b (PVar _ c p ty) = do tag 3; toBuf b c; toBuf b p; toBuf b ty
+    toBuf b (PLet _ c val ty) = do tag 4; toBuf b c; toBuf b val -- ; toBuf b ty
+    toBuf b (PVTy _ c ty) = do tag 5; toBuf b c -- ; toBuf b ty
+
+    fromBuf b
+        = case !getTag of
+               0 => do c <- fromBuf b; x <- fromBuf b; ty <- fromBuf b; pure (Lam emptyFC c x ty)
+               1 => do c <- fromBuf b; x <- fromBuf b; pure (Let emptyFC c x (Erased emptyFC Placeholder))
+               2 => do c <- fromBuf b; x <- fromBuf b; y <- fromBuf b; pure (Pi emptyFC c x y)
+               3 => do c <- fromBuf b; p <- fromBuf b; ty <- fromBuf b; pure (PVar emptyFC c p ty)
+               4 => do c <- fromBuf b; x <- fromBuf b; pure (PLet emptyFC c x (Erased emptyFC Placeholder))
+               5 => do c <- fromBuf b; pure (PVTy emptyFC c (Erased emptyFC Placeholder))
+               _ => corrupt "Binder"
+
+  export
+  TTC UseSide where
+    toBuf b UseLeft = tag 0
+    toBuf b UseRight = tag 1
+
+    fromBuf b
+        = case !getTag of
+               0 => pure UseLeft
+               1 => pure UseRight
+               _ => corrupt "UseSide"
+
+
+  export
+  {vars : _} -> TTC (Term vars) where
+    toBuf b (Local {name} fc c idx y)
+        = if idx < free
+             then do tag (cast (used + idx))
+                     toBuf b c
+             else do tag 0
+                     toBuf b c
+                     toBuf b idx
+        where
+         used : Nat
+         used = 16 -- it should be a length of all encoding cases at `toBuf` / `fromBuf`
+
+         free : Nat
+         free = 256 `minus` used -- we use 1 byte to encode special cases
+    toBuf b (Ref fc nt name)
+        = do tag 1;
+             toBuf b nt; toBuf b name
+    toBuf b (Meta fc n i xs)
+        = do tag 2;
+             toBuf b n; toBuf b xs
+    toBuf b (Bind fc x bnd scope)
+        = do tag 3;
+             toBuf b x;
+             toBuf b bnd; toBuf b scope
+    toBuf b (App fc fn c arg)
+        = do let (fn, args) = getFnArgsWithCounts (App fc fn c arg)
+             case args of
+                  [(c, arg)] => do tag 4
+                                   toBuf b fn
+                                   toBuf b c
+                                   toBuf b arg
+                  args       => do tag 5
+                                   toBuf b fn
+                                   toBuf b args
+    toBuf b (As fc s as tm)
+        = do tag 6
+             toBuf b as; toBuf b s; toBuf b tm
+    toBuf b (Case fc t c sc scty alts)
+        = do tag 7
+             toBuf b t; toBuf b c; toBuf b sc; toBuf b scty
+             toBuf b alts
+    toBuf b (TDelayed fc r tm)
+        = do tag 8
+             toBuf b r; toBuf b tm
+    toBuf b (TDelay fc r ty tm)
+        = do tag 9
+             toBuf b r; toBuf b ty; toBuf b tm
+    toBuf b (TForce fc r tm)
+        = do tag 10
+             toBuf b r; toBuf b tm
+    toBuf b (PrimVal fc c)
+        = do tag 11
+             toBuf b c
+    toBuf b (PrimOp {arity} fc fn args)
+        = do tag 12
+             toBuf b arity
+             toBuf b fn
+             toBuf b args
+    toBuf b (Erased fc _)
+        = tag 13
+    toBuf b (Unmatched fc u)
+        = do tag 14; toBuf b u
+    toBuf b (TType fc u)
+        = do tag 15; toBuf b u
+
+    fromBuf {vars} b
+        = case !getTag of
+               0 => do c <- fromBuf b
+                       idx <- fromBuf b
+                       name <- maybe (corrupt "Term") pure
+                                     (getName idx vars)
+                       pure (Local {name} emptyFC c idx (mkPrf idx))
+               1 => do nt <- fromBuf b; name <- fromBuf b
+                       pure (Ref emptyFC nt name)
+               2 => do n <- fromBuf b
+                       xs <- fromBuf b
+                       pure (Meta emptyFC n 0 xs) -- needs resolving
+               3 => do x <- fromBuf b
+                       bnd <- fromBuf b; scope <- fromBuf b
+                       pure (Bind emptyFC x bnd scope)
+               4 => do fn <- fromBuf b
+                       c <- fromBuf b
+                       arg <- fromBuf b
+                       pure (App emptyFC fn c arg)
+               5 => do fn <- fromBuf b
+                       args <- fromBuf b
+                       pure (apply emptyFC fn args)
+               6 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
+                       pure (As emptyFC s as tm)
+               7 => do t <- fromBuf b; c <- fromBuf b; sc <- fromBuf b; scty <- fromBuf b
+                       alts <- fromBuf b
+                       pure (Case emptyFC t c sc scty alts)
+               8 => do lr <- fromBuf b; tm <- fromBuf b
+                       pure (TDelayed emptyFC lr tm)
+               9 => do lr <- fromBuf b;
+                       ty <- fromBuf b; tm <- fromBuf b
+                       pure (TDelay emptyFC lr ty tm)
+               10 => do lr <- fromBuf b; tm <- fromBuf b
+                        pure (TForce emptyFC lr tm)
+               11 => do c <- fromBuf b
+                        pure (PrimVal emptyFC c)
+               12 => do arity <- fromBuf b
+                        op <- fromBuf b
+                        args <- fromBuf b
+                        pure (PrimOp {arity} emptyFC op args)
+               13 => pure (Erased emptyFC Placeholder)
+               14 => do str <- fromBuf b
+                        pure (Unmatched emptyFC str)
+               15 => do u <- fromBuf b
+                        pure (TType emptyFC u)
+               idxp => do c <- fromBuf b
+                          let idx : Nat = fromInteger (cast (idxp - 16))
+                          let Just name = getName idx vars
+                              | Nothing => corrupt "Term"
+                          pure (Local {name} emptyFC c idx (mkPrf idx))
+
+  export
+  {vars : _} -> TTC (CaseScope vars) where
+    toBuf b (RHS _ tm) = do tag 0; toBuf b tm
+    toBuf b (Arg c x sc) = do tag 1; toBuf b c; toBuf b x; toBuf b sc
+
+    fromBuf b
+        = case !getTag of
+               0 => do tm <- fromBuf b
+                       pure (RHS [] tm)
+               1 => do c <- fromBuf b; x <- fromBuf b; sc <- fromBuf b
+                       pure (Arg c x sc)
+               _ => corrupt "CaseScope"
+
+  export
+  {vars : _} -> TTC (CaseAlt vars) where
+    toBuf b (ConCase _ x t y)
+        = do tag 0; toBuf b x; toBuf b t; toBuf b y
+    toBuf b (DelayCase _ ty arg y)
+        = do tag 1; toBuf b ty; toBuf b arg; toBuf b y
+    toBuf b (ConstCase _ x y)
+        = do tag 2; toBuf b x; toBuf b y
+    toBuf b (DefaultCase _ x)
+        = do tag 3; toBuf b x
+
+    fromBuf b
+        = case !getTag of
+               0 => do x <- fromBuf b; t <- fromBuf b
+                       y <- fromBuf b
+                       pure (ConCase emptyFC x t y)
+               1 => do ty <- fromBuf b; arg <- fromBuf b; y <- fromBuf b
+                       pure (DelayCase emptyFC ty arg y)
+               2 => do x <- fromBuf b; y <- fromBuf b
+                       pure (ConstCase emptyFC x y)
+               3 => do x <- fromBuf b
+                       pure (DefaultCase emptyFC x)
+               _ => corrupt "CaseAlt"
+
+export
+{vars : _} -> TTC (Env Term vars) where
+  toBuf b [<] = pure ()
+  toBuf b (env :< bnd)
+      = do toBuf b bnd; toBuf b env
+
+  -- Length has to correspond to length of 'vars'
+  fromBuf {vars = [<]} b = pure ScopeEmpty
+  fromBuf {vars = xs :< x} b
+      = do bnd <- fromBuf b
+           env <- fromBuf b
+           pure (env :< bnd)
+
+export
+TTC Visibility where
+  toBuf b Private = tag 0
+  toBuf b Export = tag 1
+  toBuf b Public = tag 2
+
+  fromBuf b
+      = case !getTag of
+             0 => pure Private
+             1 => pure Export
+             2 => pure Public
+             _ => corrupt "Visibility"
+
+export
+TTC PartialReason where
+  toBuf b NotStrictlyPositive = tag 0
+  toBuf b (BadCall xs) = do tag 1; toBuf b xs
+  toBuf b (BadPath xs n) = do tag 2; toBuf b xs; toBuf b n
+  toBuf b (RecPath xs) = do tag 3; toBuf b xs
+
+  fromBuf b
+      = case !getTag of
+             0 => pure NotStrictlyPositive
+             1 => do xs <- fromBuf b
+                     pure (BadCall xs)
+             2 => do xs <- fromBuf b
+                     n <- fromBuf b
+                     pure (BadPath xs n)
+             3 => do xs <- fromBuf b
+                     pure (RecPath xs)
+             _ => corrupt "PartialReason"
+
+export
+TTC Terminating where
+  toBuf b Unchecked = tag 0
+  toBuf b IsTerminating = tag 1
+  toBuf b (NotTerminating p) = do tag 2; toBuf b p
+
+  fromBuf b
+      = case !getTag of
+             0 => pure Unchecked
+             1 => pure IsTerminating
+             2 => do p <- fromBuf b
+                     pure (NotTerminating p)
+             _ => corrupt "Terminating"
+
+export
+TTC Covering where
+  toBuf b IsCovering = tag 0
+  toBuf b (MissingCases ms)
+      = do tag 1
+           toBuf b ms
+  toBuf b (NonCoveringCall ns)
+      = do tag 2
+           toBuf b ns
+
+  fromBuf b
+      = case !getTag of
+             0 => pure IsCovering
+             1 => do ms <- fromBuf b
+                     pure (MissingCases ms)
+             2 => do ns <- fromBuf b
+                     pure (NonCoveringCall ns)
+             _ => corrupt "Covering"
+
+export
+TTC Totality where
+  toBuf b (MkTotality term cov) = do toBuf b term; toBuf b cov
+
+  fromBuf b
+      = do term <- fromBuf b
+           cov <- fromBuf b
+           pure (MkTotality term cov)
+
 export
 TTC ConInfo where
   toBuf b DATACON = tag 0
@@ -787,13 +768,25 @@ mutual
                _ => corrupt "CExp"
 
   export
-  {vars : _} -> TTC (CConAlt vars) where
-    toBuf b (MkConAlt n ci t as sc) = do toBuf b n; toBuf b ci; toBuf b t; toBuf b as; toBuf b sc
+  {vars : _} -> TTC (CCaseScope vars) where
+    toBuf b (CRHS sc) = do tag 0; toBuf b sc
+    toBuf b (CArg x sc) = do tag 1; toBuf b x; toBuf b sc
 
     fromBuf b
-        = do n <- fromBuf b; ci <- fromBuf b; t <- fromBuf b
-             as <- fromBuf b; sc <- fromBuf b
-             pure (MkConAlt n ci t as sc)
+        = case !getTag of
+               0 => do sc <- fromBuf b
+                       pure (CRHS sc)
+               1 => do x <- fromBuf b; sc <- fromBuf b
+                       pure (CArg x sc)
+               _ => corrupt "CCaseScope"
+
+  export
+  {vars : _} -> TTC (CConAlt vars) where
+    toBuf b (MkConAlt n ci t sc) = do toBuf b n; toBuf b ci; toBuf b t; toBuf b sc
+
+    fromBuf b
+        = do n <- fromBuf b; ci <- fromBuf b; t <- fromBuf b; sc <- fromBuf b
+             pure (MkConAlt n ci t sc)
 
   export
   {vars : _} -> TTC (CConstAlt vars) where
@@ -977,16 +970,31 @@ TTC TypeFlags where
            pure (MkTypeFlags u e)
 
 export
+TTC DataConInfo where
+  toBuf b l
+      = do toBuf b (quantities l)
+           toBuf b (newTypeArg l)
+  fromBuf b
+      = do q <- fromBuf b; n <- fromBuf b
+           pure (MkDataConInfo q n)
+
+export
+TTC Clause where
+  toBuf b (MkClause {vars} env lhs rhs)
+      = do toBuf b vars; toBuf b env; toBuf b lhs; toBuf b rhs
+  fromBuf b
+      = do vars <- fromBuf b; env <- fromBuf b; lhs <- fromBuf b; rhs <- fromBuf b
+           pure (MkClause {vars} env lhs rhs)
+
+export
 TTC Def where
   toBuf b None = tag 0
-  toBuf b (PMDef pi args ct rt pats)
-      = do tag 1; toBuf b pi; toBuf b args; toBuf b ct; toBuf b pats
+  toBuf b (Function pi ct rt pats)
+      = do tag 1; toBuf b pi; toBuf b ct; toBuf b pats
   toBuf b (ExternDef a)
       = do tag 2; toBuf b a
   toBuf b (ForeignDef a cs)
       = do tag 3; toBuf b a; toBuf b cs
-  toBuf b (Builtin a)
-      = throw (InternalError "Trying to serialise a Builtin")
   toBuf b (DCon t arity nt) = do tag 4; toBuf b t; toBuf b arity; toBuf b nt
   toBuf b (TCon arity parampos detpos u ms datacons dets)
       = do tag 5; toBuf b arity; toBuf b parampos
@@ -1006,10 +1014,9 @@ TTC Def where
       = case !getTag of
              0 => pure None
              1 => do pi <- fromBuf b
-                     args <- fromBuf b
                      ct <- fromBuf b
                      pats <- fromBuf b
-                     pure (PMDef pi args ct (Unmatched "") pats)
+                     pure (Function pi ct (Unmatched emptyFC "") pats)
              2 => do a <- fromBuf b
                      pure (ExternDef a)
              3 => do a <- fromBuf b
@@ -1052,18 +1059,19 @@ TTC TotalReq where
 
 TTC DefFlag where
   toBuf b Inline = tag 2
-  toBuf b NoInline = tag 13
+  toBuf b NoInline = tag 14
   toBuf b Deprecate = tag 15
   toBuf b Invertible = tag 3
   toBuf b Overloadable = tag 4
   toBuf b TCInline = tag 5
   toBuf b (SetTotal x) = do tag 6; toBuf b x
   toBuf b BlockedHint = tag 7
-  toBuf b Macro = tag 8
-  toBuf b (PartialEval x) = tag 9 -- names not useful any more
-  toBuf b AllGuarded = tag 10
-  toBuf b (ConType ci) = do tag 11; toBuf b ci
-  toBuf b (Identity x) = do tag 12; toBuf b x
+  toBuf b BlockReduce = tag 8
+  toBuf b Macro = tag 9
+  toBuf b (PartialEval x) = tag 10 -- names not useful any more
+  toBuf b AllGuarded = tag 11
+  toBuf b (ConType ci) = do tag 12; toBuf b ci
+  toBuf b (Identity x) = do tag 13; toBuf b x
 
   fromBuf b
       = case !getTag of
@@ -1073,12 +1081,13 @@ TTC DefFlag where
              5 => pure TCInline
              6 => do x <- fromBuf b; pure (SetTotal x)
              7 => pure BlockedHint
-             8 => pure Macro
-             9 => pure (PartialEval [])
-             10 => pure AllGuarded
-             11 => do ci <- fromBuf b; pure (ConType ci)
-             12 => do x <- fromBuf b; pure (Identity x)
-             13 => pure NoInline
+             8 => pure BlockReduce
+             9 => pure Macro
+             10 => pure (PartialEval [])
+             11 => pure AllGuarded
+             12 => do ci <- fromBuf b; pure (ConType ci)
+             13 => do x <- fromBuf b; pure (Identity x)
+             14 => pure NoInline
              15 => pure Deprecate
              _ => corrupt "DefFlag"
 

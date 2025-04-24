@@ -3,8 +3,8 @@ module TTImp.Interactive.MakeLemma
 import Core.Context
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.TT
+import Core.Evaluate
 
 import Idris.Syntax
 
@@ -49,7 +49,7 @@ getArgs : {vars : _} ->
           Core (List (Name, Maybe Name, PiInfo RawImp, RigCount, RawImp), RawImp)
 getArgs {vars} env (S k) (Bind _ x b@(Pi _ c _ ty) sc)
     = do defs <- get Ctxt
-         ty' <- map (map rawName) $ unelab env !(normalise defs env ty)
+         ty' <- map (map rawName) $ unelab env !(normalise env ty)
          let x' = UN $ Basic !(uniqueBasicName defs (toList $ map nameRoot vars) (nameRoot x))
          (sc', ty) <- getArgs (env :< b) k (compat {n = x'} sc)
          -- Don't need to use the name if it's not used in the scope type
@@ -64,7 +64,7 @@ getArgs {vars} env (S k) (Bind _ x b@(Pi _ c _ ty) sc)
          pure ((x, mn, p', c, ty') :: sc', ty)
 getArgs env k ty
       = do defs <- get Ctxt
-           ty' <- map (map rawName) $ unelab env !(normalise defs env ty)
+           ty' <- map (map rawName) $ unelab env !(normalise env ty)
            pure ([], ty')
 
 mkType : FC -> List (Name, Maybe Name, PiInfo RawImp, RigCount, RawImp) ->
@@ -92,5 +92,5 @@ makeLemma : {auto c : Ref Ctxt Defs} ->
             Core (RawImp, RawImp)
 makeLemma loc n nlocs ty
     = do defs <- get Ctxt
-         (args, ret) <- getArgs ScopeEmpty nlocs !(normalise defs ScopeEmpty ty)
+         (args, ret) <- getArgs ScopeEmpty nlocs !(normalise ScopeEmpty ty)
          pure (mkType loc args ret, mkApp loc n args)
