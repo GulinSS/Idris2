@@ -163,12 +163,16 @@ mutual
   dropEnv (CErased fc) = Just $ CErased fc
   dropEnv (CCrash fc x) = Just $ CCrash fc x
 
-  dropConAlt :  {pre : Scope}
+  dropCaseScope :  {pre : SnocList Name}
+             -> CCaseScope (ns ++ pre)
+             -> Maybe (CCaseScope pre)
+  dropCaseScope (CRHS tm) = CRHS <$> dropEnv tm
+  dropCaseScope (CArg x sc) = CArg x <$> dropCaseScope sc
+
+  dropConAlt :  {pre : SnocList Name}
              -> CConAlt (ns ++ pre)
              -> Maybe (CConAlt pre)
-  dropConAlt (MkConAlt x y tag args z)
-    = do z <- dropEnv {ns} (rewrite sym $ snocAppendFishAssociative ns pre args in z)
-         pure $ MkConAlt x y tag args z
+  dropConAlt (MkConAlt x y tag z) = MkConAlt x y tag <$> dropCaseScope z
 
   dropConstAlt :  {pre : Scope}
                -> CConstAlt (ns ++ pre)
@@ -287,12 +291,22 @@ mutual
   analyzeSubExp c@(CErased _)    = pure (1, c)
   analyzeSubExp c@(CCrash _ _)   = pure (1, c)
 
+  analyzeCaseScope :  { auto c : Ref Sts St }
+                -> CCaseScope ns
+                -> Core (Integer, CCaseScope ns)
+  analyzeCaseScope (CRHS tm)
+      = do (sz, tm') <- analyze tm
+           pure (sz, CRHS tm')
+  analyzeCaseScope (CArg x sc)
+      = do (sz, sc') <- analyzeCaseScope sc
+           pure (sz, CArg x sc')
+
   analyzeConAlt :  { auto c : Ref Sts St }
                 -> CConAlt ns
                 -> Core (Integer, CConAlt ns)
-  analyzeConAlt (MkConAlt n c t as z) = do
-    (sz, z') <- analyze z
-    pure (sz + 1, MkConAlt n c t as z')
+  analyzeConAlt (MkConAlt n c t z) = do
+    (sz, z') <- analyzeCaseScope z
+    pure (sz + 1, MkConAlt n c t z')
 
   analyzeConstAlt : Ref Sts St => CConstAlt ns -> Core (Integer, CConstAlt ns)
   analyzeConstAlt (MkConstAlt c y) = do
@@ -449,13 +463,20 @@ mutual
   replaceExp _ c@(CErased _)    = pure c
   replaceExp _ c@(CCrash _ _)   = pure c
 
+  replaceCaseScope :  Ref ReplaceMap ReplaceMap
+                => Ref Ctxt Defs
+                => (parentCount : Integer)
+                -> CCaseScope ns
+                -> Core (CCaseScope ns)
+  replaceCaseScope pc (CRHS tm) = CRHS <$> replaceExp pc tm
+  replaceCaseScope pc (CArg x sc) = CArg x <$> replaceCaseScope pc sc
+
   replaceConAlt :  Ref ReplaceMap ReplaceMap
                 => Ref Ctxt Defs
                 => (parentCount : Integer)
                 -> CConAlt ns
                 -> Core (CConAlt ns)
-  replaceConAlt pc (MkConAlt n c t as z) =
-    MkConAlt n c t as <$> replaceExp pc z
+  replaceConAlt pc (MkConAlt n c t z) = MkConAlt n c t <$> replaceCaseScope pc z
 
   replaceConstAlt :  Ref ReplaceMap ReplaceMap
                   => Ref Ctxt Defs

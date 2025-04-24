@@ -74,6 +74,16 @@ delazy defs (App fc f c a) = App fc (delazy defs f) c (delazy defs a)
 delazy defs (As fc s a p) = As fc s (delazy defs a) (delazy defs p)
 delazy defs tm = tm
 
+-- Expand the size change argument list with 'Nothing' to match the given
+-- arity (i.e. the arity of the function we're calling) to ensure that
+-- it's noted that we don't know the size change relationship with the
+-- extra arguments.
+expandToArity : Nat -> List (Maybe (Nat, SizeChange)) ->
+                List (Maybe (Nat, SizeChange))
+expandToArity Z xs = xs
+expandToArity (S k) (x :: xs) = x :: expandToArity k xs
+expandToArity (S k) [] = Nothing :: expandToArity k []
+
 mutual
   findSC : {vars : _} ->
            {auto c : Ref Ctxt Defs} ->
@@ -172,7 +182,7 @@ mutual
   -- otherwise try to expand RHS meta
   sizeCompare fuel s@(Meta n _ i args) t = do
     Just gdef <- lookupCtxtExact (Resolved i) (gamma defs) | _ => pure Unknown
-    let (PMDef _ [<] (STerm _ tm) _ _) = definition gdef | _ => pure Unknown
+    let (Function _ tm _ _) = definition gdef | _ => pure Unknown
     tm <- substMeta (embed tm) (map snd args) zero ScopeEmpty
     sizeCompare fuel tm t
     where
@@ -265,90 +275,6 @@ mutual
     = let fuel = defs.options.elabDirectives.totalLimit
       in traverse (\p => plusLazy (sizeCompareAsserted fuel (asserted aSmaller arg) p) (sizeCompare fuel arg p)) pats
 
-  -- Given a name of a case function, and a list of the arguments being
-  -- passed to it, update the pattern list so that it's referring to the LHS
-  -- of the case block function and return the corresponding RHS.
-
-  -- This way, we can build case blocks directly into the size change graph
-  -- rather than treating the definitions separately.
-  getCasePats : {auto c : Ref Ctxt Defs} ->
-                {vars : _} ->
-                Defs -> Name -> List (Term vars) ->
-                List (Term vars) ->
-                Core (Maybe (List (vs ** (Env Term vs,
-                                         List (Term vs), Term vs))))
-
-  getCasePats {vars} defs n pats args
-      = do Just (PMDef _ _ _ _ pdefs) <- lookupDefExact n (gamma defs)
-             | _ => pure Nothing
-           log "totality" 20 $
-             unwords ["Looking at the", show (length pdefs), "cases of", show  n]
-           let pdefs' = map matchArgs pdefs
-           logC "totality" 20 $ do
-              old <- for pdefs $ \ (_ ** (_, lhs, rhs)) => do
-                       lhs <- toFullNames lhs
-                       rhs <- toFullNames rhs
-                       pure $ "    " ++ show lhs ++ " => " ++ show rhs
-              new <- for pdefs' $ \ (_ ** (_, lhs, rhs)) => do
-                       lhs <- traverse toFullNames lhs
-                       rhs <- toFullNames rhs
-                       pure $ "    " ++ show lhs ++ " => " ++ show rhs
-              pure $ unlines $ "Updated" :: old ++ "  to:" :: new
-           pure $ Just pdefs'
-
-    where
-      updateRHS : {vs, vs' : _} ->
-                  List (Term vs, Term vs') -> Term vs -> Term vs'
-      updateRHS {vs} {vs'} ms tm
-          = case lookupTm tm ms of
-                 Nothing => urhs tm
-                 Just t => t
-        where
-          urhs : Term vs -> Term vs'
-          urhs (Local fc _ _ _) = Erased fc Placeholder
-          urhs (Ref fc nt n) = Ref fc nt n
-          urhs (Meta fc m i margs) = Meta fc m i (map @{Compose} (updateRHS ms) margs)
-          urhs (App fc f r a) = App fc (updateRHS ms f) r (updateRHS ms a)
-          urhs (As fc s a p) = As fc s (updateRHS ms a) (updateRHS ms p)
-          urhs (TDelayed fc r ty) = TDelayed fc r (updateRHS ms ty)
-          urhs (TDelay fc r ty tm)
-              = TDelay fc r (updateRHS ms ty) (updateRHS ms tm)
-          urhs (TForce fc r tm) = TForce fc r (updateRHS ms tm)
-          urhs (Bind fc x b sc)
-              = Bind fc x (map (updateRHS ms) b)
-                  (updateRHS (map (\vt => (weaken (fst vt), weaken (snd vt))) ms) sc)
-          urhs (PrimVal fc c) = PrimVal fc c
-          urhs (Erased fc Impossible) = Erased fc Impossible
-          urhs (Erased fc Placeholder) = Erased fc Placeholder
-          urhs (Erased fc (Dotted t)) = Erased fc (Dotted (updateRHS ms t))
-          urhs (TType fc u) = TType fc u
-
-          lookupTm : Term vs -> List (Term vs, Term vs') -> Maybe (Term vs')
-          lookupTm tm [] = Nothing
-          lookupTm (As fc s p tm) tms -- Want to keep the pattern and the variable,
-                                      -- if there was an @ in the parent
-              = do tm' <- lookupTm tm tms
-                   Just $ As fc s tm' (urhs tm)
-          lookupTm tm ((As fc s p tm', v) :: tms)
-              = if tm == p
-                   then Just v
-                   else do tm' <- lookupTm tm ((tm', v) :: tms)
-                           Just $ As fc s (urhs p) tm'
-          lookupTm tm ((tm', v) :: tms)
-              = if tm == tm'
-                   then Just v
-                   else lookupTm tm tms
-
-      updatePat : {vs, vs' : _} ->
-                  List (Term vs, Term vs') -> Term vs -> Term vs'
-      updatePat ms tm = updateRHS ms tm
-
-      matchArgs : (vs ** (Env Term vs, Term vs, Term vs)) ->
-                  (vs ** (Env Term vs, List (Term vs), Term vs))
-      matchArgs (_ ** (env', lhs, rhs))
-         = let patMatch = reverse (zip args (getArgs lhs)) in
-               (_ ** (env', map (updatePat patMatch) pats, rhs))
-
   findSCcall : {vars : _} ->
                {auto c : Ref Ctxt Defs} ->
                Defs -> Env Term vars -> Guardedness ->
@@ -361,19 +287,19 @@ mutual
       = do fn <- getFullName fn_in
            logC "totality.termination.sizechange" 10 $ do pure $ "Looking under " ++ show !(toFullNames fn)
            aSmaller <- resolved (gamma defs) (NS builtinNS (UN $ Basic "assert_smaller"))
-           cond [(fn == NS builtinNS (UN $ Basic "assert_total"), pure [])
-                ,(caseFn fn,
-                    do scs1 <- traverse (findSC defs env g pats) args
-                       mps  <- getCasePats defs fn pats args
-                       scs2 <- traverse (findInCase defs g) $ fromMaybe [] mps
-                       pure (concat (scs1 ++ scs2)))
-              ]
-              (do scs <- traverse (findSC defs env g pats) args
+           logC "totality.termination.sizechange" 10 $
+               do under <- traverse toFullNames pats
+                  targs <- traverse toFullNames args
+                  pure ("Under " ++ show under ++ "\n" ++ "Args " ++ show targs)
+           if fn == NS builtinNS (UN $ Basic "assert_total")
+              then pure []
+              else
+               do scs <- traverse (findSC defs env g pats) args
                   pure ([MkSCCall fn
                            (fromListList
                                 !(traverse (mkChange defs aSmaller pats) args))
                            fc]
-                           ++ concat scs))
+                           ++ concat scs)
 
   findInCase : {auto c : Ref Ctxt Defs} ->
                Defs -> Guardedness ->
@@ -388,18 +314,19 @@ mutual
           findSC defs env g pats (delazy defs rhs)
 
 findCalls : {auto c : Ref Ctxt Defs} ->
-            Defs -> (vars ** (Env Term vars, Term vars, Term vars)) ->
+            Defs -> Clause ->
             Core (List SCCall)
-findCalls defs (_ ** (env, lhs, rhs_in))
+findCalls defs (MkClause env lhs rhs_in)
    = do let pargs = getArgs (delazy defs lhs)
         rhs <- normaliseOpts tcOnly defs env rhs_in
         findSC defs env Toplevel pargs (delazy defs rhs)
 
 getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
-getSC defs (PMDef _ args _ _ pats)
+getSC defs (Function _ _ _ (Just pats))
    = do sc <- traverse (findCalls defs) pats
         pure $ nub (concat sc)
+getSC defs (Function _ _ _ Nothing) = pure []
 getSC defs _ = pure []
 
 export

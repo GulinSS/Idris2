@@ -207,6 +207,7 @@ swapVars (PrimVal fc c) = PrimVal fc c
 swapVars (Erased fc Impossible) = Erased fc Impossible
 swapVars (Erased fc Placeholder) = Erased fc Placeholder
 swapVars (Erased fc (Dotted t)) = Erased fc $ Dotted (swapVars t)
+swapVars (Unmatched fc s) = Unmatched fc s
 swapVars (TType fc u) = TType fc u
 
 -- Push an explicit pi binder as far into a term as it'll go. That is,

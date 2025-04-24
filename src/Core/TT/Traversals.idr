@@ -31,6 +31,7 @@ onPRefs f = go neutral where
   go acc (PrimVal fc c) = acc
   go acc (Erased fc imp) = acc
   go acc (TType fc u) = acc
+  go acc (Unmatched fc _) = acc
 
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
@@ -60,6 +61,7 @@ onConstants f = go neutral where
   go acc (PrimVal fc c) = acc <+> f c
   go acc (Erased fc imp) = acc
   go acc (TType fc u) = acc
+  go acc (Unmatched fc _) = acc
 
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
@@ -91,6 +93,7 @@ mapTermM f t = act t where
   go t@(PrimVal fc c) = pure t
   go t@(Erased fc imp) = pure t
   go t@(TType fc u) = pure t
+  go t@(Unmatched fc _) = pure t
 
 export
 mapTerm : ({vars : _} -> Term vars -> Term vars) ->
@@ -114,3 +117,4 @@ mapTerm f t = act t where
   go t@(PrimVal fc c) = t
   go t@(Erased fc imp) = t
   go t@(TType fc u) = t
+  go t@(Unmatched fc u) = t

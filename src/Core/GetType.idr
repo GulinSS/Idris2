@@ -61,6 +61,7 @@ mutual
                 _ => throw (GenericMsg fc "Not a delayed type")
   chk env (PrimVal fc x) = pure $ gnf env (chkConstant fc x)
   chk env (TType fc u) = pure (gType fc (MN "top" 0))
+  chk env (Unmatched fc msg) = pure (gUnmatched fc msg)
   chk env (Erased fc _) = pure (gErased fc)
 
   chkMeta : {vars : _} ->

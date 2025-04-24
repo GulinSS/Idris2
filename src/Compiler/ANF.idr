@@ -251,12 +251,22 @@ mutual
   anf vs (LErased fc) = pure $ AErased fc
   anf vs (LCrash fc err) = pure $ ACrash fc err
 
+  anfConScope : {vars : _} ->
+                {auto v : Ref Next Int} ->
+                AVars vars -> LiftedCaseScope vars ->
+                Core (List Int, ANF)
+  anfConScope vs (LRHS sc) = pure ([], !(anf vs sc))
+  anfConScope vs (LArg x sc)
+      = do i <- nextVar
+           (args, sc') <- anfConScope (vs :< i) sc
+           pure (i :: args, sc')
+
   anfConAlt : {vars : _} ->
               {auto v : Ref Next Int} ->
               AVars vars -> LiftedConAlt vars -> Core AConAlt
-  anfConAlt vs (MkLConAlt n ci t args sc)
-      = do (is, vs') <- bindAsFresh args vs
-           pure $ MkAConAlt n ci t is !(anf vs' sc)
+  anfConAlt vs (MkLConAlt n ci t sc)
+      = do (args, sc') <- anfConScope vs sc
+           pure $ MkAConAlt n ci t args sc'
 
   anfConstAlt : {vars : _} ->
                 {auto v : Ref Next Int} ->

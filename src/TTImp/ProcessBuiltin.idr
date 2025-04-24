@@ -17,7 +17,7 @@ import TTImp.TTImp
 
 showDefType : Def -> String
 showDefType None = "undefined"
-showDefType (PMDef {}) = "function"
+showDefType (Function {}) = "function"
 showDefType (ExternDef {}) = "external function"
 showDefType (ForeignDef {}) = "foreign function"
 showDefType (Builtin {}) = "builtin function"
@@ -133,6 +133,7 @@ isStrict (TForce _ _ tm) = isStrict tm
 isStrict (PrimVal _ _) = True
 isStrict (Erased _ _) = True
 isStrict (TType _ _) = True
+isStrict (Unmatched _ _) = True
 
 ||| Get the name and definition of a list of names.
 getConsGDef :
@@ -198,7 +199,7 @@ checkNatCons c cons ty fc = case !(foldr checkCon (pure (Nothing, Nothing)) cons
     checkCon : (Name, GlobalDef) -> Core (Maybe Name, Maybe Name) -> Core (Maybe Name, Maybe Name)
     checkCon (n, gdef) cons = do
         (zero, succ) <- cons
-        let DCon _ arity _ = gdef.definition
+        let DCon _ _ arity = gdef.definition
             | def => throw $ GenericMsg fc $ "Expected data constructor, found:" ++ showDefType def
         case arity `minus` length gdef.eraseArgs of
             0 => case zero of
@@ -238,7 +239,7 @@ processNatToInteger fc fn = do
     log "builtin.NaturalToInteger" 5 $ "Processing %builtin NaturalToInteger " ++ show_fn ++ "."
     [(_ , i, gdef)] <- lookupCtxtName fn ds.gamma
         | ns => ambiguousName fc fn $ (\(n, _, _) => n) <$> ns
-    let PMDef _ args _ cases _ = gdef.definition
+    let Function _ _ cases _ = gdef.definition
         | def => throw $ GenericMsg fc
             $ "Expected function definition, found " ++ showDefType def ++ "."
     type <- toFullNames gdef.type
@@ -266,7 +267,7 @@ processIntegerToNat fc fn = do
     [(_, i, gdef)] <- lookupCtxtName fn ds.gamma
         | ns => ambiguousName fc fn $ (\(n, _, _) => n) <$> ns
     type <- toFullNames gdef.type
-    let PMDef _ _ _ _ _ = gdef.definition
+    let Function _ _ _ _ = gdef.definition
         | def => throw $ GenericMsg fc
             $ "Expected function definition, found " ++ showDefType def ++ "."
     logTerm "builtin.IntegerToNatural" 25 ("Type of " ++ show_fn) type

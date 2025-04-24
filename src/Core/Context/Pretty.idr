@@ -40,17 +40,14 @@ namespace Raw
   export
   prettyDef : Def -> Doc IdrisDocAnn
   prettyDef None = "undefined"
-  prettyDef (PMDef _ args ct _ pats) =
-       let ct = prettyTree ct in
-       vcat
-        [ "Arguments" <++> cast (prettyList $ toList args)
-        , header "Compile time tree" <++> reAnnotate Syntax ct
-        ]
-  prettyDef (DCon tag arity nt) =
+  prettyDef (Function _ ct _ pats) =
+       let ct = prettyTree ?ct in
+        header "Compile time tree" <++> reAnnotate Syntax ct
+  prettyDef (DCon nt tag arity) =
       vcat $ header "Data constructor" :: map (indent 2)
           ([ "tag:" <++> byShow tag
            , "arity:" <++> byShow arity
-           ] ++ maybe [] (\ n => ["newtype by:" <++> byShow n]) nt)
+           ] ++ maybe [] (\ n => ["newtype by:" <++> byShow n]) (newTypeArg nt))
   prettyDef (TCon arity ps ds u ms cons det) =
         let enum = hsep . punctuate "," in
         vcat $ header "Type constructor" :: map (indent 2)
@@ -91,17 +88,14 @@ namespace Resugared
               {auto s : Ref Syn SyntaxInfo} ->
               Def -> Core (Doc IdrisDocAnn)
   prettyDef None = pure "undefined"
-  prettyDef (PMDef _ args ct _ pats) = do
-      ct <- prettyTree (mkEnv emptyFC _) ct
-      pure $ vcat
-        [ "Arguments" <++> cast (prettyList $ toList args)
-        , header "Compile time tree" <++> reAnnotate Syntax ct
-        ]
-  prettyDef (DCon tag arity nt) = pure $
+  prettyDef (Function _ ct _ pats) =
+       let ct = prettyTree ?ct_2 in
+        pure $ header "Compile time tree" <++> reAnnotate Syntax ct
+  prettyDef (DCon nt tag arity) = pure $
       vcat $ header "Data constructor" :: map (indent 2)
           ([ "tag:" <++> byShow tag
            , "arity:" <++> byShow arity
-           ] ++ maybe [] (\ n => ["newtype by:" <++> byShow n]) nt)
+           ] ++ maybe [] (\ n => ["newtype by:" <++> byShow n]) (newTypeArg nt))
   prettyDef (TCon arity ps ds u ms cons det) = pure $
         let enum = hsep . punctuate "," in
         vcat $ header "Type constructor" :: map (indent 2)

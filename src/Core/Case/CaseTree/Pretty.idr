@@ -17,6 +17,7 @@ namespace Raw
   export
   prettyTree : {vars : _} -> CaseTree vars -> Doc IdrisSyntax
   prettyAlt : {vars : _} -> CaseAlt vars -> Doc IdrisSyntax
+  prettyScope : {vars : _} -> CaseScope vars -> Doc IdrisSyntax
 
   prettyTree (Case {name} idx prf ty alts)
       = let ann = case ty of
@@ -26,14 +27,14 @@ namespace Raw
          <+> nest 2 (hardline
          <+> vsep (assert_total (map prettyAlt alts)))
   prettyTree (STerm i tm) = byShow tm
-  prettyTree (Unmatched msg) = "Error:" <++> pretty0 msg
+  prettyTree (TUnmatched msg) = "Error:" <++> pretty0 msg
   prettyTree Impossible = "Impossible"
 
-  prettyAlt (ConCase n tag args sc)
-      = hsep (annotate (DCon (Just n)) (pretty0 n) ::  map pretty0 args)
-        <++> fatArrow
-        <+> let sc = prettyTree sc in
-            Union (spaces 1 <+> sc) (nest 2 (hardline <+> sc))
+  prettyScope (RHS tm) = fatArrow <++> byShow tm
+  prettyScope (Arg c x sc) = annotate Bound (pretty0 x) <++> prettyScope sc
+
+  prettyAlt (ConCase n tag sc)
+      = annotate (DCon (Just n)) (pretty0 n) <++> prettyScope sc
   prettyAlt (DelayCase _ arg sc) =
         keyword "Delay" <++> pretty0 arg
         <++> fatArrow
@@ -68,6 +69,10 @@ namespace Resugared
     {auto c : Ref Ctxt Defs} ->
     {auto s : Ref Syn SyntaxInfo} ->
     Env Term vars -> CaseAlt vars -> Core (Doc IdrisSyntax)
+  prettyScope : {vars : _} ->
+    {auto c : Ref Ctxt Defs} ->
+    {auto s : Ref Syn SyntaxInfo} ->
+    Env Term vars -> CaseScope vars -> Core (Doc IdrisSyntax)
 
   prettyTree env (Case {name} idx prf ty alts) = do
     ann <- case ty of
@@ -78,15 +83,19 @@ namespace Resugared
     pure $ case_ <++> pretty0 name <+> ann <++> of_
        <+> nest 2 (hardline <+> vsep alts)
   prettyTree env (STerm i tm) = pretty <$> resugar env tm
-  prettyTree env (Unmatched msg) = pure ("Error:" <++> pretty0 msg)
+  prettyTree env (TUnmatched msg) = pure ("Error:" <++> pretty0 msg)
   prettyTree env Impossible = pure "Impossible"
 
-  prettyAlt env (ConCase n tag args sc) = do
-    con <- prettyName n
-    sc <- prettyTree (mkEnvOnto emptyFC args env) sc
-    pure $ hsep (annotate (DCon (Just n)) con ::  map pretty0 args)
-     <++> fatArrow
-      <+> Union (spaces 1 <+> sc) (nest 2 (hardline <+> sc))
+  prettyScope env (RHS tm) = do
+      tm <- prettyTree env tm
+      pure $ fatArrow <++> tm
+  prettyScope env (Arg c x sc) = do
+      sc <- prettyScope (env :< PVar emptyFC top Explicit (Erased emptyFC Placeholder)) sc
+      pure $ annotate Bound (pretty0 x) <++> sc
+
+  prettyAlt env (ConCase n tag sc) = do
+    sc <- prettyScope env sc
+    pure $ annotate (DCon (Just n)) (pretty0 n) <++> sc
   prettyAlt env (DelayCase _ arg sc) = do
     sc <- prettyTree (mkEnvOnto emptyFC [_,_] env) sc
     pure $ keyword "Delay" <++> pretty0 arg

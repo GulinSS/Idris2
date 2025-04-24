@@ -1018,12 +1018,12 @@ mutual
            case mix of
              Nothing =>
                do log "compile.casetree.intermediate" 25 "match: No clauses"
-                  pure (Unmatched "No clauses")
+                  pure (TUnmatched "No clauses")
              Just m =>
                do log "compile.casetree.intermediate" 25 $ "match: new case tree " ++ show m
                   Core.pure m
   match {todo = []} fc fn phase [] err
-       = maybe (pure (Unmatched "No patterns"))
+       = maybe (pure (TUnmatched "No patterns"))
                pure err
   match {todo = []} fc fn phase ((MkPatClause pvars [] pid (Erased _ Impossible)) :: _) err
        = pure Impossible
@@ -1041,6 +1041,14 @@ mutual
       = do g <- altGroups gs
            pure (Case _ el (resolveNames vars ty) g)
     where
+      mkScope : forall vars . (vs : SnocList Name) ->
+                              (ms : SnocList RigCount) ->
+                              CaseScope (vars ++ vs) ->
+                CaseScope vars
+      mkScope [<] _ rhs = rhs
+      mkScope (sx :< y) (ms :< c) rhs = mkScope sx ms (Arg c y rhs)
+      mkScope (sx :< y) _ rhs = mkScope sx [<] (Arg top y rhs)
+
       altGroups : List (Group todo vars) -> Core (List (CaseAlt vars))
       altGroups [] = maybe (pure [])
                            (\e => pure [DefaultCase e])
@@ -1048,7 +1056,7 @@ mutual
       altGroups (ConGroup {newargs} cn tag rigs rest :: cs)
           = do crest <- match fc fn phase rest (map (weakensN (mkSizeOf newargs)) errorCase)
                cs' <- altGroups cs
-               pure (ConCase cn tag newargs crest :: cs')
+               pure (ConCase cn tag (mkScope (cast newargs) ?rigcount (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
       altGroups (DelayGroup {tyarg} {valarg} rest :: cs)
           = do crest <- match fc fn phase rest (map (weakenNs (mkSizeOf [<tyarg, valarg])) errorCase)
                cs' <- altGroups cs
@@ -1065,7 +1073,7 @@ mutual
             List (PatClause (a :: todo) vars) ->
             Maybe (CaseTree vars) ->
             Core (CaseTree vars)
-  conRule fc fn phase [] err = maybe (pure (Unmatched "No constructor clauses")) pure err
+  conRule fc fn phase [] err = maybe (pure (TUnmatched "No constructor clauses")) pure err
   -- ASSUMPTION, not expressed in the type, that the patterns all have
   -- the same variable (pprf) for the first argument. If not, the result
   -- will be a broken case tree... so we should find a way to express this
@@ -1213,7 +1221,7 @@ patCompile : {auto c : Ref Ctxt Defs} ->
              Maybe (CaseTree ScopeEmpty) ->
              Core (args ** CaseTree args)
 patCompile fc fn phase ty [] def
-    = maybe (pure (ScopeEmpty ** Unmatched "No definition"))
+    = maybe (pure (ScopeEmpty ** TUnmatched "No definition"))
             (\e => pure (ScopeEmpty ** e))
             def
 patCompile fc fn phase ty (p :: ps) def
@@ -1277,10 +1285,14 @@ simpleCase fc phase fn ty def clauses
 
 mutual
   findReachedAlts : CaseAlt ns' -> List Int
-  findReachedAlts (ConCase _ _ _ t) = findReached t
+  findReachedAlts (ConCase _ _ t) = findReachedCaseScope t
   findReachedAlts (DelayCase _ _ t) = findReached t
   findReachedAlts (ConstCase _ t) = findReached t
   findReachedAlts (DefaultCase t) = findReached t
+
+  findReachedCaseScope : CaseScope a -> List Int
+  findReachedCaseScope (RHS tm) = findReached tm
+  findReachedCaseScope (Arg _ _ cs) = findReachedCaseScope cs
 
   findReached : CaseTree ns -> List Int
   findReached (Case _ _ _ alts) = concatMap findReachedAlts alts
@@ -1322,7 +1334,7 @@ identifyUnreachableDefaults fc defs nfty cs
 
     dropRep : List (CaseAlt vars) -> SortedSet Int -> (List (CaseAlt vars), SortedSet Int)
     dropRep [] extra = ([], extra)
-    dropRep (c@(ConCase n t args sc) :: rest) extra
+    dropRep (c@(ConCase n t sc) :: rest) extra
           -- assumption is that there's no defaultcase in 'rest' because
           -- we've just removed it
         = let (filteredClauses, extraCases) = partition (not . tagIs t) rest
@@ -1351,8 +1363,12 @@ findExtraDefaults fc defs ctree@(Case {name = var} idx el ty altsIn)
        extraCases' <- concat <$> traverse findExtraAlts altsIn
        pure (Prelude.toList extraCases ++ extraCases')
   where
+    findExtraAltsScope : {vars : _} -> CaseScope vars -> Core (List Int)
+    findExtraAltsScope (RHS tm) = findExtraDefaults fc defs tm
+    findExtraAltsScope (Arg c x sc) = findExtraAltsScope sc
+
     findExtraAlts : CaseAlt vars -> Core (List Int)
-    findExtraAlts (ConCase x tag args ctree') = findExtraDefaults fc defs ctree'
+    findExtraAlts (ConCase x tag ctree') = findExtraAltsScope ctree'
     findExtraAlts (DelayCase x arg ctree') = findExtraDefaults fc defs ctree'
     findExtraAlts (ConstCase x ctree') = findExtraDefaults fc defs ctree'
     -- already handled defaults by elaborating them to all possible cons
@@ -1371,7 +1387,7 @@ getPMDef : {auto c : Ref Ctxt Defs} ->
 getPMDef fc phase fn ty []
     = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
          defs <- get Ctxt
-         pure (cast !(getArgs 0 !(nf defs ScopeEmpty ty)) ** (Unmatched "No clauses", []))
+         pure (cast !(getArgs 0 !(nf defs ScopeEmpty ty)) ** (TUnmatched "No clauses", []))
   where
     getArgs : Int -> ClosedNF -> Core (List Name)
     getArgs i (NBind fc x (Pi _ _ _ _) sc)

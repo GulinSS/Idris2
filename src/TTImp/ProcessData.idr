@@ -246,7 +246,7 @@ findNewtype [con]
               | Nothing => pure ()
          updateDef (name con) $
                \case
-                 DCon t a _ => Just $ DCon t a $ Just arg
+                 DCon di t a => Just $ DCon ({ newTypeArg := Just arg } di) t a
                  _ => Nothing
 findNewtype _ = pure ()
 

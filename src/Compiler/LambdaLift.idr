@@ -168,12 +168,17 @@ mutual
        |||   debugging.
        LCrash : FC -> (msg : String) -> Lifted vars
 
+  public export
+  data LiftedCaseScope : SnocList Name -> Type where
+       LRHS : Lifted vars -> LiftedCaseScope vars
+       LArg : (x : Name) -> LiftedCaseScope (vars :< x) -> LiftedCaseScope vars
+
   ||| A branch of an "LCon" (constructor tag) case statement.
   |||
   ||| @ vars is the list of names accessible within the current scope of the
   |||   lambda-lifted code.
   public export
-  data LiftedConAlt : (vars : Scope) -> Type where
+  data LiftedConAlt : (vars : SnocList Name) -> Type where
 
        ||| Constructs a branch of an "LCon" (constructor tag) case statement.
        |||
@@ -185,13 +190,10 @@ mutual
        ||| @ tag is a tag value, present if the type of the value
        |||   inspected is an algebraic data type (this can be matched against
        |||   instead of the constructor's name, if preferable).
-       ||| @ args is a list of new names that are bound to the inspected value's
-       |||   members before evaluation of this branch's body (this is similar
-       |||   to using a let binding for each member of the value).
-       ||| @ body is the expression that is evaluated as the consequence of
-       |||   this branch matching.
+       ||| @ scope is the scope of the case alternative, consisting of its
+       |||   arguments and right hand side
        MkLConAlt : (n : Name) -> (info : ConInfo) -> (tag : Maybe Int) ->
-                   (args : List Name) -> (body : Lifted (vars <>< args)) ->
+                   (body : LiftedCaseScope vars) ->
                    LiftedConAlt vars
 
   ||| A branch of an "LConst" (constant expression) case statement.
@@ -299,10 +301,16 @@ mutual
 
   export
   covering
+  {vs : _} -> Show (LiftedCaseScope vs) where
+    show (LRHS rhs) = ") => " ++ show rhs
+    show (LArg x sc) = show x ++ " " ++ show sc
+
+  export
+  covering
   {vs : _} -> Show (LiftedConAlt vs) where
-    show (MkLConAlt n _ t args sc)
+    show (MkLConAlt n _ t sc)
         = "%conalt " ++ show n ++
-             "(" ++ showSep ", " (map show args) ++ ") => " ++ show sc
+             "(" ++ show sc
 
   export
   covering
@@ -437,10 +445,16 @@ usedVars used (LConCase fc sc alts def) =
         scDefUsed = usedVars defUsed sc in
         foldl usedConAlt scDefUsed alts
   where
-    usedConAlt : {default Nothing lazy : Maybe LazyReason} ->
-                  Used vars -> LiftedConAlt vars -> Used vars
-    usedConAlt used (MkLConAlt n ci tag args sc) =
-      contractUsedManyFish {remove=args} (usedVars (weakenUsedFish used) sc)
+      usedConScope : {vars : _} ->
+                     {default Nothing lazy : Maybe LazyReason} ->
+                     Used vars -> LiftedCaseScope vars -> Used vars
+      usedConScope used (LRHS tm) = usedVars used tm
+      usedConScope used (LArg x sc)
+        = contractUsed $ usedConScope (weakenUsed {outer=[<x]} used) sc
+
+      usedConAlt : {default Nothing lazy : Maybe LazyReason} ->
+                   Used vars -> LiftedConAlt vars -> Used vars
+      usedConAlt used (MkLConAlt n ci tag sc) = usedConScope used sc
 
 usedVars used (LConstCase fc sc alts def) =
     let defUsed = maybe used (usedVars used {vars}) def
@@ -506,18 +520,18 @@ dropUnused {vars} {outer} unused (LConCase fc sc alts def) =
   let alts' = map dropConCase alts in
       LConCase fc (dropUnused unused sc) alts' (map (dropUnused unused) def)
   where
-    dropConCase : LiftedConAlt (vars ++ outer) ->
-                  LiftedConAlt (dropped vars unused ++ outer)
-    dropConCase (MkLConAlt n ci t args sc) =
-      MkLConAlt n ci t args droppedSc
-      where
-        sc' : Lifted (vars ++ (outer <>< args))
-        sc' = rewrite sym $ snocAppendFishAssociative vars outer args in sc
+      dropScope : {vars, outer : _} ->
+                  (unused : Vect (length vars) Bool) ->
+                  LiftedCaseScope (vars ++ outer) ->
+                  LiftedCaseScope (dropped vars unused ++ outer)
+      dropScope unused (LRHS sc) = LRHS (dropUnused unused sc)
+      dropScope {vars} {outer} unused (LArg x sc)
+        = LArg x (rewrite (appendAssociative (dropped vars unused) outer [<x]) in
+                 (dropScope {outer = outer :< x} unused sc))
 
-        droppedSc : Lifted ((dropped vars unused ++ outer) <>< args)
-        droppedSc = do
-          rewrite snocAppendFishAssociative (dropped vars unused) outer args
-          dropUnused {vars=vars} {outer=outer <>< args} unused sc'
+      dropConCase : LiftedConAlt (vars ++ outer) ->
+                    LiftedConAlt (dropped vars unused ++ outer)
+      dropConCase (MkLConAlt n ci t sc) = MkLConAlt n ci t (dropScope unused sc)
 dropUnused {vars} {outer} unused (LConstCase fc sc alts def) =
   let alts' = map dropConstCase alts in
       LConstCase fc (dropUnused unused sc) alts' (map (dropUnused unused) def)
@@ -591,9 +605,16 @@ mutual
       = pure $ LConCase fc !(liftExp {doLazyAnnots} sc) !(traverse (liftConAlt {lazy}) alts)
                            !(traverseOpt (liftExp {doLazyAnnots}) def)
     where
+      liftCaseScope : {vars : _} ->
+                      {default Nothing lazy : Maybe LazyReason} ->
+                      CCaseScope vars -> Core (LiftedCaseScope vars)
+      liftCaseScope (CRHS tm) = pure $ LRHS !(liftExp {doLazyAnnots} tm)
+      liftCaseScope (CArg x sc) = pure $ LArg x !(liftCaseScope sc)
+
       liftConAlt : {default Nothing lazy : Maybe LazyReason} ->
                    CConAlt vars -> Core (LiftedConAlt vars)
-      liftConAlt (MkConAlt n ci t args sc) = pure $ MkLConAlt n ci t args !(liftExp {doLazyAnnots} {lazy} sc)
+      liftConAlt (MkConAlt n ci t sc)
+          = pure $ MkLConAlt n ci t !(liftCaseScope {lazy} sc)
   liftExp (CConstCase fc sc alts def)
       = pure $ LConstCase fc !(liftExp {doLazyAnnots} sc) !(traverse liftConstAlt alts)
                              !(traverseOpt (liftExp {doLazyAnnots}) def)

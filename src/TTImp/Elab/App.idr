@@ -529,8 +529,8 @@ mutual
              -- Mark for reduction when we finish elaborating
              updateDef (Resolved idx)
                   (\def => case def of
-                        (PMDef pminfo args treeCT treeRT pats) =>
-                           Just (PMDef ({alwaysReduce := True} pminfo) args treeCT treeRT pats)
+                        (Function pminfo treeCT treeRT pats) =>
+                           Just (Function ({alwaysReduce := True} pminfo) treeCT treeRT pats)
                         _ => Nothing
                         )
              removeHole idx

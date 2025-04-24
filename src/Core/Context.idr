@@ -167,7 +167,7 @@ returnDef : Bool -> Int -> GlobalDef -> Maybe (Int, GlobalDef)
 returnDef False idx def = Just (idx, def)
 returnDef True idx def
     = case definition def of
-           PMDef pi _ _ _ _ =>
+           Function pi _ _ _ =>
                  if alwaysReduce pi
                     then Just (idx, def)
                     else Nothing
@@ -396,6 +396,26 @@ interface HasNames a where
   resolved : Context -> a -> Core a
 
 export
+HasNames a => HasNames (List a) where
+  full c ns = full_aux c [] ns
+    where full_aux : Context -> List a -> List a -> Core (List a)
+          full_aux c res [] = pure (reverse res)
+          full_aux c res (n :: ns) = full_aux c (!(full c n):: res) ns
+
+
+  resolved c ns = resolved_aux c [] ns
+    where resolved_aux : Context -> List a -> List a -> Core (List a)
+          resolved_aux c res [] = pure (reverse res)
+          resolved_aux c res (n :: ns) = resolved_aux c (!(resolved c n) :: res) ns
+
+export
+HasNames a => HasNames (Maybe a) where
+  full gam Nothing = pure Nothing
+  full gam (Just x) = pure $ Just !(full gam x)
+  resolved gam Nothing = pure Nothing
+  resolved gam (Just x) = pure $ Just !(resolved gam x)
+
+export
 HasNames Name where
   full gam (Resolved i)
       = do Just gdef <- lookupCtxtExact (Resolved i) gam
@@ -535,12 +555,17 @@ mutual
     resolved gam t = pure t
 
   export
+  HasNames (CaseScope vars) where
+    full gam (RHS x) = pure (RHS !(full gam x))
+    full gam (Arg c x sc) = pure (Arg c x !(full gam sc))
+
+    resolved gam (RHS x) = pure (RHS !(resolved gam x))
+    resolved gam (Arg c x sc) = pure (Arg c x !(resolved gam sc))
+
+  export
   HasNames (CaseAlt vars) where
-    full gam (ConCase n t args sc)
-        = do sc' <- full gam sc
-             Just gdef <- lookupCtxtExact n gam
-                | Nothing => pure (ConCase n t args sc')
-             pure $ ConCase (fullname gdef) t args sc'
+    full gam (ConCase x tag y)
+        = pure (ConCase !(full gam x) tag !(full gam y))
     full gam (DelayCase ty arg sc)
         = pure $ DelayCase ty arg !(full gam sc)
     full gam (ConstCase c sc)
@@ -548,11 +573,8 @@ mutual
     full gam (DefaultCase sc)
         = pure $ DefaultCase !(full gam sc)
 
-    resolved gam (ConCase n t args sc)
-        = do sc' <- resolved gam sc
-             let Just i = getNameID n gam
-                | Nothing => pure (ConCase n t args sc')
-             pure $ ConCase (Resolved i) t args sc'
+    resolved gam (ConCase x tag y)
+        = pure (ConCase !(resolved gam x) tag !(resolved gam y))
     resolved gam (DelayCase ty arg sc)
         = pure $ DelayCase ty arg !(resolved gam sc)
     resolved gam (ConstCase c sc)
@@ -581,15 +603,8 @@ HasNames Clause where
 
 export
 HasNames Def where
-  full gam (PMDef r args ct rt pats)
-      = pure $ PMDef r args !(full gam ct) !(full gam rt)
-                     !(traverse fullNamesPat pats)
-    where
-      fullNamesPat : (vs ** (Env Term vs, Term vs, Term vs)) ->
-                     Core (vs ** (Env Term vs, Term vs, Term vs))
-      fullNamesPat (_ ** (env, lhs, rhs))
-          = pure $ (_ ** (!(full gam env),
-                          !(full gam lhs), !(full gam rhs)))
+  full gam (Function x ctm rtm cs)
+      = pure $ Function x !(full gam ctm) !(full gam rtm) !(full gam cs)
   full gam (TCon a ps ds u ms mcs det)
       = pure $ TCon a ps ds u !(traverse (full gam) ms)
                                 !(traverseOpt (traverse (full gam)) mcs) det
@@ -599,15 +614,8 @@ HasNames Def where
       = pure $ Guess !(full gam tm) b cs
   full gam t = pure t
 
-  resolved gam (PMDef r args ct rt pats)
-      = pure $ PMDef r args !(resolved gam ct) !(resolved gam rt)
-                     !(traverse resolvedNamesPat pats)
-    where
-      resolvedNamesPat : (vs ** (Env Term vs, Term vs, Term vs)) ->
-                         Core (vs ** (Env Term vs, Term vs, Term vs))
-      resolvedNamesPat (_ ** (env, lhs, rhs))
-          = pure $ (_ ** (!(resolved gam env),
-                          !(resolved gam lhs), !(resolved gam rhs)))
+  resolved gam (Function x ctm rtm cs)
+      = pure $ Function x !(resolved gam ctm) !(resolved gam rtm) !(resolved gam cs)
   resolved gam (TCon a ps ds u ms mcs det)
       = pure $ TCon a ps ds u !(traverse (resolved gam) ms)
                                 !(traverseOpt (traverse (full gam)) mcs) det
@@ -618,23 +626,21 @@ HasNames Def where
   resolved gam t = pure t
 
 export
+StripNamespace Clause where
+  trimNS gam (MkClause env lhs rhs)
+     = MkClause env (trimNS gam lhs) (trimNS gam rhs)
+
+  restoreNS gam (MkClause env lhs rhs)
+    = MkClause env (restoreNS gam lhs) (restoreNS gam rhs)
+
+export
 StripNamespace Def where
-  trimNS ns (PMDef i args ct rt pats)
-      = PMDef i args (trimNS ns ct) rt (map trimNSpat pats)
-    where
-      trimNSpat : (vs ** (Env Term vs, Term vs, Term vs)) ->
-                  (vs ** (Env Term vs, Term vs, Term vs))
-      trimNSpat (vs ** (env, lhs, rhs))
-          = (vs ** (env, trimNS ns lhs, trimNS ns rhs))
+  trimNS ns (Function x ctm rtm cs)
+      = Function x (trimNS ns ctm) rtm (trimNS ns cs)
   trimNS ns d = d
 
-  restoreNS ns (PMDef i args ct rt pats)
-      = PMDef i args (restoreNS ns ct) rt (map restoreNSpat pats)
-    where
-      restoreNSpat : (vs ** (Env Term vs, Term vs, Term vs)) ->
-                  (vs ** (Env Term vs, Term vs, Term vs))
-      restoreNSpat (vs ** (env, lhs, rhs))
-          = (vs ** (env, restoreNS ns lhs, restoreNS ns rhs))
+  restoreNS ns (Function x ctm rtm cs)
+      = Function x (restoreNS ns ctm) rtm (restoreNS ns cs)
   restoreNS ns d = d
 
 export
@@ -941,13 +947,6 @@ export
 HasNames SCCall where
   full gam sc = pure $ { fnCall := !(full gam (fnCall sc)) } sc
   resolved gam sc = pure $ { fnCall := !(resolved gam (fnCall sc)) } sc
-
-export
-HasNames a => HasNames (Maybe a) where
-  full gam Nothing = pure Nothing
-  full gam (Just x) = pure $ Just !(full gam x)
-  resolved gam Nothing = pure Nothing
-  resolved gam (Just x) = pure $ Just !(resolved gam x)
 
 export
 HasNames GlobalDef where

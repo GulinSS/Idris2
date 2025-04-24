@@ -77,7 +77,7 @@ isHole : GlobalDef -> Maybe Nat
 isHole def
     = case definition def of
            Hole locs _ => Just locs
-           PMDef pi _ _ _ _ =>
+           Function pi _ _ _ =>
                  case holeInfo pi of
                       NotHole => Nothing
                       SolvedHole n => Just n

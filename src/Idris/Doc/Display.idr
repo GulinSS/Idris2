@@ -44,9 +44,9 @@ displayTerm defs tm
 export
 displayClause : {auto c : Ref Ctxt Defs} ->
                 {auto s : Ref Syn SyntaxInfo} ->
-                Defs -> (vs ** (Env Term vs, Term vs, Term vs)) ->
+                Defs -> Clause ->
                 Core (Doc IdrisSyntax)
-displayClause defs (vs ** (env, lhs, rhs))
+displayClause defs (MkClause env lhs rhs)
   = do lhstm <- resugar env !(normaliseHoles defs env lhs)
        rhstm <- resugar env !(normaliseHoles defs env rhs)
        pure (prettyLHS lhstm <++> equals <++> pretty rhstm)
@@ -63,9 +63,9 @@ displayPats : {auto c : Ref Ctxt Defs} ->
               Core (Doc IdrisSyntax)
 displayPats shortName defs (n, idx, gdef)
   = case definition gdef of
-      PMDef _ _ _ _ pats =>
+      Function _ _ _ pats =>
         do ty <- displayType shortName defs (n, idx, gdef)
-           ps <- traverse (displayClause defs) pats
+           ps <- traverse (displayClause defs) (maybe [] id pats)
            pure (vsep (ty :: ps))
       _ => pure (pretty0 n <++> reflow "is not a pattern matching definition")
 
@@ -76,7 +76,7 @@ displayImpl : {auto c : Ref Ctxt Defs} ->
               Core (Doc IdrisSyntax)
 displayImpl defs (n, idx, gdef)
   = case definition gdef of
-      PMDef _ _ ct _ [(vars ** (env,  _, rhs))] =>
+      Function _ ct _ (Just [MkClause env  _ rhs]) =>
         do rhstm <- resugar env !(normaliseHoles defs env rhs)
            let (_, args) = getFnArgs defaultKindedName rhstm
            defs <- get Ctxt

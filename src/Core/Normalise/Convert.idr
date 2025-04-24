@@ -104,6 +104,7 @@ tryUpdate ms (TDelay fc r ty tm) = pure $ TDelay fc r !(tryUpdate ms ty) !(tryUp
 tryUpdate ms (TForce fc r tm) = pure $ TForce fc r !(tryUpdate ms tm)
 tryUpdate ms (PrimVal fc c) = pure $ PrimVal fc c
 tryUpdate ms (Erased fc a) = Erased fc <$> traverse (tryUpdate ms) a
+tryUpdate ms (Unmatched fc str) = pure $ Unmatched fc str
 tryUpdate ms (TType fc u) = pure $ TType fc u
 
 mutual
@@ -159,107 +160,18 @@ mutual
               then allConvNF q i defs env xsnf ysnf
               else pure False
 
-  -- If the case trees match in structure, get the list of variables which
-  -- have to match in the call
-  getMatchingVarAlt : {auto c : Ref Ctxt Defs} ->
-                      {args, args' : _} ->
-                      Defs ->
-                      List (Var args, Var args') ->
-                      CaseAlt args -> CaseAlt args' ->
-                      Core (Maybe (List (Var args, Var args')))
-  getMatchingVarAlt defs ms (ConCase n tag cargs t) (ConCase n' tag' cargs' t')
-      = if n == n'
-           then do let s = mkSizeOf cargs
-                   let s' = mkSizeOf cargs'
-                   let Just ms' = extend s s' ms
-                        | Nothing => pure Nothing
-                   Just ms <- getMatchingVars defs ms' t t'
-                        | Nothing => pure Nothing
-                   -- drop the prefix from cargs/cargs' since they won't
-                   -- be in the caller
-                   pure (Just (mapMaybe (dropP s s') ms))
-           else pure Nothing
-    where
-      weakenP : {0 c, c' : _} -> {0 args, args' : Scope} ->
-                (Var args, Var args') ->
-                (Var (args :< c), Var (args' :< c'))
-      weakenP (v, vs) = (weaken v, weaken vs)
-
-  getMatchingVarAlt defs ms (ConstCase c t) (ConstCase c' t')
-      = if c == c'
-           then getMatchingVars defs ms t t'
-           else pure Nothing
-  getMatchingVarAlt defs ms (DefaultCase t) (DefaultCase t')
-      = getMatchingVars defs ms t t'
-  getMatchingVarAlt defs _ _ _ = pure Nothing
-
-  getMatchingVarAlts : {auto c : Ref Ctxt Defs} ->
-                       {args, args' : _} ->
-                       Defs ->
-                       List (Var args, Var args') ->
-                       List (CaseAlt args) -> List (CaseAlt args') ->
-                       Core (Maybe (List (Var args, Var args')))
-  getMatchingVarAlts defs ms [] [] = pure (Just ms)
-  getMatchingVarAlts defs ms (a :: as) (a' :: as')
-      = do Just ms <- getMatchingVarAlt defs ms a a'
-                | Nothing => pure Nothing
-           getMatchingVarAlts defs ms as as'
-  getMatchingVarAlts defs _ _ _ = pure Nothing
-
-  getMatchingVars : {auto c : Ref Ctxt Defs} ->
-                    {args, args' : _} ->
-                    Defs ->
-                    List (Var args, Var args') ->
-                    CaseTree args -> CaseTree args' ->
-                    Core (Maybe (List (Var args, Var args')))
-  getMatchingVars defs ms (Case _ p _ alts) (Case _ p' _ alts')
-      = getMatchingVarAlts defs ((MkVar p, MkVar p') :: ms) alts alts'
-  getMatchingVars defs ms (STerm i tm) (STerm i' tm')
-      = do let Just tm'' = tryUpdate ms tm
-               | Nothing => pure Nothing
-           if !(convert defs (mkEnv (getLoc tm) args') tm'' tm')
-              then pure (Just ms)
-              else pure Nothing
-  getMatchingVars defs ms (Unmatched _) (Unmatched _) = pure (Just ms)
-  getMatchingVars defs ms Impossible Impossible = pure (Just ms)
-  getMatchingVars _ _ _ _ = pure Nothing
-
   chkSameDefs : {auto c : Ref Ctxt Defs} ->
                 {vars : _} ->
                 Ref QVar Int -> Bool -> Defs -> Env Term vars ->
                 Name -> Name ->
                 Scopeable (Closure vars) -> Scopeable (Closure vars) -> Core Bool
   chkSameDefs q i defs env n n' nargs nargs'
-     = do Just (PMDef _ args ct rt _) <- lookupDefExact n (gamma defs)
+     = do Just (Function _ ct rt _) <- lookupDefExact n (gamma defs)
                | _ => pure False
-          Just (PMDef _ args' ct' rt' _) <- lookupDefExact n' (gamma defs)
+          Just (Function _ ct' rt' _) <- lookupDefExact n' (gamma defs)
                | _ => pure False
 
-          -- If the two case blocks match in structure, get which variables
-          -- correspond. If corresponding variables convert, the two case
-          -- blocks convert.
-          Just ms <- getMatchingVars defs [] ct ct'
-               | Nothing => pure False
-          convertMatches ms
-     where
-       -- We've only got the index into the argument list, and the indices
-       -- don't match up, which is annoying. But it'll always be there!
-       getArgPos : Nat -> Scopeable (Closure vars) -> Maybe (Closure vars)
-       getArgPos _ [<] = Nothing
-       getArgPos Z (cs :< c) = pure c
-       getArgPos (S k) (cs :< c) = getArgPos k cs
-
-       convertMatches : {vs, vs' : _} ->
-                        List (Var vs, Var vs') ->
-                        Core Bool
-       convertMatches [] = pure True
-       convertMatches ((MkVar {varIdx = ix} p, MkVar {varIdx = iy} p') :: vs)
-          = do let Just varg = getArgPos ix nargs
-                   | Nothing => pure False
-               let Just varg' = getArgPos iy nargs'
-                   | Nothing => pure False
-               pure $ !(convGen q i defs env varg varg') &&
-                      !(convertMatches vs)
+          convGen q i defs env (embed ct) (embed ct')
 
   -- If two names are standing for case blocks, check the blocks originate
   -- from the same place, and have the same scrutinee
@@ -285,31 +197,13 @@ mutual
                 | _ => pure False
            Just def' <- lookupCtxtExact n' (gamma defs)
                 | _ => pure False
-           let PMDef _ _ tree _ _ = definition def
+           let Function _ tree _ _ = definition def
                 | _ => pure False
-           let PMDef _ _ tree' _ _ = definition def'
+           let Function _ tree' _ _ = definition def'
                 | _ => pure False
-           let Just scpos = findArgPos tree
-                | Nothing => pure False
-           let Just scpos' = findArgPos tree'
-                | Nothing => pure False
-           let Just sc = getScrutinee ((length nargs) `minus` scpos + 1) nargs
-                | Nothing => pure False
-           let Just sc' = getScrutinee ((length nargs') `minus` scpos' + 1) nargs'
-                | Nothing => pure False
-           ignore $ convGen q i defs env sc sc'
+           ignore $ convGen q i defs env (embed tree) (embed tree')
            pure (location def == location def')
-    where
-      -- Need to find the position of the scrutinee to see if they are the
-      -- same
-      findArgPos : CaseTree as -> Maybe Nat
-      findArgPos (Case idx p _ _) = Just idx
-      findArgPos _ = Nothing
 
-      getScrutinee : Nat -> Scopeable (Closure vs) -> Maybe (Closure vs)
-      getScrutinee Z (xs :< x) = Just x
-      getScrutinee (S k) (xs :< x) = getScrutinee k xs
-      getScrutinee _ _ = Nothing
   chkConvCaseBlock _ _ _ _ _ _ _ _ _ = pure False
 
   chkConvHead : {auto c : Ref Ctxt Defs} ->

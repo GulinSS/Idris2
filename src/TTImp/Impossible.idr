@@ -142,7 +142,7 @@ mutual
            -- the coverage checker will considers that all the cases have been
            -- covered!
            let head = case definition gdef of
-                        DCon t a _ => DataCon t a
+                        DCon _ t a => DataCon t a
                         TCon a _ _ _ _ _ _ => TyCon a
                         _ => Func
            processArgs (Ref fc head (Resolved i)) tynf exps autos named

@@ -170,9 +170,14 @@ constFold rho (CDelay fc x y) = CDelay fc x $ constFold rho y
 constFold rho (CConCase fc sc xs x)
   = CConCase fc (constFold rho sc) (foldAlt <$> xs) (constFold rho <$> x)
   where
+    foldScope : forall vars . {vars' : _} ->
+                Subst vars vars' -> CCaseScope vars -> CCaseScope vars'
+    foldScope rho (CRHS tm) = CRHS (constFold rho tm)
+    foldScope rho (CArg x sc) = CArg x (foldScope (wk (mkSizeOf [<x]) rho) sc)
+
     foldAlt : CConAlt vars -> CConAlt vars'
-    foldAlt (MkConAlt n ci t xs e)
-      = MkConAlt n ci t xs $ constFold (wksN rho (mkSizeOf xs)) e
+    foldAlt (MkConAlt n ci t sc)
+      = MkConAlt n ci t (foldScope rho sc)
 
 constFold rho (CConstCase fc sc xs x) =
     let sc' = constFold rho sc

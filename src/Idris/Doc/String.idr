@@ -418,7 +418,7 @@ getDocsForName fc n config
              | [ifacedata] => (Just "interface",) . pure <$> getIFaceDoc ifacedata
              | _ => pure (Nothing, []) -- shouldn't happen, we've resolved ambiguity by now
          case definition d of
-           PMDef _ _ _ _ _ => pure ( Nothing
+           Function _ _ _ _ => pure ( Nothing
                                    , catMaybes [ showTotal (totality d)
                                                , pure (showVisible (collapseDefault $ visibility d))])
            TCon _ _ _ _ _ cons _ =>

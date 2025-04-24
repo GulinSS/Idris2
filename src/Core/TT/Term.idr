@@ -128,6 +128,7 @@ data Term : Scoped where
      TForce : FC -> LazyReason -> Term vars -> Term vars
      PrimVal : FC -> (c : Constant) -> Term vars
      Erased : FC -> WhyErased (Term vars) -> Term vars
+     Unmatched : FC -> String -> Term vars -- error from a partialmatch
      TType : FC -> Name -> -- universe variable
              Term vars
 
@@ -163,6 +164,7 @@ insertNames out ns (PrimVal fc c) = PrimVal fc c
 insertNames out ns (Erased fc Impossible) = Erased fc Impossible
 insertNames out ns (Erased fc Placeholder) = Erased fc Placeholder
 insertNames out ns (Erased fc (Dotted t)) = Erased fc (Dotted (insertNames out ns t))
+insertNames out ns (Unmatched fc x) = Unmatched fc x
 insertNames out ns (TType fc u) = TType fc u
 
 export
@@ -239,6 +241,7 @@ mutual
   shrinkTerm (Erased fc Placeholder) prf = Just (Erased fc Placeholder)
   shrinkTerm (Erased fc Impossible) prf = Just (Erased fc Impossible)
   shrinkTerm (Erased fc (Dotted t)) prf = Erased fc . Dotted <$> shrinkTerm t prf
+  shrinkTerm (Unmatched fc s) prf = Just (Unmatched fc s)
   shrinkTerm (TType fc u) prf = Just (TType fc u)
 
 
@@ -279,6 +282,7 @@ mutual
   thinTerm (Erased fc Impossible) th = Erased fc Impossible
   thinTerm (Erased fc Placeholder) th = Erased fc Placeholder
   thinTerm (Erased fc (Dotted t)) th = Erased fc (Dotted (thinTerm t th))
+  thinTerm (Unmatched fc s) th = Unmatched fc s
   thinTerm (TType fc u) th = TType fc u
 
 export
@@ -380,6 +384,26 @@ interface StripNamespace a where
   restoreNS : Namespace -> a -> a
 
 export
+StripNamespace a => StripNamespace (Maybe a) where
+  trimNS ns Nothing = Nothing
+  trimNS ns (Just x) = Just (trimNS ns x)
+  restoreNS ns Nothing = Nothing
+  restoreNS ns (Just x) = Just (restoreNS ns x)
+
+export
+StripNamespace a => StripNamespace (List a) where
+  trimNS c ns = trimNS_aux c [] ns
+    where trimNS_aux : Namespace -> List a -> List a -> List a
+          trimNS_aux c res [] = reverse res
+          trimNS_aux c res (n :: ns) = trimNS_aux c ((trimNS c n):: res) ns
+
+
+  restoreNS c ns = restoreNS_aux c [] ns
+    where restoreNS_aux : Namespace -> List a -> List a -> List a
+          restoreNS_aux c res [] = reverse res
+          restoreNS_aux c res (n :: ns) = restoreNS_aux c ((restoreNS c n) :: res) ns
+
+export
 StripNamespace Name where
   trimNS ns nm@(NS tns n)
     = if ns == tns then NS emptyNS n else nm
@@ -450,6 +474,7 @@ getLoc (TDelay fc _ _ _) = fc
 getLoc (TForce fc _ _) = fc
 getLoc (PrimVal fc _) = fc
 getLoc (Erased fc i) = fc
+getLoc (Unmatched fc _) = fc
 getLoc (TType fc _) = fc
 
 export

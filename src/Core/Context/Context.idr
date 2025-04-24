@@ -47,6 +47,10 @@ export
 defaultPI : PMDefInfo
 defaultPI = MkPMDefInfo NotHole False False
 
+export
+reducePI : PMDefInfo
+reducePI = MkPMDefInfo NotHole True False
+
 public export
 record TypeFlags where
   constructor MkTypeFlags
@@ -56,6 +60,25 @@ record TypeFlags where
 export
 defaultFlags : TypeFlags
 defaultFlags = MkTypeFlags False False
+
+public export
+record DataConInfo where
+  constructor MkDataConInfo
+  quantities : List RigCount
+               -- Quantities on arguments
+  newTypeArg : Maybe (Bool, Nat)
+               -- if it's the only constructor, and only one argument is
+               -- non-Rig0, flag it here.
+               -- The Nat is the unerased argument position.
+               -- The Bool is 'True' if there is no %World token in the
+               -- structure, which means it is safe to completely erase
+               -- when pattern matching (otherwise we still have to ensure
+               -- that the value is inspected, to make sure external effects
+               -- happen)
+
+export
+defaultDataConInfo : List RigCount -> DataConInfo
+defaultDataConInfo qs = MkDataConInfo qs Nothing
 
 public export
 record HoleFlags where
@@ -68,34 +91,28 @@ holeInit : Bool -> HoleFlags
 holeInit b = MkHoleFlags b False
 
 public export
+data Clause : Type where
+     MkClause : {vars : _} ->
+                (env : Env Term vars) ->
+                (lhs : Term vars) -> (rhs : Term vars) -> Clause
+
+%name Clause cl
+
+public export
 data Def : Type where
     None : Def -- Not yet defined
-    PMDef : (pminfo : PMDefInfo) ->
-            (args : Scope) ->
-            (treeCT : CaseTree args) ->
-            (treeRT : CaseTree args) ->
-            (pats : List (vs ** (Env Term vs, Term vs, Term vs))) ->
-                -- original checked patterns (LHS/RHS) with the names in
-                -- the environment. Used for display purposes, for helping
-                -- find size changes in termination checking, and for
-                -- generating specialised definitions (so needs to be the
-                -- full, non-erased, term)
-            Def -- Ordinary function definition
+    Function : (pminfo : PMDefInfo) ->
+               (compileTime : Term [<]) ->
+               (runTime : Term [<]) ->
+               Maybe (List Clause) -> -- initial definition, if known
+               Def -- normal function
     ExternDef : (arity : Nat) -> Def
     ForeignDef : (arity : Nat) ->
                  List String -> -- supported calling conventions,
                                 -- e.g "C:printf,libc,stdlib.h", "scheme:display", ...
                  Def
     Builtin : {arity : Nat} -> PrimFn arity -> Def
-    DCon : (tag : Tag) -> (arity : Nat) ->
-           (newtypeArg : Maybe (Bool, Nat)) ->
-               -- if only constructor, and only one argument is non-Rig0,
-               -- flag it here. The Nat is the unerased argument position.
-               -- The Bool is 'True' if there is no %World token in the
-               -- structure, which means it is safe to completely erase
-               -- when pattern matching (otherwise we still have to ensure
-               -- that the value is inspected, to make sure external effects
-               -- happen)
+    DCon : DataConInfo -> (tag : Tag) -> (arity : Nat) ->
            Def -- data constructor
     TCon : (arity : Nat) ->
            (parampos : List Nat) -> -- parameters
@@ -129,11 +146,11 @@ data Def : Type where
 export
 defNameType : Def -> Maybe NameType
 defNameType None = Nothing
-defNameType (PMDef {}) = Just Func
+defNameType (Function {}) = Just Func
 defNameType (ExternDef {}) = Just Func
 defNameType (ForeignDef {}) = Just Func
 defNameType (Builtin {}) = Just Func
-defNameType (DCon tag ar _) = Just (DataCon tag ar)
+defNameType (DCon _ tag ar) = Just (DataCon tag ar)
 defNameType (TCon ar _ _ _ _ _ _) = Just (TyCon ar)
 defNameType (Hole {}) = Just Func
 defNameType (BySearch {}) = Nothing
@@ -146,14 +163,12 @@ export
 covering
 Show Def where
   show None = "undefined"
-  show (PMDef _ args ct rt pats)
-      = unlines [ show args ++ ";"
-                , "Compile time tree: " ++ show ct
-                , "Run time tree: " ++ show rt
-                ]
-  show (DCon t a nt)
+  show (Function _ tm tm' _)
+      = "Function " ++ show tm ++ "\n\tRuntime: " ++ show tm'
+  show (DCon di t a)
       = "DataCon " ++ show t ++ " " ++ show a
-           ++ maybe "" (\n => " (newtype by " ++ show n ++ ")") nt
+           ++ maybe "" (\n => " (newtype by " ++ show n ++ ")")
+                    (newTypeArg di)
   show (TCon a ps ds u ms cons det)
       = "TyCon " ++ show a ++ " params: " ++ show ps ++
         " constructors: " ++ show cons ++
@@ -183,13 +198,6 @@ public export
 data DataDef : Type where
      MkData : (tycon : Constructor) -> (datacons : List Constructor) ->
               DataDef
-
-public export
-data Clause : Type where
-     MkClause : {vars : _} ->
-                (env : Env Term vars) ->
-                (lhs : Term vars) -> (rhs : Term vars) -> Clause
-%name Clause cl
 
 export
 covering

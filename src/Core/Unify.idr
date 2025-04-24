@@ -198,8 +198,7 @@ chaseMetas (n :: ns) all
     = case lookup n all of
            Just _ => chaseMetas ns all
            _ => do defs <- get Ctxt
-                   Just (PMDef _ _ (STerm _ soln) _ _) <-
-                                  lookupDefExact n (gamma defs)
+                   Just (Function _ soln _ _) <- lookupDefExact n (gamma defs)
                         | _ => chaseMetas ns (insert n () all)
                    let sns = keys (getMetas soln)
                    chaseMetas (sns ++ ns) (insert n () all)
@@ -495,9 +494,7 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
          let simpleDef = MkPMDefInfo (SolvedHole num)
                                      (not (isUserName mname) && isSimple rhs)
                                      False
-         let newdef = { definition :=
-                          PMDef simpleDef ScopeEmpty (STerm 0 rhs) (STerm 0 rhs) []
-                      } mdef
+         let newdef = { definition := Function simpleDef rhs rhs Nothing } mdef
          ignore $ addDef (Resolved mref) newdef
          removeHole mref
          pure True
@@ -593,6 +590,7 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
     updateIVars ivs (Erased fc Impossible) = Just (Erased fc Impossible)
     updateIVars ivs (Erased fc Placeholder) = Just (Erased fc Placeholder)
     updateIVars ivs (Erased fc (Dotted t)) = Erased fc . Dotted <$> updateIVars ivs t
+    updateIVars ivs (Unmatched fc u) = Just (Unmatched fc u)
     updateIVars ivs (TType fc u) = Just (TType fc u)
 
     mkDef : {vs, newvars : _} ->
@@ -1463,7 +1461,11 @@ retryGuess mode smode (hid, (loc, hname))
                   handleUnify
                      (do tm <- search loc rig (smode == Defaults) depth defining
                                       (type def) ScopeEmpty
-                         let gdef = { definition := PMDef defaultPI ScopeEmpty (STerm 0 tm) (STerm 0 tm) [] } def
+
+                         let pi = if isErased rig
+                                    then defaultPI
+                                    else reducePI
+                         let gdef = { definition := Function pi tm tm Nothing } def
                          logTermNF "unify.retry" 5 ("Solved " ++ show hname) ScopeEmpty tm
                          ignore $ addDef (Resolved hid) gdef
                          removeGuess hid
@@ -1498,8 +1500,7 @@ retryGuess mode smode (hid, (loc, hname))
                                               do ty <- getType ScopeEmpty tm
                                                  logTerm "unify.retry" 5 "Retry Delay" tm
                                                  pure $ delayMeta r envb !(getTerm ty) tm
-                                  let gdef = { definition := PMDef (MkPMDefInfo NotHole True False)
-                                                                   ScopeEmpty (STerm 0 tm') (STerm 0 tm') [] } def
+                                  let gdef = { definition := Function reducePI tm' tm' Nothing } def
                                   logTerm "unify.retry" 5 ("Resolved " ++ show hname) tm'
                                   ignore $ addDef (Resolved hid) gdef
                                   removeGuess hid
@@ -1524,8 +1525,7 @@ retryGuess mode smode (hid, (loc, hname))
                          -- All constraints resolved, so turn into a
                          -- proper definition and remove it from the
                          -- hole list
-                         [] => do let gdef = { definition := PMDef (MkPMDefInfo NotHole True False)
-                                                                   ScopeEmpty (STerm 0 tm) (STerm 0 tm) [] } def
+                         [] => do let gdef = { definition := Function reducePI tm tm Nothing } def
                                   logTerm "unify.retry" 5 ("Resolved " ++ show hname) tm
                                   ignore $ addDef (Resolved hid) gdef
                                   removeGuess hid
@@ -1588,7 +1588,7 @@ checkArgsSame : {auto u : Ref UST UState} ->
 checkArgsSame [] = pure False
 checkArgsSame (x :: xs)
     = do defs <- get Ctxt
-         Just (PMDef _ [<] (STerm 0 def) _ _) <-
+         Just (Function _ def _ _) <-
                     lookupDefExact (Resolved x) (gamma defs)
               | _ => checkArgsSame xs
          s <- anySame def xs
@@ -1600,9 +1600,9 @@ checkArgsSame (x :: xs)
     anySame tm [] = pure False
     anySame tm (t :: ts)
         = do defs <- get Ctxt
-             Just (PMDef _ [<] (STerm 0 def) _ _) <-
+             Just (Function _ def _ _) <-
                         lookupDefExact (Resolved t) (gamma defs)
-                 | _ => anySame tm ts
+                  | _ => anySame tm ts
              if !(convert defs ScopeEmpty tm def)
                 then pure True
                 else anySame tm ts

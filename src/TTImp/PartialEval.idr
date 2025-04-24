@@ -96,17 +96,17 @@ mkSubsts i specs (arg :: args) rhs
 -- In the case where all the specialised positions are variables on the LHS,
 -- substitute the term in on the RHS
 specPatByVar : List (Nat, ClosedTerm) ->
-               (vs ** (Env Term vs, Term vs, Term vs)) ->
-               Maybe (vs ** (Env Term vs, Term vs, Term vs))
-specPatByVar specs (vs ** (env, lhs, rhs))
+               Clause ->
+               Maybe Clause
+specPatByVar specs (MkClause env lhs rhs)
     = do let (fn, args) = getFnArgsWithCounts lhs
          psubs <- mkSubsts 0 specs (map snd args) rhs
          let lhs' = apply (getLoc fn) fn args
-         pure (vs ** (env, substLocs psubs lhs', substLocs psubs rhs))
+         pure (MkClause env (substLocs psubs lhs') (substLocs psubs rhs))
 
 specByVar : List (Nat, ClosedTerm) ->
-            List (vs ** (Env Term vs, Term vs, Term vs)) ->
-            Maybe (List (vs ** (Env Term vs, Term vs, Term vs)))
+            List Clause ->
+            Maybe (List Clause)
 specByVar specs [] = pure []
 specByVar specs (p :: ps)
     = do p' <- specPatByVar specs p
@@ -126,7 +126,7 @@ getSpecPats : {auto c : Ref Ctxt Defs} ->
               ClosedNF -> -- Type of 'fn'
               List (Nat, ArgMode) -> -- All the arguments
               List (Nat, ClosedTerm) -> -- Just the static ones
-              List (vs ** (Env Term vs, Term vs, Term vs)) ->
+              List Clause ->
               Core (Maybe (List ImpClause))
 getSpecPats fc pename fn stk fnty args sargs pats
    = do -- First, see if all the specialised positions are variables. If so,
@@ -203,9 +203,9 @@ getSpecPats fc pename fn stk fnty args sargs pats
     dropArgs : Name -> RawImp -> RawImp
     dropArgs pename tm = reapply (IVar fc pename) (dropSpec 0 sargs (getRawArgs [] tm))
 
-    unelabPat : Name -> (vs ** (Env Term vs, Term vs, Term vs)) ->
+    unelabPat : Name -> Clause ->
                 Core ImpClause
-    unelabPat pename (_ ** (env, lhs, rhs))
+    unelabPat pename (MkClause env lhs rhs)
         = do logTerm "specialise" 20 "Unelaborating LHS:" lhs
              lhsapp <- unelabNoSugar env lhs
              log "specialise" 20 $ "Unelaborating LHS to: \{show lhsapp}"
@@ -298,7 +298,7 @@ mkSpecDef {vars} fc gdef pename sargs fn stk
            reds <- getReducible [fn] empty defs
            setFlag fc (Resolved peidx) (PartialEval (specLimits ++ toList reds))
 
-           let PMDef pminfo pmargs ct tr pats = definition gdef
+           let Function pminfo ct tr (Just pats) = definition gdef
                | _ => pure (applyStackWithFC (Ref fc Func fn) stk)
            logC "specialise" 5 $
                    do inpats <- traverse unelabDef pats
@@ -352,9 +352,9 @@ mkSpecDef {vars} fc gdef pename sargs fn stk
     updateApp n (INamedApp fc f m a) = INamedApp fc (updateApp n f) m a
     updateApp n f = IVar fc n
 
-    unelabDef : (vs ** (Env Term vs, Term vs, Term vs)) ->
+    unelabDef : Clause ->
                 Core ImpClause
-    unelabDef (_ ** (env, lhs, rhs))
+    unelabDef (MkClause env lhs rhs)
         = do lhs' <- unelabNoSugar env lhs
              defs <- get Ctxt
              rhsnf <- normaliseArgHoles defs env rhs
@@ -685,6 +685,7 @@ mutual
   quoteGenNF q defs bound env (NErased fc Placeholder) = pure $ Erased fc Placeholder
   quoteGenNF q defs bound env (NErased fc (Dotted t))
     = pure $ Erased fc $ Dotted !(quoteGenNF q defs bound env t)
+  quoteGenNF q defs bound env (NUnmatched fc str) = pure $ Unmatched fc str
   quoteGenNF q defs bound env (NType fc u) = pure $ TType fc u
 
 evalRHS : {vars : _} ->

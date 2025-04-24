@@ -179,8 +179,10 @@ mutual
         = h `hashWithSalt` 9 `hashWithSalt` (show c)
     hashWithSalt h (Erased fc _)
         = hashWithSalt h 10
+    hashWithSalt h (Unmatched fc u)
+        = hashWithSalt h 13 `hashWithSalt` u
     hashWithSalt h (TType fc u)
-        = hashWithSalt h 11 `hashWithSalt` u
+        = hashWithSalt h 15 `hashWithSalt` u
 
   export
   Hashable Pat where
@@ -207,16 +209,23 @@ mutual
         = h `hashWithSalt` 0 `hashWithSalt` idx `hashWithSalt` xs
     hashWithSalt h (STerm _ x)
         = h `hashWithSalt` 1 `hashWithSalt` x
-    hashWithSalt h (Unmatched msg)
+    hashWithSalt h (TUnmatched msg)
         = h `hashWithSalt` 2
     hashWithSalt h Impossible
         = h `hashWithSalt` 3
 
   export
+  Hashable (CaseScope vars) where
+    hashWithSalt h (RHS tm)
+        = hashWithSalt h 0 `hashWithSalt` tm
+    hashWithSalt h (Arg _ x sc)
+        = hashWithSalt h 1 `hashWithSalt` x `hashWithSalt` sc
+
+  export
   Hashable (CaseAlt vars) where
-    hashWithSalt h (ConCase x tag args y)
-        = h `hashWithSalt` 0 `hashWithSalt` x `hashWithSalt` args
-            `hashWithSalt` y
+    hashWithSalt h (ConCase n t sc)
+        = hashWithSalt h 0 `hashWithSalt` n `hashWithSalt` t
+                           `hashWithSalt` sc
     hashWithSalt h (DelayCase t x y)
         = h `hashWithSalt` 2 `hashWithSalt` (show t)
             `hashWithSalt` (show x) `hashWithSalt` y

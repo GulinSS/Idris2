@@ -82,6 +82,7 @@ tryReplace ms (PrimVal fc c) = pure (PrimVal fc c)
 tryReplace ms (Erased fc Impossible) = pure (Erased fc Impossible)
 tryReplace ms (Erased fc Placeholder) = pure (Erased fc Placeholder)
 tryReplace ms (Erased fc (Dotted t)) = Erased fc . Dotted <$> tryReplace ms t
+tryReplace ms (Unmatched fc s) = pure (Unmatched fc s)
 tryReplace ms (TType fc u) = pure (TType fc u)
 
 covering

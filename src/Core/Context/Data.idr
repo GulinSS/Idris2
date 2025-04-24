@@ -5,6 +5,8 @@ module Core.Context.Data
 import Core.Context
 import Core.Context.Log
 import Core.Normalise
+import Core.Env
+import Core.Value
 
 import Data.List
 import Data.Maybe
@@ -118,11 +120,21 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
     conVisibility Export = Private
     conVisibility x = x
 
+    readQs : NF [<] -> Core (List RigCount)
+    readQs (NBind fc x (Pi _ c _ _) sc)
+        = do defs <- get Ctxt
+             rest <- readQs !(sc defs (MkNFClosure defaultOpts [<] (NErased fc Placeholder)))
+             pure (c :: rest)
+    readQs _ = pure []
+
     addDataConstructors : (tag : Int) -> List Constructor ->
                           Context -> Core Context
     addDataConstructors tag [] gam = pure gam
     addDataConstructors tag (MkCon fc n a ty :: cs) gam
-        = do let condef = newDef fc n top vars ty (specified $ conVisibility vis) (DCon tag a Nothing)
+        = do defs <- get Ctxt
+             qs <- readQs !(nf defs [<] ty)
+             let condef = newDef fc n top vars ty (specified $ conVisibility vis)
+                                 (DCon (defaultDataConInfo qs) tag a)
              -- Check 'n' is undefined
              Nothing <- lookupCtxtExact n gam
                  | Just gdef => throw (AlreadyDefined fc n)

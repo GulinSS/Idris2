@@ -15,6 +15,7 @@ record DataCon where
   name  : Name
   tag   : Int
   arity : Nat
+  quantities : List RigCount
 
 ||| Given a normalised type, get all the possible constructors for that
 ||| type family, with their type, name, tag, and arity.
@@ -34,16 +35,20 @@ getCons defs (NTCon _ tn _ _)
         = do Just gdef <- lookupCtxtExact cn (gamma defs)
                   | _ => pure Nothing
              case (gdef.definition, gdef.type) of
-                  (DCon t arity _, ty) =>
-                        pure . Just $ MkDataCon cn t arity
+                  (DCon di t arity, ty) =>
+                        pure . Just $ MkDataCon cn t arity (quantities di)
                   _ => pure Nothing
 getCons defs _ = pure []
 
 emptyRHS : FC -> CaseTree vars -> CaseTree vars
 emptyRHS fc (Case idx el sc alts) = Case idx el sc (map emptyRHSalt alts)
   where
+    emptyRHSscope : forall vars . FC -> CaseScope vars -> CaseScope vars
+    emptyRHSscope fc (RHS tm) = RHS (emptyRHS fc tm)
+    emptyRHSscope fc (Arg c x sc) = Arg c x (emptyRHSscope fc sc)
+
     emptyRHSalt : CaseAlt vars -> CaseAlt vars
-    emptyRHSalt (ConCase n t args sc) = ConCase n t args (emptyRHS fc sc)
+    emptyRHSalt (ConCase n t sc) = ConCase n t (emptyRHSscope fc sc)
     emptyRHSalt (DelayCase c arg sc) = DelayCase c arg (emptyRHS fc sc)
     emptyRHSalt (ConstCase c sc) = ConstCase c (emptyRHS fc sc)
     emptyRHSalt (DefaultCase sc) = DefaultCase (emptyRHS fc sc)
@@ -53,13 +58,17 @@ emptyRHS fc sc = sc
 export
 mkAlt : {vars : _} ->
         FC -> CaseTree vars -> DataCon -> CaseAlt vars
-mkAlt fc sc (MkDataCon cn t ar)
-    = ConCase cn t (map (MN "m") (take ar [0..]))
-              (weakensN (map take) (emptyRHS fc sc))
+mkAlt fc sc (MkDataCon cn t ar qs)
+    = ConCase cn t (mkScope qs (map (MN "m") (take ar [0..])))
+  where
+    mkScope : List RigCount -> SnocList Name -> CaseScope vars
+    mkScope _ [<] = RHS (emptyRHS fc sc)
+    mkScope [] (vs :< v) = Arg top v (weaken (mkScope [] vs))
+    mkScope (q :: qs) (vs :< v) = Arg q v (weaken (mkScope qs vs))
 
 export
 tagIs : Int -> CaseAlt vars -> Bool
-tagIs t (ConCase _ t' _ _) = t == t'
+tagIs t (ConCase _ t' _) = t == t'
 tagIs t (ConstCase _ _) = False
 tagIs t (DelayCase _ _ _) = False
 tagIs t (DefaultCase _) = True

@@ -49,6 +49,7 @@ substTerm outer dropped env (PrimVal fc c) = PrimVal fc c
 substTerm outer dropped env (Erased fc Impossible) = Erased fc Impossible
 substTerm outer dropped env (Erased fc Placeholder) = Erased fc Placeholder
 substTerm outer dropped env (Erased fc (Dotted t)) = Erased fc (Dotted (substTerm outer dropped env t))
+substTerm outer dropped env (Unmatched fc u) = Unmatched fc u
 substTerm outer dropped env (TType fc u) = TType fc u
 
 substTerms outer dropped env xs

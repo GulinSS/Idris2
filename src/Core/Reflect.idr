@@ -31,7 +31,7 @@ getCon : {vars : _} ->
          FC -> Defs -> Name -> Core (Term vars)
 getCon fc defs n
     = case !(lookupDefExact n (gamma defs)) of
-           Just (DCon t a _) => resolved (gamma defs) (Ref fc (DataCon t a) n)
+           Just (DCon _ t a) => resolved (gamma defs) (Ref fc (DataCon t a) n)
            Just (TCon a _ _ _ _ _ _) => resolved (gamma defs) (Ref fc (TyCon a) n)
            Just _ => resolved (gamma defs) (Ref fc Func n)
            _ => throw (UndefinedName fc n)

@@ -621,7 +621,7 @@ dumpHole s n hole
                   logString s.topic n $
                      "Search " ++ show hole ++ " : " ++
                      show !(toFullNames !(normaliseHoles defs ScopeEmpty ty))
-             (PMDef _ args t _ _, ty) =>
+             (Function _ t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
                      show !(normalise defs ScopeEmpty ty) ++

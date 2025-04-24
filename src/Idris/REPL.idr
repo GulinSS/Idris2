@@ -627,7 +627,7 @@ processEdit (ExprSearch upd line name hints)
                      if upd
                         then updateFile (proofSearch name (show itm') (integerToNat (cast (line - 1))))
                         else pure $ DisplayEdit (prettyBy Syntax itm')
-              [(n, nidx, PMDef pi [<] (STerm _ tm) _ _)] =>
+              [(n, nidx, Function pi tm _ _)] =>
                   case holeInfo pi of
                        NotHole => pure $ EditError "Not a searchable hole"
                        SolvedHole locs =>
@@ -895,7 +895,7 @@ process (Eval itm)
                  evalResultName <- DN "it" <$> genName "evalResult"
                  ignore $ addDef evalResultName
                    $ newDef replFC evalResultName top ScopeEmpty ty defaulted
-                   $ PMDef defaultPI ScopeEmpty (STerm 0 ntm) (STerm 0 ntm) []
+                   $ Function defaultPI ntm ntm Nothing
                  addToSave evalResultName
                  put ROpts ({ evalResultName := Just evalResultName } opts)
                  if showTypes opts

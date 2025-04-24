@@ -226,12 +226,12 @@ mutual
                                 Erased _ _ => True -- defined elsewhere, need to expand
                                 _ => False)
                           (case definition gdef of
-                                (PMDef _ _ _ _ _) => True
+                                (Function _ _ _ _) => True
                                 _ => False)
                           rig
            logC "quantity" 10 $ do
              def <- case definition gdef of
-                         PMDef _ _ (STerm _ tm) _ _ =>
+                         Function _ tm _ _ =>
                               do tm' <- toFullNames tm
                                  pure (show tm')
                          _ => pure ""
@@ -402,6 +402,9 @@ mutual
       -- Not universe checking here, just use the top of the hierarchy
       = do log "quantity" 15 "lcheck TType"
            pure (TType fc u, gType fc (MN "top" 0), UsageEmpty)
+  lcheck rig erase env (Unmatched fc str)
+      = do log "quantity" 15 "lcheck TUnmatched"
+           pure (Unmatched fc str, gUnmatched fc str, UsageEmpty)
 
   lcheckBinder : {vars : _} ->
                  {auto c : Ref Ctxt Defs} ->
@@ -476,7 +479,7 @@ mutual
   getArgUsage : {auto c : Ref Ctxt Defs} ->
                 {auto e : Ref UST UState} ->
                 FC -> RigCount -> ClosedTerm ->
-                List (vs ** (Env Term vs, Term vs, Term vs)) ->
+                List Clause ->
                 Core (List ArgUsage)
   getArgUsage topfc rig ty pats
       = do us <- traverse (getPUsage ty) pats
@@ -556,9 +559,9 @@ mutual
                     (rewrite appendAssociative xs [<nm] done in args)
                     (rewrite appendAssociative xs [<nm] done in tm)
 
-      getPUsage : ClosedTerm -> (vs ** (Env Term vs, Term vs, Term vs)) ->
+      getPUsage : ClosedTerm -> Clause ->
                   Core (List (Name, ArgUsage))
-      getPUsage ty (_ ** (penv, lhs, rhs))
+      getPUsage ty (MkClause penv lhs rhs)
           = do logEnv "quantity" 10 "Env" penv
                logTerm "quantity" 10 "LHS" lhs
                logTerm "quantity" 5 "Linear check in case RHS" rhs
@@ -620,7 +623,7 @@ mutual
            if linearChecked def
               then pure (type def)
               else case definition def of
-                        PMDef _ _ _ _ pats =>
+                        Function _ _ _ (Just pats) =>
                             do u <- getArgUsage (getLoc (type def))
                                                 rig (type def) pats
                                log "quantity" 5 $ "Overall arg usage " ++ show u
@@ -656,7 +659,7 @@ mutual
                RigCount -> (erase : Bool) -> Env Term vars ->
                Name -> Int -> Def -> List (Term vars) ->
                Core (Term vars, Glued vars, Usage vars)
-  expandMeta rig erase env n idx (PMDef _ [<] (STerm _ fn) _ _) args
+  expandMeta rig erase env n idx (Function _ fn _ _) args
       = do tm <- substMeta (embed fn) args zero ScopeEmpty
            lcheck rig erase env tm
     where

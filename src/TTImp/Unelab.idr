@@ -46,127 +46,6 @@ Eq UnelabMode where
    _ == _ = False
 
 mutual
-
-  ||| Unelaborate a call to a case expression as an inline case.
-  ||| This should allow us to eventurally resugar case blocks and if-then-else calls.
-  |||
-  ||| This is really hard however because all we have access to is the
-  ||| clauses of the lifted case expression. So e.g.
-  |||      f x = case g x of p -> e
-  ||| became
-  |||      f x = f-case x (g x)
-  |||      f-case x p = e
-  ||| and so to display the
-  |||      f-case (h y) (g (p o))
-  ||| correctly we need to:
-  ||| 1. extract p from f-case x p
-  ||| 2. replace x with (h y) in e
-  |||
-  ||| However it can be the case that x has been split because it was forced by a
-  ||| pattern in p and so looking at (f-case x p) we may not be able to recover the
-  ||| name x.
-  |||
-  ||| We will try to do our best...
-  unelabCase : {vars : _} ->
-               {auto c : Ref Ctxt Defs} ->
-               List (Name, Nat) ->
-               Env Term vars ->
-               Name ->
-               Scopeable (Term vars) ->
-               Core (Maybe IRawImp)
-  unelabCase nest env n args
-      = do defs <- get Ctxt
-           Just glob <- lookupCtxtExact n (gamma defs)
-                | Nothing => pure Nothing
-           let PMDef _ pargs treect _ pats = definition glob
-                | _ => pure Nothing
-           let Just argpos = findArgPos treect
-                | _ => pure Nothing
-           if length args == length pargs
-              then mkCase pats argpos args
-              else pure Nothing
-    where
-      -- Need to find the position of the scrutinee to rebuild original
-      -- case correctly
-      findArgPos : CaseTree as -> Maybe Nat
-      findArgPos (Case idx p _ _) = Just idx
-      findArgPos _ = Nothing
-
-      idxOrMaybe : Nat -> Scopeable a -> Maybe a
-      idxOrMaybe Z (_ :< x) = Just x
-      idxOrMaybe (S k) (xs :< _) = idxOrMaybe k xs
-      idxOrMaybe _ [<] = Nothing
-
-      -- TODO: some utility like this should probably be implemented in Core
-      substVars : Scopeable (List (Var vs), Term vs) -> Term vs -> Term vs
-      substVars xs tm@(Local fc _ idx prf)
-          = case find (any ((idx ==) . varIdx) . fst) xs of
-                 Just (_, new) => new
-                 Nothing => tm
-      substVars xs (Meta fc n i args)
-          = Meta fc n i (mapSnd @{Compose} (substVars xs) args)
-      substVars xs (Bind fc y b scope)
-          = Bind fc y (map (substVars xs) b) (substVars (map (bimap (map weaken) weaken) xs) scope)
-      substVars xs (App fc fn r arg)
-          = App fc (substVars xs fn) r (substVars xs arg)
-      substVars xs (As fc s as pat)
-          = As fc s as (substVars xs pat)
-      substVars xs (TDelayed fc y z)
-          = TDelayed fc y (substVars xs z)
-      substVars xs (TDelay fc y t z)
-          = TDelay fc y (substVars xs t) (substVars xs z)
-      substVars xs (TForce fc r y)
-          = TForce fc r (substVars xs y)
-      substVars xs tm = tm
-
-      substArgs : SizeOf vs -> Scopeable (List (Var vs), Term vars) -> Term vs -> Term (vars ++ vs)
-      substArgs p substs tm =
-        let substs' = map (bimap (map embed) (weakenNs p)) substs
-            tm' = embed tm
-         in substVars substs' tm'
-
-      argVars : {vs : _} -> Term vs -> List (Var vs)
-      argVars (As _ _ as pat) = argVars as ++ argVars pat
-      argVars (Local _ _ _ p) = [MkVar p]
-      argVars _ = []
-
-      mkClause : FC -> Nat ->
-                 Scopeable (Term vars) ->
-                 (vs ** (Env Term vs, Term vs, Term vs)) ->
-                 Core (Maybe IImpClause)
-      mkClause fc argpos args (vs ** (clauseEnv, lhs, rhs))
-          = do logTerm "unelab.case.clause" 20 "Unelaborating clause" lhs
-               let patArgs = snd (getFnArgsSpine lhs)
-                   Just pat = idxOrMaybe argpos patArgs
-                     | _ => pure Nothing
-                   rhs = substArgs (mkSizeOf vs) (zip (map (argVars . snd) patArgs) args) rhs
-               logTerm "unelab.case.clause" 20 "Unelaborating LHS" (snd pat)
-               lhs' <- unelabTy Full nest clauseEnv (snd pat)
-               logTerm "unelab.case.clause" 20 "Unelaborating RHS" rhs
-               logEnv "unelab.case.clause" 20 "In Env" clauseEnv
-               rhs' <- unelabTy Full nest (clauseEnv ++ env) rhs
-               pure $ Just $ (PatClause fc (fst lhs') (fst rhs'))
-
-      ||| mkCase looks up the value passed as the scrutinee of the case-block.
-      ||| @ argpos  is the index of the case-block's scrutinee in args
-      ||| @ args    is the list of arguments at the call site of the case-block
-      |||
-      ||| Once we have the scrutinee `e`, we can form `case e of` and so focus
-      ||| on manufacturing the clauses.
-      mkCase : List (vs ** (Env Term vs, Term vs, Term vs)) ->
-               (argpos : Nat) -> Scopeable (Term vars) -> Core (Maybe IRawImp)
-      mkCase pats argpos args
-          = do unless (null args) $ log "unelab.case.clause" 20 $
-                 unwords $ "Ignoring" :: map show (toList args)
-               let Just scrutinee = idxOrMaybe argpos args
-                     | _ => pure Nothing
-                   fc = getLoc scrutinee
-               (tm, _) <- unelabTy Full nest env scrutinee
-               Just pats' <- map sequence $ traverse (mkClause fc argpos args) pats
-                 | _ => pure Nothing
-               -- TODO: actually grab the fnopts?
-               pure $ Just $ ICase fc [] tm (Implicit fc False) pats'
-
   dropParams : List (Name, Nat) -> (IRawImp, Glued vars) ->
                Core (IRawImp, Glued vars)
   dropParams nest (tm, ty)
@@ -266,18 +145,6 @@ mutual
            (arg', gargty) <- unelabTy umode nest env arg
            fnty <- getNF gfnty
            defs <- get Ctxt
-           Nothing <-
-              case umode of
-                (NoSugar _) => pure Nothing
-                ImplicitHoles => pure Nothing
-                _ => case getFnArgsSpine tm of
-                     (Ref _ _ fnName, args) => do
-                       fullName <- getFullName fnName
-                       let (NS ns (CaseBlock n i)) = fullName
-                         | _ => pure Nothing
-                       unelabCase nest env fullName (map snd args)
-                     _ => pure Nothing
-             | Just tm => pure (tm, gErased fc)
            case fnty of
                 NBind _ x (Pi _ rig Explicit ty) sc
                   => do sc' <- sc defs (toClosure defaultOpts env arg)
@@ -285,8 +152,10 @@ mutual
                                 glueBack defs env sc')
                 NBind _ x (Pi _ rig p ty) sc
                   => do sc' <- sc defs (toClosure defaultOpts env arg)
-                        pure (INamedApp fc fn' x arg',
-                                glueBack defs env sc')
+                        case umode of
+                             (NoSugar _) => pure (fn', glueBack defs env sc')
+                             ImplicitHoles => pure (fn', glueBack defs env sc')
+                             _ => pure (INamedApp fc fn' x arg', glueBack defs env sc')
                 _ => pure (IApp fc fn' arg', gErased fc)
   unelabTy' umode nest env (As fc s p tm)
       = do (p', _) <- unelabTy' umode nest env p
@@ -314,6 +183,7 @@ mutual
     = unelabTy' umode nest env t
   unelabTy' umode nest env (Erased fc _) = pure (Implicit fc True, gErased fc)
   unelabTy' umode nest env (TType fc _) = pure (IType fc, gType fc (MN "top" 0))
+  unelabTy' umode nest env (Unmatched fc msg) = pure (Implicit fc True, gUnmatched fc msg)
 
   unelabPi : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->

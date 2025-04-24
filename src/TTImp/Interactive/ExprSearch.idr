@@ -294,7 +294,7 @@ searchName fc rigc opts hints env target topty (n, ndef)
              | _ => noResult
          let namety : NameType
                  = case definition ndef of
-                        DCon tag arity _ => DataCon tag arity
+                        DCon _ tag arity => DataCon tag arity
                         TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
          log "interaction.search" 5 $ "Trying " ++ show (fullname ndef)
@@ -848,7 +848,7 @@ exprSearchOpts opts fc n_in hints
          -- the REPL does this step, but doing it here too because
          -- expression search might be invoked some other way
          let Hole _ _ = definition gdef
-             | PMDef pi [<] (STerm _ tm) _ _
+             | Function pi tm _ _
                  => do raw <- unelab ScopeEmpty !(toFullNames !(normaliseHoles defs ScopeEmpty tm))
                        one (map rawName raw)
              | _ => throw (GenericMsg fc "Name is already defined")
