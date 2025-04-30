@@ -29,9 +29,10 @@ public export
 Scope : Type
 Scope = Scopeable Name
 
-public export
-ScopeEmpty : Scopeable a
-ScopeEmpty = []
+namespace Scope
+  public export
+  empty : Scopeable a
+  empty = []
 
 {-
 public export

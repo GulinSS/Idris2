@@ -16,6 +16,7 @@ import Core.TT
 
 import Data.Maybe
 import Data.List
+import Data.List.Quantifiers
 import Data.SnocList
 import Data.Vect
 
@@ -28,12 +29,8 @@ import Libraries.Data.SnocList.Extra
 
 %default covering
 
-data EEnv : Scope -> Scope -> Type where
-     Nil : EEnv free ScopeEmpty
-     (::) : CExp free -> EEnv free vars -> EEnv free (x :: vars)
-public export
-ScopeEmpty : EEnv tm ScopeEmpty
-ScopeEmpty = []
+EEnv : Scope -> Scope -> Type
+EEnv free = All (\_ => CExp free)
 
 extend : EEnv free vars -> (args : List (CExp free)) -> (args' : List Name) ->
          LengthMatch args args' -> EEnv free (AddInner vars args')
@@ -154,7 +151,8 @@ mutual
   eval : {vars, free : _} ->
          {auto c : Ref Ctxt Defs} ->
          {auto l : Ref LVar Int} ->
-         List Name -> EEnv free vars -> Stack free -> CExp (vars ++ free) ->
+         List Name -> -- TODO should be a set
+         EEnv free vars -> Stack free -> CExp (vars ++ free) ->
          Core (CExp free)
   eval rec env stk (CLocal fc p) = evalLocal fc rec stk env p
   -- This is hopefully a temporary hack, giving a special case for io_bind.
@@ -169,7 +167,7 @@ mutual
         case (n == NS primIONS (UN $ Basic "io_bind"), stk) of
           (True, act :: cont :: world :: stk) =>
                  do xn <- genName "act"
-                    sc <- eval rec ScopeEmpty [] (CApp fc cont [CRef fc xn, world])
+                    sc <- eval rec [] [] (CApp fc cont [CRef fc xn, world])
                     pure $ unload stk $
                              CLet fc xn NotInline
                                (CApp fc act [world])
@@ -178,7 +176,7 @@ mutual
                  do wn <- genName "world"
                     xn <- genName "act"
                     let world : forall vars. CExp vars := CRef fc wn
-                    sc <- eval rec ScopeEmpty [] (CApp fc cont [CRef fc xn, world])
+                    sc <- eval rec [] [] (CApp fc cont [CRef fc xn, world])
                     pure $ CLam fc wn
                          $ refToLocal wn wn
                          $ CLet fc xn NotInline (CApp fc act [world])
@@ -238,7 +236,7 @@ mutual
       = pure $ unload stk $ CExtPrim fc p !(traverse (eval rec env []) args)
   eval rec env stk (CForce fc lr e)
       = case !(eval rec env [] e) of
-             CDelay _ _ e' => eval rec ScopeEmpty stk e'
+             CDelay _ _ e' => eval rec [] stk e'
              res => pure $ unload stk (CForce fc lr res) -- change this to preserve laziness semantics
   eval rec env stk (CDelay fc lr e)
       = pure $ unload stk (CDelay fc lr !(eval rec env [] e))
@@ -446,7 +444,7 @@ getNewArgs {done = x :: xs} (_ :: sub) = x :: getNewArgs sub
 -- not the highest, as you'd expect if they were all lambdas).
 mergeLambdas : (args : Scope) -> CExp args -> (args' ** CExp args')
 mergeLambdas args (CLam fc x sc)
-    = let (args' ** (s, env, exp')) = getLams zero 0 ScopeEmpty (CLam fc x sc)
+    = let (args' ** (s, env, exp')) = getLams zero 0 Subst.empty (CLam fc x sc)
           expNs = substs s env exp'
           newArgs = reverse $ getNewArgs env
           expLocs = mkLocals (mkSizeOf args) {vars = []} (mkBounds newArgs)
@@ -463,7 +461,7 @@ doEval : {args : _} ->
 doEval n exp
     = do l <- newRef LVar (the Int 0)
          log "compiler.inline.eval" 10 (show n ++ ": " ++ show exp)
-         exp' <- eval [] ScopeEmpty [] exp
+         exp' <- eval [] [] [] exp
          log "compiler.inline.eval" 10 ("Inlined: " ++ show exp')
          pure exp'
 

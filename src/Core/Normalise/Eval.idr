@@ -10,6 +10,7 @@ import Core.TT
 import Core.Value
 
 import Data.List
+import Data.List.Quantifiers
 import Data.SnocList
 import Data.Maybe
 import Data.Nat
@@ -62,7 +63,7 @@ evalArg defs c = evalClosure defs c
 
 export
 toClosure : EvalOpts -> Env Term outer -> Term outer -> Closure outer
-toClosure opts env tm = MkClosure opts ScopeEmpty env tm
+toClosure opts env tm = MkClosure opts LocalEnv.empty env tm
 
 updateLimit : NameType -> Name -> EvalOpts -> Core (Maybe EvalOpts)
 updateLimit Func n opts
@@ -110,7 +111,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
         -- use this a *lot* and it saves the run time overhead of making
         -- a closure and calling APPLY.
         closeArgs : List (Term (AddInner free vars)) -> List (Closure free)
-        closeArgs [] = ScopeEmpty
+        closeArgs [] = []
         closeArgs (t :: ts) = MkClosure topopts locs env t :: closeArgs ts
     eval env locs (Bind fc x (Lam _ r _ ty) scope) (thunk :: stk)
         = eval env (snd thunk :: locs) scope stk
@@ -176,7 +177,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
         = evalRef env False fc nt fn (args ++ stk)
                   (NApp fc (NRef nt fn) (args ++ stk))
     applyToStack env (NApp fc (NLocal mrig idx p) args) stk
-        = evalLocal env fc mrig _ p (args ++ stk) ScopeEmpty
+        = evalLocal env fc mrig _ p (args ++ stk) LocalEnv.empty
     applyToStack env (NApp fc (NMeta n i args) args') stk
         = evalMeta env fc n i args (args' ++ stk)
     applyToStack env (NDCon fc n t a args) stk
@@ -233,7 +234,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
              && fromMaybe True mrig
              then
                case getBinder prf env of
-                    Let _ _ val _ => eval env ScopeEmpty val stk
+                    Let _ _ val _ => eval env LocalEnv.empty val stk
                     _ => pure $ NApp fc (NLocal mrig idx prf) stk
              else pure $ NApp fc (NLocal mrig idx prf) stk
     evalLocal env fc mrig Z First stk (x :: locs)
@@ -571,13 +572,13 @@ export
 nf : {auto c : Ref Ctxt Defs} ->
      {vars : _} ->
      Defs -> Env Term vars -> Term vars -> Core (NF vars)
-nf defs env tm = eval defs defaultOpts env ScopeEmpty tm []
+nf defs env tm = eval defs defaultOpts env LocalEnv.empty tm []
 
 export
 nfOpts : {auto c : Ref Ctxt Defs} ->
          {vars : _} ->
          EvalOpts -> Defs -> Env Term vars -> Term vars -> Core (NF vars)
-nfOpts opts defs env tm = eval defs opts env ScopeEmpty tm []
+nfOpts opts defs env tm = eval defs opts env LocalEnv.empty tm []
 
 export
 gnf : {vars : _} ->

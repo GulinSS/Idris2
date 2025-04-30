@@ -814,27 +814,30 @@ export
 traversePair : (a -> Core b) -> (w, a) -> Core (w, b)
 traversePair f (w, a) = (w,) <$> f a
 
-export
-traverse_ : (a -> Core b) -> List a -> Core ()
-traverse_ f [] = pure ()
-traverse_ f (x :: xs)
-    = Core.do ignore (f x)
-              traverse_ f xs
-%inline
-export
-for_ : List a -> (a -> Core ()) -> Core ()
-for_ = flip traverse_
+namespace List
+  export
+  traverse_ : (a -> Core b) -> List a -> Core ()
+  traverse_ f [] = pure ()
+  traverse_ f (x :: xs)
+      = Core.do ignore (f x)
+                traverse_ f xs
 
-%inline
-export
-sequence : List (Core a) -> Core (List a)
-sequence (x :: xs)
-   = do
-        x' <- x
-        xs' <- sequence xs
-        pure (x' :: xs')
-sequence [] = pure []
+  %inline
+  export
+  for_ : List a -> (a -> Core ()) -> Core ()
+  for_ = flip traverse_
 
+  %inline
+  export
+  sequence : List (Core a) -> Core (List a)
+  sequence (x :: xs)
+     = do
+          x' <- x
+          xs' <- sequence xs
+          pure (x' :: xs')
+  sequence [] = pure []
+
+-- TODO put in namespace `List1`
 export
 traverseList1_ : (a -> Core b) -> List1 a -> Core ()
 traverseList1_ f xxs

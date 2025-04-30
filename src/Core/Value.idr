@@ -5,6 +5,8 @@ import Core.Core
 import Core.Env
 import Core.TT
 
+import Data.List.Quantifiers
+
 %default covering
 
 public export
@@ -56,10 +58,10 @@ cbv : EvalOpts
 cbv = { strategy := CBV } defaultOpts
 
 mutual
+  -- TODO swap arguments and type as `Scope -> Scoped`
   public export
-  data LocalEnv : Scope -> Scope -> Type where
-       Nil  : LocalEnv free []
-       (::) : Closure free -> LocalEnv free vars -> LocalEnv free (x :: vars)
+  LocalEnv : Scope -> Scope -> Type
+  LocalEnv free = All (\_ => Closure free)
 
   public export
   data Closure : Scoped where
@@ -115,9 +117,10 @@ public export
 ClosedNF : Type
 ClosedNF = NF []
 
-public export
-ScopeEmpty : LocalEnv free []
-ScopeEmpty = []
+namespace LocalEnv
+  public export
+  empty : LocalEnv free []
+  empty = []
 
 export
 ntCon : FC -> Name -> Int -> Nat -> List (FC, Closure vars) -> NF vars

@@ -139,8 +139,8 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
          -- The interface name might be qualified, so check if it's an
          -- alias for something
          syn <- get Syn
-         defs <- get Ctxt
-         let varsList = toList vars
+         s <- get Ctxt
+         let varsList = toList vars -- TODO change list in findBindableNames?
          inames <- lookupCtxtName iname (gamma defs)
          let [cndata] = concatMap (\n => lookupName n (ifaces syn))
                                   (map fst inames)

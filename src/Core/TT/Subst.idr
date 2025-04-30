@@ -15,12 +15,12 @@ import Libraries.Data.SnocList.SizeOf
 -- TODO replace by pointwise lifting: `Subst tm ds vars = All (\_. tm vars) ds`
 public export
 data Subst : Scoped -> Scope -> Scoped where
-  Nil : Subst tm ScopeEmpty vars
+  Nil : Subst tm Scope.empty vars
   (::) : tm vars -> Subst tm ds vars -> Subst tm (d :: ds) vars
 
 public export
-ScopeEmpty : Subst tm ScopeEmpty vars
-ScopeEmpty = []
+empty : Subst tm Scope.empty vars
+empty = []
 
 
 namespace Var

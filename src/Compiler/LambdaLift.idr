@@ -262,7 +262,7 @@ data LiftedDef : Type where
      ||| `LCrash` rather than `prim_crash`.
      |||
      ||| @ expl : an explanation of the error.
-     MkLError : (expl : Lifted ScopeEmpty) -> LiftedDef
+     MkLError : (expl : Lifted Scope.empty) -> LiftedDef
 
 showLazy : Maybe LazyReason -> String
 showLazy = maybe "" $ (" " ++) . show
@@ -462,8 +462,8 @@ dropIdx : {vars : _} ->
 dropIdx [] (False::_) First = MkVar First
 dropIdx [] (True::_) First = assert_total $
   idris_crash "INTERNAL ERROR: Referenced variable marked as unused"
-dropIdx [] (False::rest) (Later p) = Var.later $ dropIdx ScopeEmpty rest p
-dropIdx [] (True::rest) (Later p) = dropIdx ScopeEmpty rest p
+dropIdx [] (False::rest) (Later p) = Var.later $ dropIdx Scope.empty rest p
+dropIdx [] (True::rest) (Later p) = dropIdx Scope.empty rest p
 dropIdx (_::xs) unused First = MkVar First
 dropIdx (_::xs) unused (Later p) = Var.later $ dropIdx xs unused p
 
@@ -611,7 +611,7 @@ export
 lambdaLiftDef : (doLazyAnnots : Bool) -> Name -> CDef -> Core (List (Name, LiftedDef))
 lambdaLiftDef doLazyAnnots n (MkFun args exp)
     = do (expl, defs) <- liftBody {doLazyAnnots} n exp
-         pure ((n, MkLFun args ScopeEmpty expl) :: defs)
+         pure ((n, MkLFun args Scope.empty expl) :: defs)
 lambdaLiftDef _ n (MkCon t a nt) = pure [(n, MkLCon t a nt)]
 lambdaLiftDef _ n (MkForeign ccs fargs ty) = pure [(n, MkLForeign ccs fargs ty)]
 lambdaLiftDef doLazyAnnots n (MkError exp)

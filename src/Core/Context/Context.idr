@@ -74,7 +74,7 @@ data Def : Type where
             (args : Scope) ->
             (treeCT : CaseTree args) ->
             (treeRT : CaseTree args) ->
-            (pats : List (vs ** (Env Term vs, Term vs, Term vs))) ->
+            (pats : List (vs : Scope ** (Env Term vs, Term vs, Term vs))) ->
                 -- original checked patterns (LHS/RHS) with the names in
                 -- the environment. Used for display purposes, for helping
                 -- find size changes in termination checking, and for

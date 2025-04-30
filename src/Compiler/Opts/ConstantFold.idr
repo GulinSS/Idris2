@@ -31,18 +31,20 @@ foldableOp _                = True
 
 
 data Subst : Scope -> Scoped where
-  Nil  : Subst ScopeEmpty vars
+  Nil  : Subst Scope.empty vars
   (::) : CExp vars -> Subst ds vars -> Subst (d :: ds) vars
   Wk   : SizeOf ws -> Subst ds vars -> Subst (ws ++ ds) (ws ++ vars)
 
-ScopeEmpty : Subst ScopeEmpty vars
-ScopeEmpty = []
+namespace Subst
+  public export
+  empty : Subst Scope.empty vars
+  empty = []
 
 initSubst : (vars : Scope) -> Subst vars vars
+initSubst [] = Subst.empty
 initSubst vars
   = rewrite sym $ appendNilRightNeutral vars in
-    Wk (mkSizeOf vars) ScopeEmpty
-
+    Wk (mkSizeOf vars) Subst.empty
 
 wk : SizeOf out -> Subst ds vars -> Subst (out ++ ds) (out ++ vars)
 wk sout (Wk {ws, ds, vars} sws rho)

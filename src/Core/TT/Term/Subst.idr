@@ -20,9 +20,6 @@ public export
 SubstEnv : Scope -> Scoped
 SubstEnv = Subst Term
 
-ScopeSingle : Term vars -> SubstEnv [x] vars
-ScopeSingle n = [n]
-
 substTerm : Substitutable Term Term
 substTerms : Substitutable Term (List . Term)
 substBinder : Substitutable Term (Binder . Term)
@@ -61,4 +58,4 @@ substs dropped env tm = substTerm zero dropped env tm
 
 export
 subst : Term vars -> Term (ScopeBind vars x) -> Term vars
-subst val tm = substs (suc zero) (ScopeSingle val) tm
+subst val tm = substs (suc zero) [val] tm
