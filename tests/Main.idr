@@ -100,12 +100,6 @@ idrisTestsAllBackends cg = MkTestPool
 idrisTestsTotality : IO TestPool
 idrisTestsTotality = testsInDir "idris2/total" "Totality checking"
 
--- This will only work with an Idris compiled via Chez or Racket, but at
--- least for the moment we're not officially supporting self hosting any
--- other way. If we do, we'll need to have a way to disable these.
-idrisTestsSchemeEval : IO TestPool
-idrisTestsSchemeEval = testsInDir "idris2/schemeeval" "Scheme Evaluator"
-
 idrisTestsReflection : IO TestPool
 idrisTestsReflection = testsInDir "idris2/reflection" "Quotation and Reflection"
 
@@ -223,7 +217,6 @@ main = runner $
   , !idrisTestsEvaluator
   , !idrisTestsREPL
   , !idrisTestsTotality
-  , !idrisTestsSchemeEval
   , !idrisTestsReflection
   , !idrisTestsWith
   , !idrisTestsOperators
