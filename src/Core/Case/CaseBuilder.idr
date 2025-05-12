@@ -1051,12 +1051,10 @@ mutual
            pure (Case _ el (resolveNames vars ty) g)
     where
       mkScope : forall vars . (vs : SnocList Name) ->
-                              (ms : SnocList RigCount) ->
                               CaseScope (vars ++ vs) ->
                 CaseScope vars
-      mkScope [<] _ rhs = rhs
-      mkScope (sx :< y) (ms :< c) rhs = mkScope sx ms (Arg c y rhs)
-      mkScope (sx :< y) _ rhs = mkScope sx [<] (Arg top y rhs)
+      mkScope [<] rhs = rhs
+      mkScope (sx :< y) rhs = mkScope sx (Arg y rhs)
 
       altGroups : List (Group todo vars) -> Core (List (CaseAlt vars))
       altGroups [] = maybe (pure [])
@@ -1065,7 +1063,7 @@ mutual
       altGroups (ConGroup {newargs} cn tag rest :: cs)
           = do crest <- match fc fn phase rest (map (weakensN (mkSizeOf newargs)) errorCase)
                cs' <- altGroups cs
-               pure (ConCase cn tag (mkScope (cast newargs) ?rigcount (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
+               pure (ConCase cn tag (mkScope (cast newargs) (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
       altGroups (DelayGroup {tyarg} {valarg} rest :: cs)
           = do crest <- match fc fn phase rest (map (weakenNs (mkSizeOf [<tyarg, valarg])) errorCase)
                cs' <- altGroups cs
@@ -1329,7 +1327,7 @@ mutual
 
   findReachedCaseScope : CaseScope a -> List Int
   findReachedCaseScope (RHS tm) = findReached tm
-  findReachedCaseScope (Arg _ _ cs) = findReachedCaseScope cs
+  findReachedCaseScope (Arg _ cs) = findReachedCaseScope cs
 
   findReached : CaseTree ns -> List Int
   findReached (Case _ _ _ alts) = concatMap findReachedAlts alts
@@ -1402,7 +1400,7 @@ findExtraDefaults fc defs ctree@(Case {name = var} idx el ty altsIn)
   where
     findExtraAltsScope : {vars : _} -> CaseScope vars -> Core (List Int)
     findExtraAltsScope (RHS tm) = findExtraDefaults fc defs tm
-    findExtraAltsScope (Arg c x sc) = findExtraAltsScope sc
+    findExtraAltsScope (Arg x sc) = findExtraAltsScope sc
 
     findExtraAlts : CaseAlt vars -> Core (List Int)
     findExtraAlts (ConCase x tag ctree') = findExtraAltsScope ctree'

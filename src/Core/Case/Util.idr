@@ -15,7 +15,6 @@ record DataCon where
   name  : Name
   tag   : Int
   arity : Nat
-  quantities : List RigCount
 
 ||| Given a normalised type, get all the possible constructors for that
 ||| type family, with their type, name, tag, and arity.
@@ -36,7 +35,7 @@ getCons defs (NTCon _ tn _ _ _)
                   | _ => pure Nothing
              case (gdef.definition, gdef.type) of
                   (DCon di t arity, ty) =>
-                        pure . Just $ MkDataCon cn t arity (quantities di)
+                        pure . Just $ MkDataCon cn t arity
                   _ => pure Nothing
 getCons defs _ = pure []
 
@@ -45,7 +44,7 @@ emptyRHS fc (Case idx el sc alts) = Case idx el sc (map emptyRHSalt alts)
   where
     emptyRHSscope : forall vars . FC -> CaseScope vars -> CaseScope vars
     emptyRHSscope fc (RHS tm) = RHS (emptyRHS fc tm)
-    emptyRHSscope fc (Arg c x sc) = Arg c x (emptyRHSscope fc sc)
+    emptyRHSscope fc (Arg x sc) = Arg x (emptyRHSscope fc sc)
 
     emptyRHSalt : CaseAlt vars -> CaseAlt vars
     emptyRHSalt (ConCase n t sc) = ConCase n t (emptyRHSscope fc sc)
@@ -58,13 +57,12 @@ emptyRHS fc sc = sc
 export
 mkAlt : {vars : _} ->
         FC -> CaseTree vars -> DataCon -> CaseAlt vars
-mkAlt fc sc (MkDataCon cn t ar qs)
-    = ConCase cn t (mkScope qs (map (MN "m") (take ar [0..])))
+mkAlt fc sc (MkDataCon cn t ar)
+    = ConCase cn t (mkScope (map (MN "m") (take ar [0..])))
   where
-    mkScope : List RigCount -> SnocList Name -> CaseScope vars
-    mkScope _ [<] = RHS (emptyRHS fc sc)
-    mkScope [] (vs :< v) = Arg top v (weaken (mkScope [] vs))
-    mkScope (q :: qs) (vs :< v) = Arg q v (weaken (mkScope qs vs))
+    mkScope : SnocList Name -> CaseScope vars
+    mkScope [<] = RHS (emptyRHS fc sc)
+    mkScope (vs :< v) = Arg v (weaken (mkScope vs))
 
 export
 tagIs : Int -> CaseAlt vars -> Bool
