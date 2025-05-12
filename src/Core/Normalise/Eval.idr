@@ -361,7 +361,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
                     Core (CaseResult (TermWithEnv free))
     evalCaseScope {more} env loc opts fc stk [<] (RHS tm)
         = evalTree env loc opts fc stk tm
-    evalCaseScope {more} env loc opts fc stk (sp :< e) (Arg r x sc)
+    evalCaseScope {more} env loc opts fc stk (sp :< e) (Arg x sc)
         = evalCaseScope env (loc :< snd e) opts fc stk sp sc
     evalCaseScope _ _ _ _ _ _ _ = pure GotStuck
 
