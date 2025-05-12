@@ -4,6 +4,11 @@ import Core.Case.CaseTree
 import Core.Context
 import Core.Value
 
+import Data.SnocList
+import Libraries.Data.SnocList.Extra
+import Libraries.Data.SnocList.SizeOf
+import Libraries.Data.List.SizeOf
+
 public export
 record DataCon where
   constructor MkDataCon
@@ -20,7 +25,7 @@ getCons : {auto c : Ref Ctxt Defs} ->
 getCons defs (NTCon _ tn _ _ _)
     = case !(lookupDefExact tn (gamma defs)) of
            Just (TCon _ _ _ _ _ _ cons _) =>
-                do cs' <- traverse addTy cons
+                do cs' <- traverse addTy (fromMaybe [] cons)
                    pure (catMaybes cs')
            _ => throw (InternalError "Called `getCons` on something that is not a Type constructor")
   where
@@ -50,7 +55,7 @@ mkAlt : {vars : _} ->
         FC -> CaseTree vars -> DataCon -> CaseAlt vars
 mkAlt fc sc (MkDataCon cn t ar)
     = ConCase cn t (map (MN "m") (take ar [0..]))
-              (weakenNs (map take) (emptyRHS fc sc))
+              (weakensN (map take) (emptyRHS fc sc))
 
 export
 tagIs : Int -> CaseAlt vars -> Bool

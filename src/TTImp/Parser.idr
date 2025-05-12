@@ -501,7 +501,7 @@ tyDecl fname indents
          ty <- expr fname indents
          end <- location
          atEnd indents
-         pure (MkImpTy (MkFC fname start end) (MkFC fname start nameEnd) n ty)
+         pure (MkImpTy (MkFC fname start end) (MkFCVal (MkFC fname start nameEnd) n) ty)
 
 mutual
   parseRHS : (withArgs : Nat) ->
@@ -522,7 +522,9 @@ mutual
            symbol "("
            wval <- expr fname indents
            symbol ")"
-           prf <- optional (keyword "proof" *> name)
+           prf <- optional $ do
+                    keyword "proof"
+                    pure (!(getMult !multiplicity), !name)
            ws <- nonEmptyBlock (clause (S withArgs) fname)
            end <- location
            let fc = MkFC fname start end
@@ -576,7 +578,7 @@ dataOpt
   <|> do exactIdent "uniqueSearch"
          pure UniqueSearch
   <|> do exactIdent "search"
-         ns <- forget <$> some name
+         ns <- some name
          pure (SearchBy ns)
 
 dataOpts : EmptyRule (List DataOpt)
@@ -733,7 +735,7 @@ topDecl fname indents
          rig <- getMult m
          claim <- tyDecl fname indents
          end <- location
-         pure (IClaim (MkFC fname start end) rig vis opts claim)
+         pure (IClaim (MkFCVal (MkFC fname start end) $ MkIClaimData  rig vis opts claim))
   <|> recordDecl fname indents
   <|> directive fname indents
   <|> definition fname indents

@@ -130,7 +130,7 @@ Eq Error where
   FailingWrongError fc1 x1 err1 == FailingWrongError fc2 x2 err2
     = fc1 == fc2 && x1 == x2 && assert_total (err1 == err2)
   InType fc1 n1 err1 == InType fc2 n2 err2 = fc1 == fc2 && n1 == n2 && err1 == err2
-  InCon fc1 n1 err1 == InCon fc2 n2 err2 = fc1 == fc2 && n1 == n2 && err1 == err2
+  InCon n1 err1 == InCon n2 err2 = n1 == n2 && err1 == err2
   InLHS fc1 n1 err1 == InLHS fc2 n2 err2 = fc1 == fc2 && n1 == n2 && err1 == err2
   InRHS fc1 n1 err1 == InRHS fc2 n2 err2 = fc1 == fc2 && n1 == n2 && err1 == err2
   MaybeMisspelling err1 xs1 == MaybeMisspelling err2 xs2 = err1 == err2 && xs1 == xs2
@@ -392,7 +392,7 @@ perrorRaw (NotCovering fc n (MissingCases cs))
     = pure $ errorDesc (code (pretty0 !(prettyName n)) <++> reflow "is not covering.")
         <+> line <+> !(ploc fc) <+> line
         <+> reflow "Missing cases" <+> colon <+> line
-        <+> indent 4 (vsep !(traverse (pshow []) cs)) <+> line
+        <+> indent 4 (vsep !(traverse (pshow ScopeEmpty) cs)) <+> line
 perrorRaw (NotCovering fc n (NonCoveringCall ns))
     = pure $ errorDesc (pretty0 !(prettyName n) <++> reflow "is not covering.")
         <+> line <+> !(ploc fc) <+> line
@@ -533,8 +533,8 @@ perrorRaw (CantSolveGoal fc gam env g reason)
     dropEnv : {vars : _} ->
               Env Term vars -> Term vars ->
               (ns ** (Env Term ns, Term ns))
-    dropEnv env (Bind _ n b@(Pi _ _ _ _) sc) = dropEnv (b :: env) sc
-    dropEnv env (Bind _ n b@(Let _ _ _ _) sc) = dropEnv (b :: env) sc
+    dropEnv env (Bind _ n b@(Pi _ _ _ _) sc) = dropEnv (env :< b) sc
+    dropEnv env (Bind _ n b@(Let _ _ _ _) sc) = dropEnv (env :< b) sc
     dropEnv env tm = (_ ** (env, tm))
 
 perrorRaw (DeterminingArg fc n i env g)
@@ -747,7 +747,7 @@ perrorRaw (CyclicImports ns)
         <++> concatWith (surround " -> ") (pretty0 <$> ns)
 perrorRaw ForceNeeded = pure $ errorDesc (reflow "Internal error when resolving implicit laziness")
 perrorRaw (InternalError str) = pure $ errorDesc (reflow "INTERNAL ERROR" <+> colon) <++> pretty0 str
-perrorRaw (UserError str) = pure $ errorDesc ("Error" <+> colon) <++> pretty0 str
+perrorRaw (UserError str) = pure . errorDesc $ pretty0 str
 perrorRaw (NoForeignCC fc specs) = do
     let cgs = fst <$> availableCGs (options !(get Ctxt))
     let res = vsep [ errorDesc (reflow ("The given specifier '" ++ show specs ++ "' was not accepted by any backend. Available backends") <+> colon)
@@ -773,8 +773,8 @@ perrorRaw (InType fc n err)
     = pure $ hsep [ errorDesc (reflow "While processing type of" <++> code (pretty0 !(prettyName n))) <+> dot
                   , !(perrorRaw err)
                   ]
-perrorRaw (InCon fc n err)
-    = pure $ hsep [ errorDesc (reflow "While processing constructor" <++> code (pretty0 !(prettyName n))) <+> dot
+perrorRaw (InCon n err)
+    = pure $ hsep [ errorDesc (reflow "While processing constructor" <++> code (pretty0 !(prettyName n.val))) <+> dot
                   , !(perrorRaw err)
                   ]
 perrorRaw (InLHS fc n err)

@@ -40,6 +40,10 @@ sed_literal() {
     printf '%s\n' "$1" | sed -e 's/[]\/$*.^[]/\\&/g'
 }
 
+windows_path_tweaks() {
+    sed 's#C:.msys64##' | sed 's#\\#/#g'
+}
+
 # used below to normalise machine names
 # shellcheck disable=SC2016
 _awk_clean_name='
@@ -76,6 +80,10 @@ _awk_clean_name='
 # normalise machine names
 clean_names() {
     awk "$_awk_clean_name"
+}
+
+append_package_path() {
+    export IDRIS2_PACKAGE_PATH="$IDRIS2_PACKAGE_PATH$SEP$1"
 }
 
 # Folder containing the currently running test

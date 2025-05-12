@@ -53,6 +53,8 @@ knownTopics = [
     ("compile.casetree.missing", Just "Log when we add an error case for uncovered branches."),
     ("compile.casetree.partition", Nothing),
     ("compile.casetree.pick", Nothing),
+    ("compile.casetree.subst", Nothing),
+    ("compile.casetree.updateVar", Nothing),
     ("compiler.const-fold", Just "Log definitions before and after constant folding."),
     ("compiler.cse", Just "Log information about common sub-expression elimination."),
     ("compiler.identity", Just "Log definitions that are equivalent to identity at runtime."),
@@ -86,6 +88,8 @@ knownTopics = [
     ("declare.record.parameters", Just "Showing the implicitlty bound parameters"),
     ("declare.record.projection", Nothing),
     ("declare.record.projection.prefix", Nothing),
+    ("declare.record.projection.claim", Just "Showing the clause of an elaborated projection function"),
+    ("declare.record.projection.clause", Just "Showing the clause of an elaborated projection function"),
     ("declare.type", Nothing),
     ("desugar.idiom", Nothing),
     ("desugar.failing", Just "Log result of desugaring a `failing' block"),
@@ -209,8 +213,18 @@ helpTopics = show $ vcat $ map helpTopic knownTopics
       in vcat (title :: blurb)
 
 public export
-KnownTopic : String -> Type
-KnownTopic s = IsJust (lookup s knownTopics)
+data KnownTopic : String -> Type where
+  IsKnownTopic : IsJust (lookup s Log.knownTopics) => KnownTopic s
+
+public export
+record LogTopic where
+  constructor MkLogTopic
+  topic : String
+  {auto 0 known : KnownTopic topic}
+
+export
+fromString : (s : String) -> (0 _ : KnownTopic s) => LogTopic
+fromString = MkLogTopic
 
 ||| An individual log level is a pair of a list of non-empty strings and a number.
 ||| We keep the representation opaque to force users to call the smart constructor
@@ -242,8 +256,8 @@ mkUnverifiedLogLevel ps = mkLogLevel' (Just (split (== '.') ps))
 ||| Like `mkUnverifiedLogLevel` but with a compile time check that
 ||| the passed string is a known topic.
 export
-mkLogLevel : (s : String) -> {auto 0 _ : KnownTopic s} -> Nat -> LogLevel
-mkLogLevel s = mkUnverifiedLogLevel s
+mkLogLevel : LogTopic -> Nat -> LogLevel
+mkLogLevel s = mkUnverifiedLogLevel s.topic
 
 ||| The unsafe constructor should only be used in places where the topic has already
 ||| been appropriately processed.

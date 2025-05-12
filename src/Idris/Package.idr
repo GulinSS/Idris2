@@ -332,16 +332,19 @@ prepend : Candidate -> ResolutionError -> ResolutionError
 prepend p = { decisions $= (p ::)}
 
 reason : Maybe PkgVersion -> String
-reason Nothing  = "no matching version is installed"
-reason (Just x) = "assigned version \{show x} which is out of bounds"
-
+reason Nothing  = "no matching version is installed."
+reason (Just x) = "only found version \{show x} which is out of bounds."
 
 printResolutionError : ResolutionError -> String
 printResolutionError (MkRE ds d v) = go [<] ds
   where go : SnocList String -> List Candidate -> String
         go ss []        =
-          let pre    := "required \{d.pkgname} \{show d.pkgbounds} but"
-           in fastConcat . intersperse "; " $ ss <>> ["\{pre} \{reason v}"]
+          let pre        := "Required \{d.pkgname} \{show d.pkgbounds} but"
+              failure    := "\{pre} \{reason v}"
+              candidates := case ss of
+                               [<] => ""
+                               ss  => " Resolved transitive dependencies: " ++ (fastConcat $ intersperse "; " $ cast ss) ++ "."
+           in failure ++ candidates
         go ss (c :: cs) =
           let v := fromMaybe defaultVersion c.version
            in go (ss :< "\{c.name}-\{show v}") cs
@@ -350,10 +353,17 @@ data ResolutionRes : Type where
   Resolved : List String -> ResolutionRes
   Failed   : List ResolutionError -> ResolutionRes
 
-printErrs : PkgDesc -> List ResolutionError -> String
-printErrs x es =
-  unlines $  "Failed to resolve the dependencies for \{x.name}:"
-          :: map (indent 2 . printResolutionError) es
+printErrs : (pkgDirs : List String) -> PkgDesc -> List ResolutionError -> String
+printErrs pkgDirs x es =
+  let errors := unlines $ "Failed to resolve the dependencies for \{x.name}:"
+                          :: map (indent 2 . printResolutionError) es
+      dirs   := unlines $ "Searched for packages in:"
+                          :: map (indent 2) pkgDirs
+  in """
+     \{errors}
+     \{dirs}
+     For more details on what packages Idris2 can locate, run `idris2 --list-packages`
+     """
 
 -- try all possible resolution paths, keeping the first
 -- that works
@@ -369,6 +379,16 @@ tryAll ps f = go [<] ps
           Failed errs <- f x | Resolved res => pure (Resolved res)
           go (se <>< map (prepend x) errs) xs
 
+pkgDirs :
+    {auto c : Ref Ctxt Defs} ->
+    Core (List String)
+pkgDirs = do
+  localdir <- pkgLocalDirectory
+  d <- getDirs
+  pure (localdir ::  (show <$> d.package_search_paths))
+
+||| Add all dependencies (transitively) from the given package file into the
+||| context so modules from each is accessible during compilation.
 addDeps :
     {auto c : Ref Ctxt Defs} ->
     {auto s : Ref Syn SyntaxInfo} ->
@@ -377,14 +397,14 @@ addDeps :
     Core ()
 addDeps pkg = do
   Resolved allPkgs <- getTransitiveDeps pkg.depends empty
-    | Failed errs => throw $ GenericMsg EmptyFC (printErrs pkg errs)
+    | Failed errs => throw $ GenericMsg EmptyFC (printErrs !pkgDirs pkg errs)
   log "package.depends" 10 $ "all depends: \{show allPkgs}"
   traverse_ addPackageDir allPkgs
   traverse_ addDataDir ((</> "data") <$> allPkgs)
   where
     -- Note: findPkgDir throws an error if a package is not found
     -- *unless* --ignore-missing-ipkg is enabled
-    -- therefore, findPkgDir returns Nothing, skip the package
+    -- therefore, if findPkgDir returns Nothing, skip the package
     --
     -- We use a backtracking algorithm here: If several versions of
     -- a package are installed, we must try all, which are are
@@ -457,6 +477,24 @@ compileMain mainn mfilename exec
          ignore $ loadMainFile mfilename
          ignore $ compileExp (PRef replFC mainn) exec
 
+||| Emit captured warnings from inner scope and clear them
+||| afterwards (to avoid emitting them in some unrelated
+||| codepath later).
+withWarnings : Ref Ctxt Defs =>
+               Ref Syn SyntaxInfo =>
+               Ref ROpts REPLOpts =>
+               Core a -> Core a
+withWarnings op = do o <- catch op $ \err =>
+                           do emit
+                              throw err
+                     emit
+                     pure o
+  where
+    emit : Core ()
+    emit = do
+      ignore emitWarnings
+      update Ctxt { warnings := [] }
+
 prepareCompilation : {auto c : Ref Ctxt Defs} ->
                      {auto s : Ref Syn SyntaxInfo} ->
                      {auto o : Ref ROpts REPLOpts} ->
@@ -466,7 +504,7 @@ prepareCompilation : {auto c : Ref Ctxt Defs} ->
 prepareCompilation pkg opts =
   do
     processOptions (options pkg)
-    addDeps pkg
+    withWarnings $ addDeps pkg
 
     ignore $ preOptions opts
 
@@ -484,6 +522,7 @@ assertIdrisCompatibility pkg
          unless (inBounds version requiredBounds) $
            throw (GenericMsg emptyFC "\{pkg.name} requires Idris2 \{show requiredBounds} but the installed version of Idris2 is \{show Version.version}.")
 
+export
 build : {auto c : Ref Ctxt Defs} ->
         {auto s : Ref Syn SyntaxInfo} ->
         {auto o : Ref ROpts REPLOpts} ->
@@ -505,10 +544,7 @@ build pkg opts
          runScript (postbuild pkg)
          pure []
 
-installBuildArtifactFrom : {auto o : Ref ROpts REPLOpts} ->
-              {auto c : Ref Ctxt Defs} ->
-              String ->
-              String -> String -> ModuleIdent -> Core ()
+installBuildArtifactFrom : String -> String -> String -> ModuleIdent -> Core ()
 
 installBuildArtifactFrom file_extension builddir destdir ns
     = do let filename_trunk = ModuleIdent.toPath ns
@@ -567,8 +603,7 @@ installFrom builddir destdir ns = do
       ignore $ coreLift $ copyFile obj dest)
     objPaths
 
-installSrcFrom : {auto c : Ref Ctxt Defs} ->
-                 String -> String -> (ModuleIdent, FileName) -> Core ()
+installSrcFrom : String -> String -> (ModuleIdent, FileName) -> Core ()
 installSrcFrom wdir destdir (ns, srcRelPath)
     = do let srcfile = ModuleIdent.toPath ns
          let srcPath = wdir </> srcRelPath
@@ -604,6 +639,12 @@ installSrcFrom wdir destdir (ns, srcRelPath)
            | Left err => throw $ UserError (show err)
          pure ()
 
+absoluteInstallDir : (relativeInstallDir : String) -> Core String
+absoluteInstallDir relativeInstallDir = do
+  mdestdir <- coreLift $ getEnv "DESTDIR"
+  let destdir = fromMaybe "" mdestdir
+  pure $ destdir ++ relativeInstallDir
+
 -- Install all the built modules in prefix/package/
 -- We've already built and checked for success, so if any don't exist that's
 -- an internal error.
@@ -617,11 +658,9 @@ install pkg opts installSrc -- not used but might be in the future
     = do defs <- get Ctxt
          build <- ttcBuildDirectory
          let lib = installDir pkg
-         mdestdir <- coreLift $ getEnv "DESTDIR"
-         let destdir = fromMaybe "" mdestdir
-         libTargetDir <- (destdir ++) <$> libInstallDirectory lib
-         ttcTargetDir <- (destdir ++) <$> ttcInstallDirectory lib
-         srcTargetDir <- (destdir ++) <$> srcInstallDirectory lib
+         libTargetDir <- absoluteInstallDir =<< libInstallDirectory lib
+         ttcTargetDir <- absoluteInstallDir =<< ttcInstallDirectory lib
+         srcTargetDir <- absoluteInstallDir =<< srcInstallDirectory lib
 
          let src = source_dir (dirs (options defs))
          runScript (preinstall pkg)
@@ -658,6 +697,7 @@ install pkg opts installSrc -- not used but might be in the future
       } $ initPkgDesc pkg.name
 
 -- Check package without compiling anything.
+export
 check : {auto c : Ref Ctxt Defs} ->
         {auto s : Ref Syn SyntaxInfo} ->
         {auto o : Ref ROpts REPLOpts} ->
@@ -809,7 +849,6 @@ foldWithKeysC {a} {b} fk fv = go []
                    nd
 
 clean : {auto c : Ref Ctxt Defs} ->
-        {auto o : Ref ROpts REPLOpts} ->
         PkgDesc ->
         List CLOpt ->
         Core ()
@@ -890,7 +929,7 @@ runRepl fname = do
       Nothing => pure ()
       Just fn => do
         errs <- loadMainFile fn
-        displayErrors errs
+        displayStartupErrors errs
   repl {u} {s}
 
 ||| If the user did not provide a package file we can look in the working
@@ -959,6 +998,10 @@ processPackage opts (cmd, mfile)
                     runRepl (map snd $ mainmod pkg)
                   Init => pure () -- already handled earlier
                   DumpJson => coreLift . putStrLn $ toJson pkg
+                  DumpInstallDir => do
+                    libInstallDir <- libInstallDirectory (installDir pkg)
+                    dir <- absoluteInstallDir libInstallDir
+                    coreLift (putStrLn dir)
 
 record PackageOpts where
   constructor MkPFR
@@ -980,6 +1023,7 @@ partitionOpts opts = foldr pOptUpdate (MkPFR [] [] False) opts
     optType Verbose                = POpt
     optType (Timing l)             = POpt
     optType (Logging l)            = POpt
+    optType (LoggingTree)          = POpt
     optType CaseTreeHeuristics     = POpt
     optType (DumpANF f)            = POpt
     optType (DumpCases f)          = POpt
@@ -1014,6 +1058,7 @@ errorMsg = unlines
   , "    --verbose"
   , "    --timing"
   , "    --log <log level>"
+  , "    --log-tree"
   , "    --dumpcases <file>"
   , "    --dumplifted <file>"
   , "    --dumpvmcode <file>"

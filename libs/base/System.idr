@@ -39,7 +39,7 @@ prim__usleep : Int -> PrimIO ()
 
 ||| Sleep for the specified number of seconds or, if signals are supported,
 ||| until an un-ignored signal arrives.
-||| The exact wall-clock time slept might slighly differ depending on how busy
+||| The exact wall-clock time slept might slightly differ depending on how busy
 ||| the system is and the resolution of the system's clock.
 |||
 ||| @ sec the number of seconds to sleep for
@@ -294,11 +294,20 @@ data ExitCode : Type where
   ||| @prf   Proof that the int value is non-zero.
   ExitFailure : (errNo    : Int) -> (So (not $ errNo == 0)) => ExitCode
 
+export
+Cast Int ExitCode where
+  cast 0 = ExitSuccess
+  cast code = ExitFailure code @{believe_me Oh}
+
+export
+Cast ExitCode Int where
+  cast ExitSuccess = 0
+  cast (ExitFailure code) = code
+
 ||| Exit the program normally, with the specified status.
 export
 exitWith : HasIO io => ExitCode -> io a
-exitWith ExitSuccess = primIO $ believe_me $ prim__exit 0
-exitWith (ExitFailure code) = primIO $ believe_me $ prim__exit code
+exitWith = primIO . believe_me . prim__exit . cast
 
 ||| Exit the program with status value 1, indicating failure.
 ||| If you want to specify a custom status value, see `exitWith`.

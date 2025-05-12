@@ -26,6 +26,7 @@ import Core.SchemeEval
 
 import Parser.Unlit
 
+import Idris.CommandLine
 import Idris.Desugar
 import Idris.Doc.Display
 import Idris.Doc.String
@@ -155,7 +156,7 @@ getEnvTerm : {vars : _} ->
              (vars' ** (Env Term vars', Term vars'))
 getEnvTerm (n :: ns) env (Bind fc x b sc)
     = if n == x
-         then getEnvTerm ns (b :: env) sc
+         then getEnvTerm ns (env :< b) sc
          else (_ ** (env, Bind fc x b sc))
 getEnvTerm _ env tm = (_ ** (env, tm))
 
@@ -164,7 +165,7 @@ displayPatTerm : {auto c : Ref Ctxt Defs} ->
                  Defs -> ClosedTerm ->
                  Core String
 displayPatTerm defs tm
-    = do ptm <- resugarNoPatvars [] !(normaliseHoles defs [] tm)
+    = do ptm <- resugarNoPatvars ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
          pure (show ptm)
 
 setOpt : {auto c : Ref Ctxt Defs} ->
@@ -223,11 +224,12 @@ printClause l i (WithClause _ lhsraw rig wvraw prf flags csraw)
     = do lhs <- pterm $ map defaultKindedName lhsraw -- hack
          wval <- pterm $ map defaultKindedName wvraw -- hack
          cs <- traverse (printClause l (i + 2)) csraw
-         pure (relit l ((pack (replicate i ' ')
+         pure (relit l (pack (replicate i ' ')
                 ++ show lhs
-                ++ " with " ++ elimSemi "0 " "1 " (const "") rig ++ "(" ++ show wval ++ ")"
-                ++ maybe "" (\ nm => " proof " ++ show nm) prf
-                ++ "\n"))
+                ++ " with " ++ showCount rig ++ "(" ++ show wval ++ ")"
+                   -- TODO: remove `the` after fix idris-lang/Idris2#3418
+                ++ maybe "" (the (_ -> _) $ \(rg, nm) => " proof " ++ showCount rg ++ show nm) prf
+                ++ "\n")
                ++ showSep "\n" cs)
 printClause l i (ImpossibleClause _ lhsraw)
     = do lhs <- pterm $ map defaultKindedName lhsraw -- hack
@@ -350,7 +352,7 @@ dropLamsTm : {vars : _} ->
              Nat -> Env Term vars -> Term vars ->
              (vars' ** (Env Term vars', Term vars'))
 dropLamsTm Z env tm = (_ ** (env, tm))
-dropLamsTm (S k) env (Bind _ _ b sc) = dropLamsTm k (b :: env) sc
+dropLamsTm (S k) env (Bind _ _ b sc) = dropLamsTm k (env :< b) sc
 dropLamsTm _ env tm = (_ ** (env, tm))
 
 findInTree : FilePos -> Name -> PosMap (NonEmptyFC, Name) -> Maybe Name
@@ -386,7 +388,7 @@ findInTree p hint m
     match : (NonEmptyFC, Name) -> Bool
     match (_, n) = matches hint n && checkCandidate n
 
-record TermWithType (vars : List Name) where
+record TermWithType (vars : Scope) where
   constructor WithType
   termOf : Term vars
   typeOf : Term vars
@@ -400,7 +402,9 @@ getItDecls
             Nothing => pure []
             Just n =>
               let it = UN $ Basic "it" in
-              pure [ IClaim replFC top Private [] (MkImpTy replFC EmptyFC it (Implicit replFC False))
+              pure [ IClaim
+                       (MkFCVal replFC $ MkIClaimData top Private []
+                                       $ MkImpTy replFC (NoFC it) (Implicit replFC False))
                   , IDef replFC it [PatClause replFC (IVar replFC it) (IVar replFC n)]]
 
 ||| Produce the elaboration of a PTerm, along with its inferred type
@@ -416,7 +420,7 @@ inferAndElab :
   Env Term vars ->
   Core (TermWithType vars)
 inferAndElab emode itm env
-  = do ttimp <- desugar AnyExpr vars itm
+  = do ttimp <- desugar AnyExpr (toList vars) itm
        let ttimpWithIt = ILocal replFC !getItDecls ttimp
        inidx <- resolveName (UN $ Basic "[input]")
        -- a TMP HACK to prioritise list syntax for List: hide
@@ -500,7 +504,7 @@ processEdit (Intro upd line hole)
            | _ => pure $ EditError ("Could not find hole named" <++> pretty0 hole)
          let Hole args _ = definition hgdef
            | _ => pure $ EditError (pretty0 hole <++> "is not a refinable hole")
-         let (lhsCtxt ** (env, htyInLhsCtxt)) = underPis (cast args) [] (type hgdef)
+         let (lhsCtxt ** (env, htyInLhsCtxt)) = underPis (cast args) ScopeEmpty (type hgdef)
 
          (iintrod :: iintrods) <- intro hidx hole env htyInLhsCtxt
            | [] => pure $ EditError "Don't know what to do."
@@ -522,7 +526,7 @@ processEdit (Refine upd line hole e)
            | _ => pure $ EditError ("Could not find hole named" <++> pretty0 hole)
          let Hole args _ = definition hgdef
            | _ => pure $ EditError (pretty0 hole <++> "is not a refinable hole")
-         let (lhsCtxt ** (env, htyInLhsCtxt)) = underPis (cast args) [] (type hgdef)
+         let (lhsCtxt ** (env, htyInLhsCtxt)) = underPis (cast args) ScopeEmpty (type hgdef)
 
          -- Then we elaborate the expression we were given and infer its type.
          -- We have some magic built-in if the expression happens to be a single identifier
@@ -533,7 +537,7 @@ processEdit (Refine upd line hole e)
                  -- could not find the variable: it may be a local one!
                  | [] => pure (Right Nothing)
                let sizes = (n ::: ns) <&> \ (_,_,gdef) =>
-                              let ctxt = underPis (-1) [] (type gdef) in
+                              let ctxt = underPis (-1) ScopeEmpty (type gdef) in
                               lengthExplicitPi $ fst $ snd $ ctxt
                let True = all (head sizes ==) sizes
                  | _ => pure (Left ("Ambiguous name" <++> pretty0 v <++> "(couldn't infer arity)"))
@@ -573,7 +577,7 @@ processEdit (Refine upd line hole e)
          -- without eta-expansion to (\ a => fun a)
          -- It is hopefully a good enough approximation for now. A very ambitious approach
          -- would be to type-align the telescopes. Bonus points for allowing permutations.
-         let size_tele_hole = lengthExplicitPi $ fst $ snd $ underPis (-1) [] (type hgdef)
+         let size_tele_hole = lengthExplicitPi $ fst $ snd $ underPis (-1) ScopeEmpty (type hgdef)
          let True = size_tele_fun >= size_tele_hole
            | _ => pure $ EditError $ hsep
                        [ "Cannot seem to refine", pretty0 hole
@@ -590,7 +594,7 @@ processEdit (Refine upd line hole e)
                     let pcall = papply replFC e new_holes
 
                     -- We're desugaring it to the corresponding TTImp
-                    icall <- desugar AnyExpr (lhsCtxt <>> []) pcall
+                    icall <- desugar AnyExpr lhsCtxt pcall
 
                     -- We're checking this term full of holes against the type of the hole
                     -- TODO: branch before checking the expression fits
@@ -628,11 +632,11 @@ processEdit (ExprSearch upd line name hints)
                      if upd
                         then updateFile (proofSearch name (show itm') (integerToNat (cast (line - 1))))
                         else pure $ DisplayEdit (prettyBy Syntax itm')
-              [(n, nidx, PMDef pi [] (STerm _ tm) _ _)] =>
+              [(n, nidx, PMDef pi [<] (STerm _ tm) _ _)] =>
                   case holeInfo pi of
                        NotHole => pure $ EditError "Not a searchable hole"
                        SolvedHole locs =>
-                          do let (_ ** (env, tm')) = dropLamsTm locs [] !(normaliseHoles defs [] tm)
+                          do let (_ ** (env, tm')) = dropLamsTm locs ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
                              itm <- resugar env tm'
                              let itm'= ifThenElse brack (addBracket replFC itm) itm
                              if upd
@@ -743,8 +747,8 @@ prepareExp ctm
          let ttimpWithIt = ILocal replFC !getItDecls ttimp
          inidx <- resolveName (UN $ Basic "[input]")
          (tm, ty) <- elabTerm inidx InExpr [] (MkNested [])
-                                 [] ttimpWithIt Nothing
-         tm_erased <- linearCheck replFC linear True [] tm
+                                 ScopeEmpty ttimpWithIt Nothing
+         tm_erased <- linearCheck replFC linear True ScopeEmpty tm
          compileAndInlineAll
          pure tm_erased
 
@@ -794,8 +798,8 @@ execDecls decls = do
     execDecl decl = do
       i <- desugarDecl [] decl
       inidx <- resolveName (UN $ Basic "[defs]")
-      _ <- newRef EST (initEStateSub inidx [] Refl)
-      processLocal [] (MkNested []) [] !getItDecls i
+      _ <- newRef EST (initEStateSub inidx ScopeEmpty Refl)
+      processLocal [] (MkNested []) ScopeEmpty !getItDecls i
 
 export
 compileExp : {auto c : Ref Ctxt Defs} ->
@@ -854,14 +858,14 @@ inferAndNormalize : {auto c : Ref Ctxt Defs} ->
   {auto o : Ref ROpts REPLOpts} ->
   REPLEval ->
   PTerm ->
-  Core (TermWithType [])
+  Core (TermWithType ScopeEmpty)
 inferAndNormalize emode itm
-  = do (tm `WithType` ty) <- inferAndElab (elabMode emode) itm []
+  = do (tm `WithType` ty) <- inferAndElab (elabMode emode) itm ScopeEmpty
        logTerm "repl.eval" 10 "Elaborated input" tm
        defs <- get Ctxt
        let norm = replEval emode
-       ntm <- norm defs [] tm
-       logTermNF "repl.eval" 5 "Normalised" [] ntm
+       ntm <- norm defs ScopeEmpty tm
+       logTermNF "repl.eval" 5 "Normalised" ScopeEmpty ntm
        pure $ ntm `WithType` ty
   where
     elabMode : REPLEval -> ElabMode
@@ -887,27 +891,27 @@ process (Eval itm)
          case emode of
             Execute => do ignore (execExp itm); pure (Executed itm)
             Scheme =>
-              do (tm `WithType` ty) <- inferAndElab InExpr itm []
+              do (tm `WithType` ty) <- inferAndElab InExpr itm ScopeEmpty
                  qtm <- logTimeWhen !getEvalTiming 0 "Evaluation" $
-                           (do nf <- snfAll [] tm
-                               quote [] nf)
-                 itm <- logTimeWhen False 0 "Resugar" $ resugar [] qtm
+                           (do nf <- snfAll ScopeEmpty tm
+                               quote ScopeEmpty nf)
+                 itm <- logTimeWhen False 0 "Resugar" $ resugar ScopeEmpty qtm
                  pure (Evaluated itm Nothing)
             _ =>
               do (ntm `WithType` ty) <- logTimeWhen !getEvalTiming 0 "Evaluation" $
                                            inferAndNormalize emode itm
-                 itm <- resugar [] ntm
+                 itm <- resugar ScopeEmpty ntm
                  defs <- get Ctxt
                  opts <- get ROpts
                  let norm = replEval emode
                  evalResultName <- DN "it" <$> genName "evalResult"
                  ignore $ addDef evalResultName
-                   $ newDef replFC evalResultName top [] ty defaulted
-                   $ PMDef defaultPI [] (STerm 0 ntm) (STerm 0 ntm) []
+                   $ newDef replFC evalResultName top ScopeEmpty ty defaulted
+                   $ PMDef defaultPI ScopeEmpty (STerm 0 ntm) (STerm 0 ntm) []
                  addToSave evalResultName
                  put ROpts ({ evalResultName := Just evalResultName } opts)
                  if showTypes opts
-                    then do ity <- resugar [] !(norm defs [] ty)
+                    then do ity <- resugar ScopeEmpty !(norm defs ScopeEmpty ty)
                             pure (Evaluated itm (Just ity))
                     else pure (Evaluated itm Nothing)
 process (Check (PRef fc (UN (Basic "it"))))
@@ -922,11 +926,11 @@ process (Check (PRef fc fn))
               ts => do tys <- traverse (displayType False defs) ts
                        pure (Printed $ vsep $ map (reAnnotate Syntax) tys)
 process (Check itm)
-    = do (tm `WithType` ty) <- inferAndElab InExpr itm []
+    = do (tm `WithType` ty) <- inferAndElab InExpr itm ScopeEmpty
          defs <- get Ctxt
-         itm <- resugar [] !(normaliseHoles defs [] tm)
+         itm <- resugar ScopeEmpty !(normaliseHoles defs ScopeEmpty tm)
          -- ty <- getTerm gty
-         ity <- resugar [] !(normalise defs [] ty)
+         ity <- resugar ScopeEmpty !(normalise defs ScopeEmpty ty)
          pure (TermChecked itm ity)
 process (CheckWithImplicits itm)
     = do showImplicits <- showImplicits <$> getPPrint
@@ -986,7 +990,7 @@ process (TypeSearch searchTerm)
          let ctxt = gamma defs
          rawTy <- desugar AnyExpr [] searchTerm
          bound <- piBindNames replFC [] rawTy
-         (ty, _) <- elabTerm 0 InType [] (MkNested []) [] bound Nothing
+         (ty, _) <- elabTerm 0 InType [] (MkNested []) ScopeEmpty bound Nothing
          ty' <- toResolvedNames ty
          filteredDefs <-
            do names   <- allNames ctxt
@@ -1224,11 +1228,20 @@ mutual
   handleResult Exited = iputStrLn (reflow "Bye for now!")
   handleResult other = do { displayResult other ; repl }
 
+  fileLoadingError : (fname : String) -> (err : FileError) -> (suggestion : Maybe (Doc IdrisAnn)) -> Doc IdrisAnn
+  fileLoadingError fname err suggestion =
+    let suggestion = maybe "" (hardline <+>) suggestion
+    in
+    hardline <+>
+    (indent 2 $
+      error ((reflow "Error loading file") <++> (dquotes $ pretty0 fname) <+> colon) <++>
+        pretty0 (show err) <+>
+      suggestion) <+>
+    hardline
+
   export
   displayResult : {auto c : Ref Ctxt Defs} ->
-         {auto u : Ref UST UState} ->
          {auto s : Ref Syn SyntaxInfo} ->
-         {auto m : Ref MD Metadata} ->
          {auto o : Ref ROpts REPLOpts} -> REPLResult -> Core ()
   displayResult (REPLError err) = printResult err
   displayResult (Evaluated x Nothing) = printResult $ prettyBy Syntax x
@@ -1241,7 +1254,7 @@ mutual
   displayResult (ErrorLoadingModule x err)
     = printResult (reflow "Error loading module" <++> pretty0 x <+> colon <++> !(perror err))
   displayResult (ErrorLoadingFile x err)
-    = printResult (reflow "Error loading file" <++> pretty0 x <+> colon <++> pretty0 (show err))
+    = printResult (fileLoadingError x err Nothing)
   displayResult (ErrorsBuildingFile x errs)
     = printResult (reflow "Error(s) building file" <++> pretty0 x) -- messages already displayed while building
   displayResult NoFileLoaded = printResult (reflow "No file can be reloaded")
@@ -1293,12 +1306,17 @@ mutual
       cmdInfo : (List String, CmdArg, String) -> String
       cmdInfo (cmds, args, text) = " " ++ col 18 36 (showSep " " cmds) (show args) text
 
+  ||| Display errors that may occur when starting the REPL.
+  ||| Does not force the REPL to exit, just prints the error(s).
+  |||
+  ||| NOTE: functionally the only reason to consider this function specialized
+  ||| to "startup" is that it will provide suggestions to the user under the
+  ||| assumption that the user has just entered the REPL via CLI arguments that
+  ||| they may have used incorrectly.
   export
-  displayErrors : {auto c : Ref Ctxt Defs} ->
-         {auto u : Ref UST UState} ->
-         {auto s : Ref Syn SyntaxInfo} ->
-         {auto m : Ref MD Metadata} ->
-         {auto o : Ref ROpts REPLOpts} -> REPLResult -> Core ()
-  displayErrors (ErrorLoadingFile x err)
-    = printError (reflow "File error in" <++> pretty0 x <+> colon <++> pretty0 (show err))
-  displayErrors _ = pure ()
+  displayStartupErrors : {auto o : Ref ROpts REPLOpts} ->
+                         REPLResult -> Core ()
+  displayStartupErrors (ErrorLoadingFile x err) =
+    let suggestion = nearMatchOptSuggestion x
+     in printError (fileLoadingError x err suggestion)
+  displayStartupErrors _ = pure ()

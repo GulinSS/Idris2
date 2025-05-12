@@ -109,7 +109,7 @@ mutual
                  {auto u : Ref UST UState} ->
                  ImpTy ->
                  Core ImpTy
-  getUnquoteTy (MkImpTy fc nameFC n t) = pure $ MkImpTy fc nameFC n !(getUnquote t)
+  getUnquoteTy (MkImpTy fc n t) = pure $ MkImpTy fc n !(getUnquote t)
 
   getUnquoteField : {auto c : Ref Ctxt Defs} ->
                     {auto q : Ref Unq (List (Name, FC, RawImp))} ->
@@ -148,15 +148,15 @@ mutual
                    {auto u : Ref UST UState} ->
                    ImpDecl ->
                    Core ImpDecl
-  getUnquoteDecl (IClaim fc c v opts ty)
-      = pure $ IClaim fc c v opts !(getUnquoteTy ty)
+  getUnquoteDecl (IClaim (MkFCVal fc (MkIClaimData c v opts ty)))
+      = pure $ IClaim (MkFCVal fc (MkIClaimData c v opts !(getUnquoteTy ty)))
   getUnquoteDecl (IData fc v mbt d)
       = pure $ IData fc v mbt !(getUnquoteData d)
   getUnquoteDecl (IDef fc v d)
       = pure $ IDef fc v !(traverse getUnquoteClause d)
   getUnquoteDecl (IParameters fc ps ds)
       = pure $ IParameters fc
-                           !(traverse unqTuple ps)
+                           !(traverseList1 unqTuple ps)
                            !(traverse getUnquoteDecl ds)
     where
       unqTuple : (Name, RigCount, PiInfo RawImp, RawImp) -> Core (Name, RigCount, PiInfo RawImp, RawImp)
@@ -222,9 +222,7 @@ checkQuote rig elabinfo nest env fc tm exp
 export
 checkQuoteName : {vars : _} ->
                  {auto c : Ref Ctxt Defs} ->
-                 {auto m : Ref MD Metadata} ->
                  {auto u : Ref UST UState} ->
-                 {auto e : Ref EST (EState vars)} ->
                  RigCount -> ElabInfo ->
                  NestedNames vars -> Env Term vars ->
                  FC -> Name -> Maybe (Glued vars) ->

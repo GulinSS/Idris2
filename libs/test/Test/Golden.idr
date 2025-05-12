@@ -19,7 +19,7 @@
 |||   * May use `${IDRIS2_TESTS_CG}` to pick a codegen that ought to work
 |||   * Clean up after itself (e.g. by running `rm -rf build/`)
 |||
-||| + `expected` a file containting the expected output of `run`
+||| + `expected` a file containing the expected output of `run`
 |||
 ||| During testing, the test harness will generate an artefact named `output`
 ||| and display both outputs if there is a failure.
@@ -231,7 +231,7 @@ runTest opts testPath = do
   let cg = maybe "" (" --cg " ++) (codegen opts)
   let exe = "\"" ++ exeUnderTest opts ++ cg ++ "\""
   ignore $ system $ "cd " ++ escapeArg testPath ++ " && " ++
-    "sh ./run " ++ exe ++ " | tr -d '\\r' > output"
+    "timeout 30m sh ./run " ++ exe ++ " | tr -d '\\r' > output"
   end <- clockTime UTC
 
   Right out <- readFile $ testPath ++ "/output"

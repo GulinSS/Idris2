@@ -13,6 +13,7 @@ import Libraries.Data.List.Extra
 
 import Idris.CommandLine
 import Idris.Package.Types
+import Idris.Parser
 import Idris.Pretty
 import Idris.ProcessIdr
 import Idris.REPL
@@ -82,18 +83,56 @@ getPackageDirs dname = do
     ttcVersions : String -> IO (List Int)
     ttcVersions dir = catMaybes . map parsePositive <$> listDirOrEmpty (dname </> dir)
 
--- Get a list of all the candidate directories that match a package spec
--- in a given path. Return an empty list on file error (e.g. path not existing)
+||| Get a list of all the candidate directories that match a package spec
+||| in a given path. Return an empty list on file error (e.g. path not existing)
+|||
+||| Only package's with build artifacts for the correct TTC version for the
+||| compiler will be considered.
 export
-candidateDirs : String -> String -> PkgVersionBounds ->
-                IO (List (String, Maybe PkgVersion))
-candidateDirs dname pkg bounds =
-  mapMaybe checkBounds <$> getPackageDirs dname
+candidateDirs :
+    Ref Ctxt Defs =>
+    String -> String -> PkgVersionBounds ->
+    Core (List (String, Maybe PkgVersion))
+candidateDirs dname pkgName bounds = do
+  dirs <- coreLift (getPackageDirs dname)
+  checkedDirs <- traverse check dirs
+  pure (catMaybes checkedDirs)
 
-  where checkBounds : PkgDir -> Maybe (String,Maybe PkgVersion)
-        checkBounds (MkPkgDir dirName pkgName ver _) =
-          do guard (pkgName == pkg && inBounds ver bounds)
-             pure ((dname </> dirName), ver)
+  where
+    data CandidateError = OutOfBounds | TTCMismatch
+
+    checkNameAndBounds : PkgDir -> Either CandidateError PkgDir
+    checkNameAndBounds pkg =
+      if pkg.pkgName == pkgName && inBounds pkg.version bounds
+         then Right pkg
+         else Left OutOfBounds
+
+    checkTTCVersion : PkgDir -> Either CandidateError PkgDir
+    checkTTCVersion pkg =
+      if ttcVersion `elem` pkg.ttcVersions
+         then Right pkg
+         else Left TTCMismatch
+
+    unpack : PkgDir -> (String, Maybe PkgVersion)
+    unpack (MkPkgDir dirName pkgName ver _) =
+      ((dname </> dirName), ver)
+
+    check : PkgDir -> Core (Maybe (String, Maybe PkgVersion))
+    check pkg =
+      let checkedPkg = checkNameAndBounds pkg >>= checkTTCVersion
+      in
+      case checkedPkg of
+        Right pkg'       => pure . Just $ unpack pkg'
+        Left OutOfBounds => pure Nothing
+        Left TTCMismatch => do
+          let pkgVersion = maybe "unversioned" (\v => "version \{show v} of") pkg.version
+          recordWarning $ GenericWarn EmptyFC $
+                 """
+                 Found \{pkgVersion} package \{pkg.pkgName} installed with no compatible binaries for the current Idris2 compiler.
+
+                 Reinstall \{pkg.pkgName} with the current Idris2 compiler to resolve the issue.
+                 """
+          pure Nothing
 
 ||| Find all package directories (plus version) matching
 ||| the given package name and version bounds. Results
@@ -101,6 +140,9 @@ candidateDirs dname pkg bounds =
 |||
 ||| All package _search paths_ will be searched for package
 ||| _directories_ that fit the requested critera.
+|||
+||| Only packages with build artifacts for the correct TTC version for the
+||| compiler will be considered.
 export
 findPkgDirs :
     Ref Ctxt Defs =>
@@ -111,10 +153,10 @@ findPkgDirs p bounds = do
   localdir <- pkgLocalDirectory
 
   -- Get candidate directories from the local package directory
-  locFiles <- coreLift $ candidateDirs localdir p bounds
+  locFiles <- candidateDirs localdir p bounds
   -- Look in all the package paths too
   d <- getDirs
-  pkgFiles <- coreLift $ traverse (\d => candidateDirs d p bounds) d.package_search_paths
+  pkgFiles <- traverse (\d => candidateDirs (show d) p bounds) d.package_search_paths
 
   -- If there's anything locally, use that and ignore the global ones
   let allFiles = if isNil locFiles
@@ -164,7 +206,7 @@ visiblePackages dir = map (MkQualifiedPkgDir dir) <$> filter viable <$> getPacka
 findPackages : {auto c : Ref Ctxt Defs} -> Core (List QualifiedPkgDir)
 findPackages
     = do d <- getDirs
-         pkgPathPkgs <- coreLift $ traverse (\d => visiblePackages d) d.package_search_paths
+         pkgPathPkgs <- coreLift $ traverse (\d => visiblePackages $ show d) d.package_search_paths
          -- local packages
          localPkgs <- coreLift $ visiblePackages !pkgLocalDirectory
          pure $ localPkgs ++ join pkgPathPkgs
@@ -186,14 +228,14 @@ listPackages
     pkgTTCVersions (MkPkgDir _ _ _ ttcVersions) =
       pretty0 "├ TTC Versions:" <++> prettyTTCVersions
       where
-        colorize : Int -> Doc IdrisAnn
-        colorize version =
+        annotate : Int -> Doc IdrisAnn
+        annotate version =
           if version == ttcVersion
              then pretty0 $ show version
-             else warning (pretty0 $ show version)
+             else warning ((pretty0 $ show version) <++> (parens "incompatible"))
 
         prettyTTCVersions : Doc IdrisAnn
-        prettyTTCVersions = (concatWith (\x,y => x <+> "," <++> y)) $ colorize <$> sort ttcVersions
+        prettyTTCVersions = (concatWith (\x,y => x <+> "," <++> y)) $ annotate <$> sort ttcVersions
 
     pkgPath : String -> Doc IdrisAnn
     pkgPath path = pretty0 "└ \{path}"
@@ -225,7 +267,7 @@ dirOption dirs Prefix
 --          Bash Autocompletions
 --------------------------------------------------------------------------------
 
-findIpkg : {auto c : Ref Ctxt Defs} -> Core (List String)
+findIpkg : Core (List String)
 findIpkg =
   do Just srcdir <- coreLift currentDir
        | Nothing => throw (InternalError "Can't get current directory")
@@ -445,8 +487,15 @@ preOptions (Logging n :: opts)
     = do setSession ({ logEnabled := True,
                        logLevel $= insertLogLevel n } !getSession)
          preOptions opts
+preOptions (LoggingTree :: opts)
+    = do updateSession ({ logTreeEnabled := True })
+         preOptions opts
 preOptions (ConsoleWidth n :: opts)
     = do setConsoleWidth n
+         preOptions opts
+preOptions (ShowImplicits :: opts)
+    = do pp <- getPPrint
+         setPPrint ({ showImplicits := True } pp)
          preOptions opts
 preOptions (ShowMachineNames :: opts)
     = do pp <- getPPrint
@@ -514,8 +563,11 @@ postOptions res (OutputFile outfile :: rest)
     = do ignore $ compileExp (PRef EmptyFC (UN $ Basic "main")) outfile
          ignore $ postOptions res rest
          pure False
-postOptions res (ExecFn str :: rest)
-    = do ignore $ execExp (PRef EmptyFC (UN $ Basic str))
+postOptions res (ExecFn expr :: rest)
+    = do setCurrentElabSource expr
+         let Right (_, _, e) = runParser (Virtual Interactive) Nothing expr $ aPTerm <* eoi
+           | Left err => throw err
+         ignore $ execExp e
          ignore $ postOptions res rest
          pure False
 postOptions res (CheckOnly :: rest)

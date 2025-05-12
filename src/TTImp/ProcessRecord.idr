@@ -26,7 +26,7 @@ import Data.String
 %default covering
 
 -- Used to remove the holes so that we don't end up with "hole is already defined"
--- errors because they've been duplicarted when forming the various types of the
+-- errors because they've been duplicated when forming the various types of the
 -- record constructor, getters, etc.
 killHole : RawImp -> RawImp
 killHole (IHole fc str) = Implicit fc True
@@ -70,13 +70,13 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
 
          -- Go into new namespace, if there is one, for getters
          case newns of
-              Nothing => elabGetters tn conName params 0 [] [] conty
+              Nothing => elabGetters tn conName params 0 [] ScopeEmpty conty
               Just ns =>
                    do let cns = currentNS defs
                       let nns = nestedNS defs
                       extendNS (mkNamespace ns)
                       newns <- getNS
-                      elabGetters tn conName params 0 [] [] conty
+                      elabGetters tn conName params 0 [] ScopeEmpty conty
                       -- Record that the current namespace is allowed to look
                       -- at private names in the nested namespace
                       update Ctxt { currentNS := cns,
@@ -144,17 +144,19 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
                     Core (List ImpParameter) -- New telescope of parameters, including missing bindings
     preElabAsData tn
         = do let fc = virtualiseFC fc
-             let dataTy = IBindHere fc (PI erased) !(bindTypeNames fc [] vars (mkDataTy fc params0))
-             -- we don't use MkImpLater because users may have already declared the record ahead of time
-             let dt = MkImpData fc tn (Just dataTy) opts []
-             log "declare.record" 10 $ "Pre-declare record data type: \{show dt}"
-             processDecl [] nest env (IData fc def_vis mbtot dt)
+             let dataTy = IBindHere fc (PI erased) !(bindTypeNames fc [] (toList vars) (mkDataTy fc params0))
+             defs <- get Ctxt
+             -- Create a forward declaration if none exists
+             when (isNothing !(lookupTyExact tn (gamma defs))) $ do
+               let dt = MkImpLater fc tn dataTy
+               log "declare.record" 10 $ "Pre-declare record data type: \{show dt}"
+               processDecl [] nest env (IData fc def_vis mbtot dt)
              defs <- get Ctxt
              Just ty <- lookupTyExact tn (gamma defs)
                | Nothing => throw (InternalError "Missing data type \{show tn}, despite having just declared it!")
              log "declare.record" 20 "Obtained type: \{show ty}"
-             (_ ** (tyenv, ty)) <- dropLeadingPis vars ty []
-             ty <- unelabNest !nestDrop tyenv ty
+             (_ ** (tyenv, ty)) <- dropLeadingPis vars ty ScopeEmpty
+             ty <- unelabNest (NoSugar True) !nestDrop tyenv ty
              log "declare.record.parameters" 30 "Unelaborated type: \{show ty}"
              params <- getParameters [<] ty
              addMissingNames ([<] <>< map fst params0) params []
@@ -165,9 +167,9 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
         -- a LHS, or inside a `parameters` block) and so we need to start by dropping
         -- these local variables from the fully elaborated record's type
         -- We'll use the `env` thus obtained to unelab the remaining scope
-        dropLeadingPis : {vs : _} -> (vars : List Name) -> Term vs -> Env Term vs ->
+        dropLeadingPis : {vs : _} -> (vars : Scope) -> Term vs -> Env Term vs ->
                          Core (vars' ** (Env Term vars', Term vars'))
-        dropLeadingPis [] ty env
+        dropLeadingPis [<] ty env
           = do unless (null vars) $
                  logC "declare.record.parameters" 60 $ pure $ unlines
                    [ "We elaborated \{show tn} in a non-empty local context."
@@ -175,8 +177,8 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
                    , "  Remaining type: \{show !(toFullNames ty)}"
                    ]
                pure (_ ** (env, ty))
-        dropLeadingPis (var :: vars) (Bind fc n b@(Pi _ _ _ _) ty) env
-          = dropLeadingPis vars ty (b :: env)
+        dropLeadingPis (vars :< var) (Bind fc n b@(Pi _ _ _ _) ty) env
+          = dropLeadingPis vars ty (env :< b)
         dropLeadingPis _ ty _ = throw (InternalError "Malformed record type \{show ty}")
 
         getParameters :
@@ -219,8 +221,8 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
         = do let fc = virtualiseFC fc
              let conty = mkTy (paramTelescope params) $
                          mkTy (map farg fields) (recTy tn params)
-             let boundNames = paramNames params ++ map fname fields ++ vars
-             let con = MkImpTy (virtualiseFC fc) EmptyFC cname
+             let boundNames = paramNames params ++ map fname fields ++ (toList vars)
+             let con = MkImpTy (virtualiseFC fc) (NoFC cname)
                        !(bindTypeNames fc [] boundNames conty)
              let dt = MkImpData fc tn Nothing opts [con]
              log "declare.record" 5 $ "Record data type " ++ show dt
@@ -253,28 +255,28 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
              then elabGetters tn con params
                               (if imp == Explicit && not (n `elem` vars)
                                   then S done else done)
-                              upds (b :: tyenv) sc
+                              upds (tyenv :< b) sc
              else
                 do let fldNameStr = nameRoot n
                    rfNameNS <- inCurrentNS (UN $ Field fldNameStr)
                    unNameNS <- inCurrentNS (UN $ Basic fldNameStr)
 
-                   ty <- unelabNest !nestDrop tyenv ty_chk
-                   let ty' = substNames vars upds $ map rawName ty
+                   ty <- unelabNest (NoSugar True) !nestDrop tyenv ty_chk
+                   let ty' = substNames (toList vars) upds $ map rawName ty
                    log "declare.record.field" 5 $ "Field type: " ++ show ty'
                    let rname = MN "rec" 0
 
                    -- Claim the projection type
                    projTy <- bindTypeNames fc []
-                                 (map fst params ++ map fname fields ++ vars) $
+                                 (map fst params ++ map fname fields ++ toList vars) $
                                       mkTy (paramTelescope params) $
                                       IPi bfc top Explicit (Just rname) (recTy tn params) ty'
-
+                   let fc' = virtualiseFC fc
                    let mkProjClaim = \ nm =>
-                          let ty = MkImpTy EmptyFC EmptyFC nm projTy
-                          in IClaim bfc rig isVis [Inline] ty
+                          let ty = MkImpTy fc' (MkFCVal fc' nm) projTy
+                          in IClaim (MkFCVal bfc (MkIClaimData rig isVis [Inline] ty))
 
-                   log "declare.record.projection" 5 $
+                   log "declare.record.projection.claim" 5 $
                       "Projection " ++ show rfNameNS ++ " : " ++ show projTy
                    processDecl [] nest env (mkProjClaim rfNameNS)
 
@@ -283,7 +285,7 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
                           = apply (IVar bfc con)
                                     (replicate done (Implicit bfc True) ++
                                        (if imp == Explicit
-                                           then [IBindVar EmptyFC fldNameStr]
+                                           then [IBindVar fc' fldNameStr]
                                            else []) ++
                                     (replicate (countExp sc) (Implicit bfc True)))
                    let lhs = IApp bfc (IVar bfc rfNameNS)
@@ -291,8 +293,22 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
                                     then lhs_exp
                                     else INamedApp bfc lhs_exp (UN $ Basic fldNameStr)
                                              (IBindVar bfc fldNameStr))
-                   let rhs = IVar EmptyFC (UN $ Basic fldNameStr)
-                   log "declare.record.projection" 5 $ "Projection " ++ show lhs ++ " = " ++ show rhs
+                   let rhs = IVar fc' (UN $ Basic fldNameStr)
+
+                   -- EtaExpand implicits on both sides:
+                   -- First, obtain all the implicit names in the prefix of
+                   let piNames = collectPiNames ty_chk
+
+                   let namesToRawImp : List (Bool, Name) -> (fn : RawImp) -> RawImp
+                       namesToRawImp ((True,  nm@(UN{})) :: xs) fn = namesToRawImp xs (INamedApp fc fn nm (IVar fc' nm))
+                       namesToRawImp _ fn = fn
+
+                   -- Then apply names for each argument to the lhs
+                   let lhs = namesToRawImp piNames lhs
+                   -- Do the same for the rhs
+                   let rhs = namesToRawImp piNames rhs
+
+                   log "declare.record.projection.clause" 5 $ "Projection " ++ show lhs ++ " = " ++ show rhs
                    processDecl [] nest env
                        (IDef bfc rfNameNS [PatClause bfc lhs rhs])
 
@@ -329,7 +345,7 @@ elabRecord {vars} eopts fc env nest newns def_vis mbtot tn_in params0 opts conNa
                    elabGetters tn con params
                                (if imp == Explicit
                                    then S done else done)
-                               upds' (b :: tyenv) sc
+                               upds' (tyenv :< b) sc
 
     elabGetters tn con _ done upds _ _ = pure ()
 

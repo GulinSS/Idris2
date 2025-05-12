@@ -24,7 +24,7 @@ record Dirs where
   output_dir : Maybe String -- output directory, relative to working directory
   prefix_dir : String -- installation prefix, for finding data files (e.g. run time support)
   extra_dirs : List String -- places to look for import files
-  package_search_paths : List String -- paths at which to look for packages
+  package_search_paths : List Path -- paths at which to look for packages
   package_dirs : List String -- places where specific needed packages at required versions are located
   lib_dirs : List String -- places to look for libraries (for code generation)
   data_dirs : List String -- places to look for data file
@@ -127,6 +127,7 @@ record ElabDirectives where
   ambigLimit : Nat
   autoImplicitLimit : Nat
   nfThreshold : Nat
+  totalLimit : Nat
   --
   -- produce traditional (prefix) record projections,
   -- in addition to postfix (dot) projections
@@ -153,6 +154,8 @@ record Session where
                     -- any logging is enabled.
   logLevel : LogLevels
   logTimings : Maybe Nat -- log level, higher means more details
+  logTreeEnabled : Bool -- do we show logs in a tree-like output
+  logDepth : Nat -- depth level of logging to separate related stuff visually
   debugElabCheck : Bool -- do conversion check to verify results of elaborator
   dumpcases : Maybe String -- file to output compiled case trees
   dumplifted : Maybe String -- file to output lambda lifted definitions
@@ -226,13 +229,13 @@ defaultPPrint = MkPPOpts False False True False
 export
 defaultSession : Session
 defaultSession = MkSessionOpts False CoveringOnly False False Chez [] 1000 False False
-                               defaultLogLevel Nothing False Nothing Nothing
+                               defaultLogLevel Nothing False 0 False Nothing Nothing
                                Nothing Nothing False 1 False False True
                                False [] False False
 
 export
 defaultElab : ElabDirectives
-defaultElab = MkElabDirectives True True CoveringOnly 3 50 25 True
+defaultElab = MkElabDirectives True True CoveringOnly 3 50 25 5 True
 
 -- FIXME: This turns out not to be reliably portable, since different systems
 -- may have tools with the same name but different required arugments. We

@@ -118,14 +118,14 @@ process : {vars : _} ->
           {auto o : Ref ROpts REPLOpts} ->
           List ElabOpt ->
           NestedNames vars -> Env Term vars -> ImpDecl -> Core ()
-process eopts nest env (IClaim fc rig vis opts ty)
+process eopts nest env (IClaim (MkFCVal fc (MkIClaimData rig vis opts ty)))
     = processType eopts nest env fc rig vis opts ty
 process eopts nest env (IData fc vis mbtot ddef)
     = processData eopts nest env fc vis mbtot ddef
 process eopts nest env (IDef fc fname def)
     = processDef eopts nest env fc fname def
 process eopts nest env (IParameters fc ps decls)
-    = processParams nest env fc ps decls
+    = processParams nest env fc (forget ps) decls
 process eopts nest env (IRecord fc ns vis mbtot rec)
     = processRecord eopts nest env ns vis mbtot rec
 process eopts nest env (IFail fc msg decls)
@@ -171,24 +171,24 @@ processTTImpDecls {vars} nest env decls
          pure True -- TODO: False on error
   where
     bindConNames : ImpTy -> Core ImpTy
-    bindConNames (MkImpTy fc nameFC n ty)
-        = do ty' <- bindTypeNames fc [] vars ty
-             pure (MkImpTy fc nameFC n ty')
+    bindConNames (MkImpTy fc n ty)
+        = do ty' <- bindTypeNames fc [] (toList vars) ty
+             pure (MkImpTy fc n ty')
 
     bindDataNames : ImpData -> Core ImpData
     bindDataNames (MkImpData fc n t opts cons)
-        = do t' <- traverseOpt (bindTypeNames fc [] vars) t
+        = do t' <- traverseOpt (bindTypeNames fc [] (toList vars)) t
              cons' <- traverse bindConNames cons
              pure (MkImpData fc n t' opts cons')
     bindDataNames (MkImpLater fc n t)
-        = do t' <- bindTypeNames fc [] vars t
+        = do t' <- bindTypeNames fc [] (toList vars) t
              pure (MkImpLater fc n t')
 
     -- bind implicits to make raw TTImp source a bit friendlier
     bindNames : ImpDecl -> Core ImpDecl
-    bindNames (IClaim fc c vis opts (MkImpTy tfc nameFC n ty))
-        = do ty' <- bindTypeNames fc [] vars ty
-             pure (IClaim fc c vis opts (MkImpTy tfc nameFC n ty'))
+    bindNames (IClaim (MkFCVal fc (MkIClaimData c vis opts (MkImpTy tfc n ty))))
+        = do ty' <- bindTypeNames fc [] (toList vars) ty
+             pure (IClaim (MkFCVal fc (MkIClaimData c vis opts (MkImpTy tfc n ty'))))
     bindNames (IData fc vis mbtot d)
         = do d' <- bindDataNames d
              pure (IData fc vis mbtot d')
@@ -212,7 +212,7 @@ processTTImpFile fname
                                 pure False
          traverse_ recordWarning ws
          logTime 0 "Elaboration" $
-            catch (do ignore $ processTTImpDecls (MkNested []) [] tti
+            catch (do ignore $ processTTImpDecls (MkNested []) ScopeEmpty tti
                       Nothing <- checkDelayedHoles
                           | Just err => throw err
                       pure True)

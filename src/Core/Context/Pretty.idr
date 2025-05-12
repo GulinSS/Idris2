@@ -15,13 +15,13 @@ import Core.Context.Context
 
 import Libraries.Data.String.Extra
 
-%hide Env.(::)
-%hide Env.Nil
+%hide Env.(:<)
+%hide Env.Lin
 %hide String.(::)
 %hide String.Nil
 %hide Doc.Nil
-%hide Subst.(::)
-%hide Subst.Nil
+%hide Subst.(:<)
+%hide Subst.Lin
 %hide CList.(::)
 %hide CList.Nil
 %hide Stream.(::)
@@ -43,7 +43,7 @@ namespace Raw
   prettyDef (PMDef _ args ct _ pats) =
        let ct = prettyTree ct in
        vcat
-        [ "Arguments" <++> cast (prettyList args)
+        [ "Arguments" <++> cast (prettyList $ toList args)
         , header "Compile time tree" <++> reAnnotate Syntax ct
         ]
   prettyDef (DCon tag arity nt) =
@@ -57,7 +57,7 @@ namespace Raw
           ([ "tag:" <++> byShow tag
            , "arity:" <++> byShow arity
            , "parameter positions:" <++> byShow ps
-           , "constructors:" <++> enum ((\ nm => annotate (Syntax $ DCon (Just nm)) (pretty0 nm)) <$> cons)
+           , "constructors:" <++> enum ((\ nm => annotate (Syntax $ DCon (Just nm)) (pretty0 nm)) <$> fromMaybe [] cons)
            ] ++ (("mutual with:" <++> enum (pretty0 <$> ms)) <$ guard (not $ null ms))
              ++ (maybe [] (\ pos => ["detaggable by:" <++> byShow pos]) det))
   prettyDef (ExternDef arity) =
@@ -95,7 +95,7 @@ namespace Resugared
   prettyDef (PMDef _ args ct _ pats) = do
       ct <- prettyTree (mkEnv emptyFC _) ct
       pure $ vcat
-        [ "Arguments" <++> cast (prettyList args)
+        [ "Arguments" <++> cast (prettyList $ toList args)
         , header "Compile time tree" <++> reAnnotate Syntax ct
         ]
   prettyDef (DCon tag arity nt) = pure $
@@ -109,7 +109,7 @@ namespace Resugared
           ([ "tag:" <++> byShow tag
            , "arity:" <++> byShow arity
            , "parameter positions:" <++> byShow ps
-           , "constructors:" <++> enum ((\ nm => annotate (Syntax $ DCon (Just nm)) (pretty0 nm)) <$> cons)
+           , "constructors:" <++> enum ((\ nm => annotate (Syntax $ DCon (Just nm)) (pretty0 nm)) <$> fromMaybe [] cons)
            ] ++ (("mutual with:" <++> enum (pretty0 <$> ms)) <$ guard (not $ null ms))
              ++ (maybe [] (\ pos => ["detaggable by:" <++> byShow pos]) det))
   prettyDef (ExternDef arity) = pure $

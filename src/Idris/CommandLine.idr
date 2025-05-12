@@ -2,6 +2,9 @@ module Idris.CommandLine
 
 import Idris.Env
 import Idris.Version
+import Idris.Doc.Display
+import Idris.Doc.String
+import Idris.Pretty
 
 import Core.Options
 
@@ -25,6 +28,7 @@ data PkgCommand
       | REPL
       | Init
       | DumpJson
+      | DumpInstallDir
 
 export
 Show PkgCommand where
@@ -37,6 +41,7 @@ Show PkgCommand where
   show REPL = "--repl"
   show Init = "--init"
   show DumpJson = "--dump-ipkg-json"
+  show DumpInstallDir = "--dump-installdir"
 
 public export
 data DirCommand
@@ -98,6 +103,8 @@ data CLOpt
   NoBanner |
    ||| Run Idris 2 in quiet mode
   Quiet |
+   ||| Show implicits when pretty printing
+  ShowImplicits |
    ||| Show machine names when pretty printing
   ShowMachineNames |
    ||| Show namespaces when pretty printing
@@ -110,6 +117,8 @@ data CLOpt
   Color Bool |
    ||| Set the log level globally
   Logging LogLevel |
+   ||| Enable logging in a tree-like output
+  LoggingTree |
    ||| Add a package as a dependency
   PkgPath String |
    ||| List installed packages
@@ -229,7 +238,7 @@ options = [MkOpt ["--check", "-c"] [] [CheckOnly]
            MkOpt ["--output", "-o"] [Required "file"] (\f => [OutputFile f, Quiet])
               (Just "Specify output file"),
            MkOpt ["--exec", "-x"] [Required "name"] (\f => [ExecFn f, Quiet])
-              (Just "Execute function after checking source file"),
+              (Just "Execute expression"),
            MkOpt ["--no-prelude"] [] [NoPrelude]
               (Just "Don't implicitly import Prelude"),
            MkOpt ["--codegen", "--cg"] [Required "backend"] (\f => [SetCG f])
@@ -284,6 +293,9 @@ options = [MkOpt ["--check", "-c"] [] [CheckOnly]
            MkOpt ["--dump-ipkg-json"] [Optional "package file"]
               (\ f => [Package DumpJson f])
               (Just "Dump an Idris2 package file in the JSON format"),
+           MkOpt ["--dump-installdir"] [Optional "package file"]
+              (\ f => [Package DumpInstallDir f])
+              (Just "Dump the location where the given package will be installed"),
            MkOpt ["--build"] [Optional "package file"]
                (\f => [Package Build f])
               (Just "Build modules/executable for the given package"),
@@ -328,6 +340,8 @@ options = [MkOpt ["--check", "-c"] [] [CheckOnly]
               (Just "Quiet mode; display fewer messages"),
            MkOpt ["--console-width"] [AutoNat "console width"] (\l => [ConsoleWidth l])
               (Just "Width for console output (0 for unbounded) (auto by default)"),
+          MkOpt ["--show-implicits"] [] [ShowImplicits]
+              (Just "Show implicits when pretty printing"),
            MkOpt ["--show-machine-names"] [] [ShowMachineNames]
               (Just "Show machine names when pretty printing"),
            MkOpt ["--show-namespaces"] [] [ShowNamespaces]
@@ -340,6 +354,8 @@ options = [MkOpt ["--check", "-c"] [] [CheckOnly]
               (Just "Verbose mode (default)"),
            MkOpt ["--log"] [RequiredLogLevel "log level"] (\l => [Logging l])
               (Just "Global log level (0 by default)"),
+           MkOpt ["--log-tree"] [] [LoggingTree]
+              (Just "Enable log output in a tree-like view to allow folding/unfolding inner parts (disabled by default)"),
 
            optSeparator,
            MkOpt ["--version", "-v"] [] [Version]
@@ -469,7 +485,9 @@ processArgs flag (AutoNat a :: as) (x :: xs) f =
 processArgs flag (Required a :: as) (x :: xs) f =
   processArgs flag as xs (f x)
 processArgs flag (Optional a :: as) (x :: xs) f =
-  processArgs flag as xs (f $ toMaybe (not (isPrefixOf "-" x)) x)
+  if isPrefixOf "-" x
+    then processArgs flag as (x :: xs) (f Nothing)
+    else processArgs flag as xs (f $ Just x)
 
 matchFlag : (d : OptDesc) -> List String ->
             Either String (Maybe (List CLOpt, List String))
@@ -500,12 +518,35 @@ export
 getOpts : List String -> Either String (List CLOpt)
 getOpts opts = parseOpts options opts
 
-
 export covering
 getCmdOpts : IO (Either String (List CLOpt))
 getCmdOpts = do (_ :: opts) <- getArgs
                     | _ => pure (Left "Invalid command line")
                 pure $ getOpts opts
+
+||| Find an opt that would have matched if only the user had prefixed it with
+||| double-dashes. It is common to see the user error of specifying a command
+||| like "idris2 repl ..." when they mean to write "idris2 --repl ..."
+export
+findNearMatchOpt : String -> Maybe String
+findNearMatchOpt arg =
+  let argWithDashes = "--\{arg}"
+  in
+  case (getOpts [argWithDashes]) of
+       Right [(InputFile _)] => Nothing
+       Right [_] => Just argWithDashes
+       _ => Nothing
+
+||| Suggest an opt that would have matched if only the user had prefixed it with
+||| double-dashes. It is common to see the user error of specifying a command
+||| like "idris2 repl ..." when they mean to write "idris2 --repl ..."
+export
+nearMatchOptSuggestion : String -> Maybe (Doc IdrisAnn)
+nearMatchOptSuggestion arg =
+    findNearMatchOpt arg <&>
+      \opt =>
+        (reflow "Did you mean to type" <++>
+          (dquotes . meta $ pretty0 opt) <+> "?")
 
 ||| List of all command line option flags.
 export

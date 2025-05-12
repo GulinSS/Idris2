@@ -40,6 +40,7 @@ import Idris.Pretty
 import Idris.Doc.String
 
 import Data.List
+import Data.SnocList
 import Data.String
 import Libraries.Data.SortedMap
 
@@ -79,21 +80,21 @@ processDecl : {auto c : Ref Ctxt Defs} ->
 -- Special cases to avoid treating these big blocks as units
 -- This should give us better error recovery (the whole block won't fail
 -- as soon as one of the definitions fails)
-processDecl (PNamespace fc ns ps)
+processDecl (MkFCVal _ $ PNamespace ns ps)
     = withExtendedNS ns $ processDecls ps
-processDecl (PMutual fc ps)
+processDecl (MkFCVal _ $ PMutual ps)
     = let (tys, defs) = splitMutual ps in
       processDecls (tys ++ defs)
 
 processDecl decl
     = catch (do impdecls <- desugarDecl [] decl
-                traverse_ (Check.processDecl [] (MkNested []) []) impdecls
+                traverse_ (Check.processDecl [] (MkNested []) ScopeEmpty) impdecls
                 pure [])
             (\err => do giveUpConstraints -- or we'll keep trying...
                         pure [err])
 
 processDecls decls
-    = do xs <- concat <$> traverse processDecl decls
+    = do xs <- concat <$> traverse (logDepthWrap processDecl) decls
          Nothing <- checkDelayedHoles
              | Just err => pure (if null xs then [err] else xs)
          errs <- logTime 3 ("Totality check overall") getTotalityErrors
@@ -149,7 +150,6 @@ addImport imp
          setNS topNS
 
 readImportMeta : {auto c : Ref Ctxt Defs} ->
-                 {auto u : Ref UST UState} ->
                  Import -> Core (Bool, (Namespace, Int))
 readImportMeta imp
     = do Right ttcFileName <- nsToPath (loc imp) (path imp)
@@ -274,7 +274,6 @@ unchangedHash hashFn ttcFileName sourceFileName
 
 export
 getCG : {auto o : Ref ROpts REPLOpts} ->
-        {auto c : Ref Ctxt Defs} ->
         CG -> Core (Maybe Codegen)
 getCG Chez = pure $ Just codegenChez
 getCG ChezSep = pure $ Just codegenChezSep
@@ -386,20 +385,23 @@ processMod sourceFileName ttcFileName msg sourcecode origin
                 -- a phase before this which builds the dependency graph
                 -- (also that we only build child dependencies if rebuilding
                 -- changes the interface - will need to store a hash in .ttc!)
+                logDepthIncrease
                 logTime 2 "Reading imports" $
-                   traverse_ (readImport False) allImports
+                   logDepthDecrease $ traverse_ (readImport False) allImports
 
                 -- Before we process the source, make sure the "hide_everywhere"
                 -- names are set to private (TODO, maybe if we want this?)
 --                 defs <- get Ctxt
 --                 traverse (\x => setVisibility emptyFC x Private) (hiddenNames defs)
                 setNS (miAsNamespace ns)
+                logDepthIncrease
                 errs <- logTime 2 "Processing decls" $
-                            processDecls (decls mod)
+                            logDepthDecrease $ processDecls (decls mod)
 --                 coreLift $ gc
 
                 when (isNil errs) $
-                   logTime 2 "Compile defs" $ compileAndInlineAll
+                   do logDepthIncrease
+                      logTime 2 "Compile defs" $ logDepthDecrease $ compileAndInlineAll
 
                 -- Save the import hashes for the imports we just read.
                 -- If they haven't changed next time, and the source

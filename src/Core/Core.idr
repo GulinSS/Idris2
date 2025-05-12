@@ -5,6 +5,7 @@ import Core.Env
 import Core.TT
 
 import Data.List1
+import Data.SnocList
 import Data.Vect
 
 import Libraries.Data.IMaybe
@@ -190,7 +191,7 @@ data Error : Type where
      FailingWrongError : FC -> String -> List1 Error -> Error
 
      InType : FC -> Name -> Error -> Error
-     InCon : FC -> Name -> Error -> Error
+     InCon : WithFC Name -> Error -> Error
      InLHS : FC -> Name -> Error -> Error
      InRHS : FC -> Name -> Error -> Error
 
@@ -256,7 +257,7 @@ Show Error where
             case cov of
                  IsCovering => "Oh yes it is (Internal error!)"
                  MissingCases cs => "Missing cases:\n\t" ++
-                                           showSep "\n\t" (map show cs)
+                                           showSep "\n\t" (toList $ map show cs)
                  NonCoveringCall ns => "Calls non covering function"
                                            ++ (case ns of
                                                    [fn] => " " ++ show fn
@@ -387,8 +388,8 @@ Show Error where
   show (InType fc n err)
        = show fc ++ ":When elaborating type of " ++ show n ++ ":\n" ++
          show err
-  show (InCon fc n err)
-       = show fc ++ ":When elaborating type of constructor " ++ show n ++ ":\n" ++
+  show (InCon n err)
+       = show n.fc ++ ":When elaborating type of constructor " ++ show n.val ++ ":\n" ++
          show err
   show (InLHS fc n err)
        = show fc ++ ":When elaborating left hand side of " ++ show n ++ ":\n" ++
@@ -491,7 +492,7 @@ getErrorLoc (NoForeignCC loc _) = Just loc
 getErrorLoc (BadMultiline loc _) = Just loc
 getErrorLoc (Timeout _) = Nothing
 getErrorLoc (InType _ _ err) = getErrorLoc err
-getErrorLoc (InCon _ _ err) = getErrorLoc err
+getErrorLoc (InCon _ err) = getErrorLoc err
 getErrorLoc (FailingDidNotFail fc) = pure fc
 getErrorLoc (FailingWrongError fc _ _) = pure fc
 getErrorLoc (InLHS _ _ err) = getErrorLoc err
@@ -583,7 +584,7 @@ killErrorLoc (Timeout x) = Timeout x
 killErrorLoc (FailingDidNotFail fc) = FailingDidNotFail emptyFC
 killErrorLoc (FailingWrongError fc x errs) = FailingWrongError emptyFC x (map killErrorLoc errs)
 killErrorLoc (InType fc x err) = InType emptyFC x (killErrorLoc err)
-killErrorLoc (InCon fc x err) = InCon emptyFC x (killErrorLoc err)
+killErrorLoc (InCon x err) = InCon (NoFC x.val) (killErrorLoc err)
 killErrorLoc (InLHS fc x err) = InLHS emptyFC x (killErrorLoc err)
 killErrorLoc (InRHS fc x err) = InRHS emptyFC x (killErrorLoc err)
 killErrorLoc (MaybeMisspelling err xs) = MaybeMisspelling (killErrorLoc err) xs
@@ -760,6 +761,18 @@ export
 traverse : (a -> Core b) -> List a -> Core (List b)
 traverse f xs = traverse' f xs []
 
+namespace SnocList
+  -- Traversable (specialised)
+  traverse' : (a -> Core b) -> SnocList a -> SnocList b -> Core (SnocList b)
+  traverse' f [<] acc = pure (reverse acc)
+  traverse' f (xs :< x) acc
+      = traverse' f xs (acc :< !(f x))
+
+  %inline
+  export
+  traverse : (a -> Core b) -> SnocList a -> Core (SnocList b)
+  traverse f xs = traverse' f xs [<]
+
 export
 mapMaybeM : (a -> Core (Maybe b)) -> List a -> Core (List b)
 mapMaybeM f = go [<] where
@@ -784,7 +797,7 @@ traverseList1 f xxs
 export
 traverseSnocList : (a -> Core b) -> SnocList a -> Core (SnocList b)
 traverseSnocList f [<] = pure [<]
-traverseSnocList f (as :< a) = (:<) <$> traverseSnocList f as <*> f a
+traverseSnocList f (as :< a) = [| traverseSnocList f as :< f a |]
 
 export
 traverseVect : (a -> Core b) -> Vect n a -> Core (Vect n b)
@@ -829,6 +842,18 @@ traverseList1_ f xxs
          let xs = tail xxs
          ignore (f x)
          traverse_ f xs
+
+namespace SnocList
+  export
+  traverse_ : (a -> Core b) -> SnocList a -> Core ()
+  traverse_ f [<] = pure ()
+  traverse_ f (xs :< x)
+      = Core.do ignore (f x)
+                traverse_ f xs
+
+%inline export
+traverseFC : (a -> Core b) -> WithFC a -> Core (WithFC b)
+traverseFC f (MkFCVal fc x) = MkFCVal fc <$> f x
 
 namespace PiInfo
   export
@@ -876,6 +901,15 @@ anyM f (x :: xs)
          then pure True
          else anyM f xs
 
+namespace SnocList
+  export
+  anyM : (a -> Core Bool) -> SnocList a -> Core Bool
+  anyM f [<] = pure False
+  anyM f (xs :< x)
+      = if !(f x)
+          then pure True
+          else anyM f xs
+
 export
 allM : (a -> Core Bool) -> List a -> Core Bool
 allM f [] = pure True
@@ -894,27 +928,27 @@ filterM p (x :: xs)
          else filterM p xs
 
 export
-newRef : (x : label) -> t -> Core (Ref x t)
+newRef : (0 x : label) -> t -> Core (Ref x t)
 newRef x val
     = do ref <- coreLift (newIORef val)
          pure (MkRef ref)
 
 export %inline
-get : (x : label) -> {auto ref : Ref x a} -> Core a
+get : (0 x : label) -> {auto ref : Ref x a} -> Core a
 get x {ref = MkRef io} = coreLift (readIORef io)
 
 export %inline
-put : (x : label) -> {auto ref : Ref x a} -> a -> Core ()
+put : (0 x : label) -> {auto ref : Ref x a} -> a -> Core ()
 put x {ref = MkRef io} val = coreLift (writeIORef io val)
 
 export %inline
-update : (x : label) -> {auto ref : Ref x a} -> (a -> a) -> Core ()
+update : (0 x : label) -> {auto ref : Ref x a} -> (a -> a) -> Core ()
 update x f
   = do v <- get x
        put x (f v)
 
 export
-wrapRef : (x : label) -> {auto ref : Ref x a} ->
+wrapRef : (0 x : label) -> {auto ref : Ref x a} ->
           (a -> Core ()) ->
           Core b ->
           Core b

@@ -21,6 +21,17 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 * The `idris2 --init` command now ensures that package names are
   valid Idris2 identifiers.
 
+* A new `idris2 --dump-installdir {ipkg-filename}` command outputs the file path
+  where Idris2 will install the given package if `idris2 --install
+  {ipkg-filename}` is called.
+
+* Remove reference to column number parameter in help menu for `refine` command.
+
+* CLI errors will now be printed to `stderr` instead of `stdout`.
+
+* The `idris2 --exec` command now takes an arbitrary expression, not just the
+  function name.
+
 ### Building/Packaging changes
 
 * The Nix flake's `buildIdris` function now returns a set with `executable` and
@@ -45,6 +56,8 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 
 * Support for macOS PowerPC added.
 
+* Multiline comments `{- text -}` are now supported in ipkg files.
+
 ### Language changes
 
 * Autobind and Typebind modifier on operators allow the user to
@@ -63,6 +76,17 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 * Bind expressions in `do` blocks can now have a type ascription.
   See [#3327](https://github.com/idris-lang/Idris2/issues/3327).
 
+* Added syntax to specifying quantity for proof in with-clause.
+
+* Old-style parameter block syntax is deprecated in favor of the new one.
+  In Idris1 you could write `parameters (a : t1, b : t2)` but this did not
+  allow for implicits arguments or quantities, this is deprecated. Use the
+  new Idris2 syntax instead where you can write
+  `parameters {0 t : Type} (v : t)` to indicate if arguments are implicit or
+  erased.
+
+* Elaborator scripts were made to be able to get pretty-printed resugared expressions.
+
 ### Compiler changes
 
 * The compiler now differentiates between "package search path" and "package
@@ -79,11 +103,31 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 * The compiler now parses `~x.fun` as unquoting `x` rather than `x.fun`
   and `~(f 5).fun` as unquoting `(f 5)` rather than `(f 5).fun`.
 
+* Totality checking will now look under data constructors, so `Just xs` will
+  be considered smaller than `Just (x :: xs)`.
+
 * LHS of `with`-applications are parsed as `PWithApp` instead of `PApp`. As a
   consequence, `IWithApp` appears in `TTImp` values in elaborator scripts instead
   of `IApp`, as it should have been.
 
 * `MakeFuture` primitive is removed.
+
+* [Typst](https://typst.app/) files can be compiled as Literate Idris.
+
+* `min` was renamed to `leftMost` in `Libraries.Data.Sorted{Map|Set}` in order
+  to be defined as in `base`.
+
+* Reflected trees now make use of `WithFC` to replicate the new location tracking
+  in the compiler.
+
+* Constructors with certain tags (`CONS`, `NIL`, `JUST`, `NOTHING`) are replaced
+  with `_builtin.<TAG>` (eg `_builtin.CONS`). This allows the identity optimisation
+  to optimise conversions between list-shaped things.
+
+* [Djot](https://djot.net/) files can now be compiled as CommonMark style
+  Literate Idris files.
+
+* Fixed a bug that caused `ttc` size to grow exponentially.
 
 ### Backend changes
 
@@ -114,12 +158,23 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 
 * Rename C function to avoid confliction. But only a part.
 
-* Supress code generation of _arglist wrappers to reduce code size and compilation time.
+* Suppress code generation of `_arglist` wrappers to reduce code size and compilation time.
 
-* Removed Value_Arglist to reduce Closure's allocation overhead and make code simply.
+* Removed `Value_Arglist` to reduce Closure's allocation overhead and make code simply.
 
 * Switch calling conventions based on the number of arguments to avoid limits on
   the number of arguments and to reduce stack usage.
+
+* Values that reference counters reaching their maximum limit are immortalized to
+  prevent counter overflow. This can potentially cause memory leaks, but they
+  occur rarely and are a better choice than crashing. Since overflow is no longer
+  a concern, changing `refCounter` from `int` to `uint16` reduces the size of `Value_Header`.
+
+* Values often found at runtime, such as integers less than 100 are generate
+  statically and share.
+
+* Constant `String`, `Int64`, `Bits64` and `Double` values are allocated statically as
+  immortal and shared.
 
 #### Chez
 
@@ -156,6 +211,8 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 * Added pipeline operators `(|>)` and `(<|)`.
 
 #### Base
+
+* `Data.Vect.Views.Extra` was moved from `contrib` to `base`.
 
 * `Data.List.Lazy` was moved from `contrib` to `base`.
 
@@ -213,7 +270,37 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 
 * Added `fromRight` and `fromLeft` for extracting values out of `Either`, equivalent to `fromJust` for `Just`.
 
+* Export `System.Signal.signalCode` and `System.Signal.toSignal`.
+
+* Added implementations of `Foldable` and `Traversable` for `Control.Monad.Identity`
+
+* Added `Data.IORef.atomically` for the chez backend.
+
+* `Data.Nat.NonZero` was made to be an alias for `Data.Nat.IsSucc`.
+  `SIsNonZero` was made to be an alias for `ItIsSucc`, was marked as deprecated,
+  and won't work on LHS anymore.
+
+* Deprecated `toList` function in favor of `Prelude.toList` in `Data.SortedSet`.
+
+* Several functions like `pop`, `differenceMap` and `toSortedMap` were added to `Data.Sorted{Map|Set}`
+
+* Added `kvList` function to `Data.SortedMap` and `Data.SortedMap.Dependent` to have an unambiguous
+  `toList` variant.
+
+* Refactored `Uninhabited` implementation for `Data.List.Elem`, `Data.List1.Elem`, `Data.SnocList.Elem` and `Data.Vect.Elem`
+  so it can be used for homogeneous (`===`) and heterogeneous (`~=~`) equality.
+
+* Added `System.Concurrency.channelGetNonBlocking` for the chez backend.
+
+* Added `System.Concurrency.channelGetWithTimeout` for the chez backend.
+
+* Added `System.Concurrency.getThreadId` for the chez backend.
+
+* `unrestricted`, for unpacking a `!* a`, now uses its argument once
+
 #### Contrib
+
+* `Data.Vect.Views.Extra` was moved from `contrib` to `base`.
 
 * `Data.List.Lazy` was moved from `contrib` to `base`.
 
@@ -253,7 +340,8 @@ This CHANGELOG describes the merged but unreleased changes. Please see [CHANGELO
 #### Network
 
 * Add a missing function parameter (the flag) in the C implementation of `idrnet_recv_bytes`
-
+* Merge callbacks in linear `newSocket` into one single, linear callback,
+  and allow the callback to produce any value
 
 #### Test
 

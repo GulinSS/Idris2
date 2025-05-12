@@ -120,9 +120,12 @@ jobs:
       - name: Build current version
         run: |
           make && make install
+      - name: Test
+        run: make ci-ubuntu-test INTERACTIVE=''
       - name: Artifact Idris2 from previous version
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: ubuntu-installed-idris2-${{ env.IDRIS2_MINIMUM_COMPAT_VERSION }}-chez
           path: ~/.idris2/
 
@@ -157,6 +160,7 @@ jobs:
       - name: Artifact Bootstrapped Idris2
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: ubuntu-installed-bootstrapped-idris2-chez
           path: ~/.idris2/
 
@@ -188,12 +192,14 @@ jobs:
       - name: Artifact Bootstrapped Idris2
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: macos-installed-bootstrapped-idris2-chez
           path: ~/.idris2/
 
   windows-bootstrap-chez:
     needs: [initialise, quick-check]
     runs-on: windows-latest
+    timeout-minutes: 45
     if: |
       !contains(needs.initialise.outputs.commit_message, '[ci:')
       || contains(needs.initialise.outputs.commit_message, '[ci: windows]')
@@ -238,12 +244,14 @@ jobs:
       - name: Artifact Idris2 from chez
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: windows-installed-bootstrapped-idris2-chez
           path: ${{ env.IDRIS_PREFIX }}
 
   nix-bootstrap-chez:
     needs: [initialise, quick-check]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     if: |
       (!contains(needs.initialise.outputs.commit_message, '[ci:')
       || contains(needs.initialise.outputs.commit_message, '[ci: nix]')
@@ -284,6 +292,7 @@ jobs:
       - name: Artifact Bootstrapped Idris2
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: ubuntu-installed-bootstrapped-idris2-racket
           path: ~/.idris2/
 
@@ -296,6 +305,7 @@ jobs:
   ubuntu-self-host-chez:
     needs: ubuntu-bootstrap-chez
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       IDRIS2_CG: chez
       SCHEME: scheme
@@ -321,6 +331,7 @@ jobs:
   macos-self-host-chez:
     needs: macos-bootstrap-chez
     runs-on: macos-latest
+    timeout-minutes: 45
     env:
       SCHEME: chez
     steps:
@@ -376,6 +387,7 @@ jobs:
   ubuntu-self-host-previous-version:
     needs: [initialise, quick-check]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     if: |
       !contains(needs.initialise.outputs.commit_message, '[ci:')
       || contains(needs.initialise.outputs.commit_message, '[ci: ubuntu]')
@@ -403,6 +415,7 @@ jobs:
       - name: Artifact Idris2
         uses: actions/upload-artifact@v4
         with:
+          include-hidden-files: true
           name: idris2-nightly-chez
           path: ~/.idris2/
 
@@ -630,6 +643,8 @@ jobs:
             echo "commit = \"latest:${GITHUB_REF_NAME}\""
             echo "bootstrap  = true"
           } > pack.toml
+      - name: Fetching bleeding-edge state of libraries
+        run: pack switch HEAD
       - name: Build idris2-pack
         run: |
           git config --global --add safe.directory "${PWD}"
@@ -672,6 +687,8 @@ jobs:
             echo "commit = \"latest:${GITHUB_REF_NAME}\""
             echo "bootstrap  = true"
           } > pack.toml
+      - name: Fetching bleeding-edge state of libraries
+        run: pack switch HEAD
       # make sure pack is running the PR's Idris2 before building LSP
       - name: Build pack with PR-Idris
         run: |

@@ -21,6 +21,7 @@ modules =
     Compiler.VMCode,
 
     Compiler.Opts.ConstantFold,
+    Compiler.Opts.Constructor,
     Compiler.Opts.Identity,
     Compiler.Opts.InlineHeuristics,
     Compiler.Opts.ToplevelConstants,
@@ -72,6 +73,7 @@ modules =
     Core.LinearCheck,
     Core.Metadata,
     Core.Name,
+    Core.Name.CompatibleVars,
     Core.Name.Namespace,
     Core.Name.Scoped,
     Core.Normalise,
@@ -190,6 +192,7 @@ modules =
     Libraries.Data.NameMap.Traversable,
     Libraries.Data.Ordering.Extra,
     Libraries.Data.PosMap,
+    Libraries.Data.SnocList.Extra,
     Libraries.Data.SnocList.HasLength,
     Libraries.Data.SnocList.LengthMatch,
     Libraries.Data.SnocList.SizeOf,

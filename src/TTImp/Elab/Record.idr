@@ -18,6 +18,7 @@ import TTImp.Elab.Delayed
 import TTImp.TTImp
 
 import Data.List
+import Data.SnocList
 import Libraries.Data.SortedSet
 
 %default covering
@@ -26,12 +27,12 @@ getRecordType : Env Term vars -> NF vars -> Maybe Name
 getRecordType env (NTCon _ n _ _ _) = Just n
 getRecordType env _ = Nothing
 
-getNames : {auto c : Ref Ctxt Defs} -> Defs -> NF [] -> Core $ SortedSet Name
+getNames : {auto c : Ref Ctxt Defs} -> Defs -> ClosedNF -> Core $ SortedSet Name
 getNames defs (NApp _ hd args)
     = do eargs <- traverse (evalClosure defs . snd) args
          pure $ nheadNames hd `union` concat !(traverse (getNames defs) eargs)
   where
-    nheadNames : NHead [] -> SortedSet Name
+    nheadNames : NHead ScopeEmpty -> SortedSet Name
     nheadNames (NRef Bound n) = singleton n
     nheadNames _ = empty
 getNames defs (NDCon _ _ _ _ args)
@@ -79,7 +80,7 @@ toRHS fc r = snd (toRHS' fc r)
 findConName : Defs -> Name -> Core (Maybe Name)
 findConName defs tyn
     = case !(lookupDefExact tyn (gamma defs)) of
-           Just (TCon _ _ _ _ _ _ [con] _) => pure (Just con)
+           Just (TCon _ _ _ _ _ _ (Just [con]) _) => pure (Just con)
            _ => pure Nothing
 
 findFieldsAndTypeArgs : {auto c : Ref Ctxt Defs} ->
@@ -87,12 +88,12 @@ findFieldsAndTypeArgs : {auto c : Ref Ctxt Defs} ->
                         Core $ Maybe (List (String, Maybe Name, Maybe Name), SortedSet Name)
 findFieldsAndTypeArgs defs con
     = case !(lookupTyExact con (gamma defs)) of
-           Just t => pure (Just !(getExpNames empty [] !(nf defs [] t)))
+           Just t => pure (Just !(getExpNames empty [] !(nf defs ScopeEmpty t)))
            _ => pure Nothing
   where
     getExpNames : SortedSet Name ->
                   List (String, Maybe Name, Maybe Name) ->
-                  NF [] ->
+                  ClosedNF ->
                   Core (List (String, Maybe Name, Maybe Name), SortedSet Name)
     getExpNames names expNames (NBind fc x (Pi _ _ p ty) sc)
         = do let imp = case p of
@@ -100,8 +101,8 @@ findFieldsAndTypeArgs defs con
                             _ => Just x
              nfty <- evalClosure defs ty
              let names = !(getNames defs nfty) `union` names
-             let expNames = (nameRoot x, imp, getRecordType [] nfty) :: expNames
-             getExpNames names expNames !(sc defs (toClosure defaultOpts [] (Ref fc Bound x)))
+             let expNames = (nameRoot x, imp, getRecordType ScopeEmpty nfty) :: expNames
+             getExpNames names expNames !(sc defs (toClosure defaultOpts ScopeEmpty (Ref fc Bound x)))
     getExpNames names expNames nfty = pure (reverse expNames, (!(getNames defs nfty) `union` names))
 
 genFieldName : {auto u : Ref UST UState} ->
@@ -202,7 +203,6 @@ export
 recUpdate : {vars : _} ->
             {auto c : Ref Ctxt Defs} ->
             {auto u : Ref UST UState} ->
-            {auto e : Ref EST (EState vars)} ->
             RigCount -> ElabInfo -> FC ->
             NestedNames vars -> Env Term vars ->
             List IFieldUpdate ->
@@ -211,7 +211,7 @@ recUpdate : {vars : _} ->
 recUpdate rigc elabinfo iloc nest env flds rec grecty
       = do let dups = checkForDuplicates flds empty empty
            unless (null dups) $
-             throw (DuplicatedRecordUpdatePath iloc $ SortedSet.toList dups)
+             throw (DuplicatedRecordUpdatePath iloc $ Prelude.toList dups)
            defs <- get Ctxt
            rectynf <- getNF grecty
            let Just rectyn = getRecordType env rectynf
@@ -230,7 +230,7 @@ recUpdate rigc elabinfo iloc nest env flds rec grecty
 needType : Error -> Bool
 needType (RecordTypeNeeded _ _) = True
 needType (InType _ _ err) = needType err
-needType (InCon _ _ err) = needType err
+needType (InCon _ err) = needType err
 needType (InLHS _ _ err) = needType err
 needType (InRHS _ _ err) = needType err
 needType (WhenUnifying _ _ _ _ _ err) = needType err

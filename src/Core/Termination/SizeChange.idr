@@ -167,8 +167,7 @@ postCompose h ch2 s work f _ ch1
        insert (f, h, ch) work
 
 mutual
-  addGraph : {auto c : Ref Ctxt Defs} ->
-             (f, g : Name) -> Graph {- f g -} ->
+  addGraph : (f, g : Name) -> Graph {- f g -} ->
              WorkList ->
              SCSet ->
              SCSet
@@ -188,8 +187,7 @@ mutual
         -- And then we need to close over all of these new paths too
         transitiveClosure work_post s
 
-  transitiveClosure : {auto c : Ref Ctxt Defs} ->
-                      WorkList ->
+  transitiveClosure : WorkList ->
                       SCSet ->
                       SCSet
   transitiveClosure work s
@@ -230,7 +228,7 @@ findLoops s
       map (foldMap checkNonDesc) loops
     where
       filterEndos : (Graph -> Bool) -> SCSet -> NameMap (List Graph)
-      filterEndos p = mapWithKey (\f, m => filter p (Data.SortedSet.toList (lookupSet f m)))
+      filterEndos p = mapWithKey (\f, m => filter p (Prelude.toList (lookupSet f m)))
 
 findNonTerminatingLoop : SCSet -> Maybe (Name, Graph)
 findNonTerminatingLoop s = findNonTerminating (findLoops s)

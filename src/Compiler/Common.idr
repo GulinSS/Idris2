@@ -6,6 +6,7 @@ import Compiler.CompileExpr
 import Compiler.Inline
 import Compiler.LambdaLift
 import Compiler.NoMangle
+import Compiler.Opts.Constructor
 import Compiler.Opts.CSE
 import Compiler.VMCode
 
@@ -80,7 +81,7 @@ Ord UsePhase where
 public export
 record CompileData where
   constructor MkCompileData
-  mainExpr : CExp [] -- main expression to execute. This also appears in
+  mainExpr : ClosedCExp -- main expression to execute. This also appears in
                      -- the definitions below as MN "__mainExpression" 0
                      -- For incremental compilation and for compiling exported
                      -- names only, this can be set to 'erased'.
@@ -152,7 +153,7 @@ getMinimalDef (Coded ns bin)
          name <- fromBuf b
          let def
              = MkGlobalDef fc name (Erased fc Placeholder) [] [] [] [] mul
-                           [] (specified Public) (MkTotality Unchecked IsCovering) False
+                           ScopeEmpty (specified Public) (MkTotality Unchecked IsCovering) False
                            [] Nothing refsR False False True
                            None cdef Nothing [] Nothing
          pure (def, Just (ns, bin))
@@ -340,6 +341,11 @@ getCompileDataWith exports doLazyAnnots phase_in tm_in
 
          (cseDefs, csetm) <- logTime 2 "CSE" $ cse rcns compiledtm
 
+         for_ cseDefs $ \(n, _, def) => log "compile.execute" 40 $ "getCompileDataWith cseDefs: \{show (n, def)}"
+
+         -- Add intrinsic constructors (see Compiler.Opts.Constructor)
+         let cseDefs = intrinsicCons ++ cseDefs
+
          namedDefs <- logTime 2 "Forget names" $
            traverse getNamedDef cseDefs
 
@@ -351,8 +357,8 @@ getCompileDataWith exports doLazyAnnots phase_in tm_in
                               traverse (lambdaLift doLazyAnnots) cseDefs
                          else pure []
 
-         let lifted = (mainname, MkLFun [] [] liftedtm) ::
-                      ldefs ++ concat lifted_in
+         let lifted = (mainname, MkLFun ScopeEmpty ScopeEmpty liftedtm) ::
+                      (ldefs ++ concat lifted_in)
 
          anf <- if phase >= ANF
                    then logTime 2 "Get ANF" $ traverse (\ (n, d) => pure (n, !(toANF d))) lifted
@@ -365,18 +371,22 @@ getCompileDataWith exports doLazyAnnots phase_in tm_in
          whenJust (dumpcases sopts) $ \ f =>
             do coreLift $ putStrLn $ "Dumping case trees to " ++ f
                dumpIR f (map (\(n, _, def) => (n, def)) namedDefs)
+         for_ namedDefs $ \(n, _, def) => log "compile.execute" 40 $ "getCompileDataWith namedDefs: \{show (n, def)}"
 
          whenJust (dumplifted sopts) $ \ f =>
             do coreLift $ putStrLn $ "Dumping lambda lifted defs to " ++ f
                dumpIR f lifted
+         for_ lifted $ \(n, def) => log "compile.execute" 40 $ "getCompileDataWith lifted: \{show (n, def)}"
 
          whenJust (dumpanf sopts) $ \ f =>
             do coreLift $ putStrLn $ "Dumping ANF defs to " ++ f
                dumpIR f anf
+         for_ anf $ \(n, def) => log "compile.execute" 40 $ "getCompileDataWith anf: \{show (n, def)}"
 
          whenJust (dumpvmcode sopts) $ \ f =>
             do coreLift $ putStrLn $ "Dumping VM defs to " ++ f
                dumpIR f vmcode
+         for_ vmcode $ \(n, def) => log "compile.execute" 40 $ "getCompileDataWith vmcode: \{show (n, def)}"
 
          -- We're done with our minimal context now, so put it back the way
          -- it was. Back ends shouldn't look at the global context, because
@@ -408,7 +418,7 @@ getCompileData = getCompileDataWith []
 
 export
 compileTerm : {auto c : Ref Ctxt Defs} ->
-              ClosedTerm -> Core (CExp [])
+              ClosedTerm -> Core ClosedCExp
 compileTerm tm_in
     = do tm <- toFullNames tm_in
          fixArityExp !(compileExp tm)

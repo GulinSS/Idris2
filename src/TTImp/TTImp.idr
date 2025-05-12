@@ -10,17 +10,20 @@ import Core.TT
 import Core.Value
 
 import Data.List
-import Data.List1
+import public Data.List1
 import Data.Maybe
+
+import Libraries.Data.List.SizeOf
 
 import Libraries.Data.SortedSet
 import Libraries.Data.WithDefault
+import Libraries.Data.SnocList.SizeOf
 
 %default covering
 
 -- Information about names in nested blocks
 public export
-record NestedNames (vars : List Name) where
+record NestedNames (vars : Scope) where
   constructor MkNested
   -- A map from names to the decorated version of the name, and the new name
   -- applied to its enclosing environment
@@ -35,7 +38,7 @@ Weaken NestedNames where
   weakenNs {ns = wkns} s (MkNested ns) = MkNested (map wknName ns)
     where
       wknName : (Name, (Maybe Name, List (Var vars), FC -> NameType -> Term vars)) ->
-                (Name, (Maybe Name, List (Var (wkns ++ vars)), FC -> NameType -> Term (wkns ++ vars)))
+                (Name, (Maybe Name, List (Var (vars ++ wkns)), FC -> NameType -> Term (vars ++ wkns)))
       wknName (n, (mn, vars, rep))
           = (n, (mn, map (weakenNs s) vars, \fc, nt => weakenNs s (rep fc nt)))
 
@@ -258,6 +261,15 @@ mutual
   isTotalityReq _ = False
 
   export
+  extractTotality : FnOpt' nm -> Maybe TotalReq
+  extractTotality (Totality t) = Just t
+  extractTotality _ = Nothing
+
+  export
+  findTotality : List (FnOpt' nm) -> Maybe TotalReq
+  findTotality = foldr (\elem, acc => extractTotality elem <|> acc) empty
+
+  export
   covering
   Show nm => Show (FnOpt' nm) where
     show Unsafe = "%unsafe"
@@ -299,19 +311,22 @@ mutual
   ImpTy = ImpTy' Name
 
   public export
-  data ImpTy' : Type -> Type where
-       MkImpTy : FC -> (nameFC : FC) -> (n : Name) -> (ty : RawImp' nm) -> ImpTy' nm
+  record ImpTy' (nm : Type) where
+      constructor MkImpTy
+      loc : FC
+      name : WithFC Name
+      type : RawImp' nm
 
   %name ImpTy' ty
 
   export
   covering
   Show nm => Show (ImpTy' nm) where
-    show (MkImpTy fc _ n ty) = "(%claim " ++ show n ++ " " ++ show ty ++ ")"
+    show (MkImpTy fc n ty) = "(%claim " ++ show n.val ++ " " ++ show ty ++ ")"
 
   public export
   data DataOpt : Type where
-       SearchBy : List Name -> DataOpt -- determining arguments
+       SearchBy : List1 Name -> DataOpt -- determining arguments
        NoHints : DataOpt -- Don't generate search hints for constructors
        UniqueSearch : DataOpt -- auto implicit search must check result is unique
        External : DataOpt -- implemented externally
@@ -359,7 +374,8 @@ mutual
 
   public export
   data IField' : Type -> Type where
-       MkIField : FC -> RigCount -> PiInfo (RawImp' nm) -> Name -> RawImp' nm ->
+       MkIField : FC -> RigCount -> PiInfo (RawImp' nm) ->
+                  (name : Name) -> (ty : RawImp' nm) ->
                   IField' nm
 
   %name IField' fld
@@ -423,7 +439,7 @@ mutual
        PatClause : FC -> (lhs : RawImp' nm) -> (rhs : RawImp' nm) -> ImpClause' nm
        WithClause : FC -> (lhs : RawImp' nm) ->
                     (rig : RigCount) -> (wval : RawImp' nm) -> -- with'd expression (& quantity)
-                    (prf : Maybe Name) -> -- optional name for the proof
+                    (prf : Maybe (RigCount, Name)) -> -- optional name for the proof
                     (flags : List WithFlag) ->
                     List (ImpClause' nm) -> ImpClause' nm
        ImpossibleClause : FC -> (lhs : RawImp' nm) -> ImpClause' nm
@@ -437,8 +453,9 @@ mutual
        = show lhs ++ " = " ++ show rhs
     show (WithClause fc lhs rig wval prf flags block)
        = show lhs
-       ++ " with (" ++ show rig ++ " " ++ show wval ++ ")"
-       ++ maybe "" (\ nm => " proof " ++ show nm) prf
+       ++ " with " ++ showCount rig ++ "(" ++ show wval ++ ")"
+          -- TODO: remove `the` after fix idris-lang/Idris2#3418
+       ++ maybe "" (the (_ -> _) $ \(rg, nm) => " proof " ++ showCount rg ++ show nm) prf
        ++ "\n\t" ++ show block
     show (ImpossibleClause fc lhs)
        = show lhs ++ " impossible"
@@ -448,14 +465,21 @@ mutual
   ImpDecl = ImpDecl' Name
 
   public export
+  record IClaimData (nm : Type) where
+    constructor MkIClaimData
+    rig : RigCount
+    vis : Visibility
+    opts : List (FnOpt' nm)
+    type : ImpTy' nm
+
+  public export
   data ImpDecl' : Type -> Type where
-       IClaim : FC -> RigCount -> Visibility -> List (FnOpt' nm) ->
-                ImpTy' nm -> ImpDecl' nm
+       IClaim : WithFC (IClaimData nm) -> ImpDecl' nm
        IData : FC -> WithDefault Visibility Private ->
                Maybe TotalReq -> ImpData' nm -> ImpDecl' nm
        IDef : FC -> Name -> List (ImpClause' nm) -> ImpDecl' nm
        IParameters : FC ->
-                     List (ImpParameter' nm) ->
+                     List1 (ImpParameter' nm) ->
                      List (ImpDecl' nm) -> ImpDecl' nm
        IRecord : FC ->
                  Maybe String -> -- nested namespace
@@ -480,7 +504,8 @@ mutual
   export
   covering
   Show nm => Show (ImpDecl' nm) where
-    show (IClaim _ c _ opts ty) = show opts ++ " " ++ show c ++ " " ++ show ty
+    show (IClaim (MkFCVal _ $ MkIClaimData c _ opts ty))
+        = show opts ++ " " ++ show c ++ " " ++ show ty
     show (IData _ _ _ d) = show d
     show (IDef _ n cs) = "(%def " ++ show n ++ " " ++ show cs ++ ")"
     show (IParameters _ ps ds)
@@ -506,7 +531,7 @@ mutual
 
 
 export
-mkWithClause : FC -> RawImp' nm -> List1 (RigCount, RawImp' nm, Maybe Name) ->
+mkWithClause : FC -> RawImp' nm -> List1 (RigCount, RawImp' nm, Maybe (RigCount, Name)) ->
                List WithFlag -> List (ImpClause' nm) -> ImpClause' nm
 mkWithClause fc lhs ((rig, wval, prf) ::: []) flags cls
   = WithClause fc lhs rig wval prf flags cls
@@ -693,7 +718,7 @@ implicitsAs n defs ns tm
                     "Could not find variable " ++ show n
                   pure $ IVar loc nm
             Just ty =>
-               do ty' <- nf defs [] ty
+               do ty' <- nf defs ScopeEmpty ty
                   implicits <- findImps is es ns ty'
                   log "declare.def.lhs.implicits" 30 $
                     "\n  In the type of " ++ show n ++ ": " ++ show ty ++
@@ -722,7 +747,7 @@ implicitsAs n defs ns tm
         -- in the lhs: this is used to determine when to stop searching for further
         -- implicits to add.
         findImps : List (Maybe Name) -> List (Maybe Name) ->
-                   List Name -> NF [] ->
+                   List Name -> ClosedNF ->
                    Core (List (Name, PiInfo RawImp))
         -- #834 When we are in a local definition, we have an explicit telescope
         -- corresponding to the variables bound in the parent function.
@@ -730,12 +755,12 @@ implicitsAs n defs ns tm
         -- and explicit variables. So we first peel off all of the quantifiers
         -- corresponding to these variables.
         findImps ns es (_ :: locals) (NBind fc x (Pi _ _ _ _) sc)
-          = do body <- sc defs (toClosure defaultOpts [] (Erased fc Placeholder))
+          = do body <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
                findImps ns es locals body
                -- ^ TODO? check that name of the pi matches name of local?
         -- don't add implicits coming after explicits that aren't given
         findImps ns es [] (NBind fc x (Pi _ _ Explicit _) sc)
-            = do body <- sc defs (toClosure defaultOpts [] (Erased fc Placeholder))
+            = do body <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
                  case es of
                    -- Explicits were skipped, therefore all explicits are given anyway
                    Just (UN Underscore) :: _ => findImps ns es [] body
@@ -745,13 +770,13 @@ implicitsAs n defs ns tm
                           Just es' => findImps ns es' [] body
         -- if the implicit was given, skip it
         findImps ns es [] (NBind fc x (Pi _ _ AutoImplicit _) sc)
-            = do body <- sc defs (toClosure defaultOpts [] (Erased fc Placeholder))
+            = do body <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
                  case updateNs x ns of
                    Nothing => -- didn't find explicit call
                       pure $ (x, AutoImplicit) :: !(findImps ns es [] body)
                    Just ns' => findImps ns' es [] body
         findImps ns es [] (NBind fc x (Pi _ _ p _) sc)
-            = do body <- sc defs (toClosure defaultOpts [] (Erased fc Placeholder))
+            = do body <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
                  if Just x `elem` ns
                    then findImps ns es [] body
                    else pure $ (x, forgetDef p) :: !(findImps ns es [] body)
@@ -785,10 +810,10 @@ export
 definedInBlock : Namespace -> -- namespace to resolve names
                  List ImpDecl -> List Name
 definedInBlock ns decls =
-    SortedSet.toList $ foldl (defName ns) empty decls
+    Prelude.toList $ foldl (defName ns) empty decls
   where
     getName : ImpTy -> Name
-    getName (MkImpTy _ _ n _) = n
+    getName (MkImpTy _ n _) = n.val
 
     getFieldName : IField -> Name
     getFieldName (MkIField _ _ _ n _) = n
@@ -802,7 +827,7 @@ definedInBlock ns decls =
            _ => n
 
     defName : Namespace -> SortedSet Name -> ImpDecl -> SortedSet Name
-    defName ns acc (IClaim _ _ _ _ ty) = insert (expandNS ns (getName ty)) acc
+    defName ns acc (IClaim c) = insert (expandNS ns (getName c.val.type)) acc
     defName ns acc (IDef _ nm _) = insert (expandNS ns nm) acc
     defName ns acc (IData _ _ _ (MkImpData _ n _ _ cons))
         = foldl (flip insert) acc $ expandNS ns n :: map (expandNS ns . getName) cons
@@ -890,7 +915,7 @@ namespace ImpDecl
 
   public export
   getFC : ImpDecl' nm -> FC
-  getFC (IClaim fc _ _ _ _) = fc
+  getFC (IClaim c) = c.fc
   getFC (IData fc _ _ _) = fc
   getFC (IDef fc _ _) = fc
   getFC (IParameters fc _ _) = fc
@@ -982,9 +1007,5 @@ getFn f = f
 -- Log message with a RawImp
 export
 logRaw : {auto c : Ref Ctxt Defs} ->
-         (s : String) ->
-         {auto 0 _ : KnownTopic s} ->
-         Nat -> Lazy String -> RawImp -> Core ()
-logRaw str n msg tm
-    = when !(logging str n) $
-        do logString str n (msg ++ ": " ++ show tm)
+         LogTopic -> Nat -> Lazy String -> RawImp -> Core ()
+logRaw s n msg tm = log s n $ msg ++ ": " ++ show tm

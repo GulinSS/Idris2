@@ -79,6 +79,16 @@ TTC FC where
              _ => corrupt "FC"
 
 export
+TTC a => TTC (WithFC a) where
+  toBuf b (MkFCVal fc val)
+    = do toBuf b fc
+       ; toBuf b val
+  fromBuf b
+    = do fc <- fromBuf b
+         val <- fromBuf b
+         pure $ MkFCVal fc val
+
+export
 TTC Name where
   -- for efficiency reasons we do not encode UserName separately
   -- hence the nested pattern matches on UN (Basic/Hole/Field)
@@ -260,13 +270,13 @@ TTC NameType where
 -- (Indeed, we're expecting the whole IsVar proof to be erased because
 -- we have the idx...)
 mkPrf : (idx : Nat) -> IsVar n idx ns
-mkPrf {n} {ns} Z = believe_me (First {n} {ns = n :: ns})
+mkPrf {n} {ns} Z = believe_me (First {n} {ns = ns :< n})
 mkPrf {n} {ns} (S k) = believe_me (Later {m=n} (mkPrf {n} {ns} k))
 
-getName : (idx : Nat) -> List Name -> Maybe Name
-getName Z (x :: xs) = Just x
-getName (S k) (x :: xs) = getName k xs
-getName _ [] = Nothing
+getName : (idx : Nat) -> Scope -> Maybe Name
+getName Z (xs :< x) = Just x
+getName (S k) (xs :< x) = getName k xs
+getName _ [<] = Nothing
 
 mutual
   export
@@ -483,16 +493,16 @@ mutual
 
 export
 {vars : _} -> TTC (Env Term vars) where
-  toBuf b [] = pure ()
-  toBuf b ((::) bnd env)
+  toBuf b [<] = pure ()
+  toBuf b (env :< bnd)
       = do toBuf b bnd; toBuf b env
 
   -- Length has to correspond to length of 'vars'
-  fromBuf {vars = []} b = pure Nil
-  fromBuf {vars = x :: xs} b
+  fromBuf {vars = [<]} b = pure ScopeEmpty
+  fromBuf {vars = xs :< x} b
       = do bnd <- fromBuf b
            env <- fromBuf b
-           pure (bnd :: env)
+           pure (env :< bnd)
 
 export
 TTC Visibility where
@@ -1107,7 +1117,7 @@ TTC GlobalDef where
            toBuf b (fullname gdef)
            toBuf b (map NameMap.toList (refersToM gdef))
            toBuf b (definition gdef)
-           when (isUserName (fullname gdef) || cwName (fullname gdef)) $
+           when (isUserName (fullname gdef)) $
               do toBuf b (type gdef)
                  toBuf b (eraseArgs gdef)
                  toBuf b (safeErase gdef)
@@ -1121,11 +1131,7 @@ TTC GlobalDef where
                  toBuf b (invertible gdef)
                  toBuf b (noCycles gdef)
                  toBuf b (sizeChange gdef)
-    where
-      cwName : Name -> Bool
-      cwName (CaseBlock _ _) = True
-      cwName (WithBlock _ _) = True
-      cwName _ = False
+
   fromBuf b
       = do cdef <- fromBuf b
            refsRList <- fromBuf b
@@ -1151,7 +1157,7 @@ TTC GlobalDef where
                                         mul vars vis
                                         tot hatch fl refs refsR inv c True def cdef Nothing sc Nothing)
               else pure (MkGlobalDef loc name (Erased loc Placeholder) [] [] [] []
-                                     mul [] (specified Public) unchecked False [] refs refsR
+                                     mul ScopeEmpty (specified Public) unchecked False [] refs refsR
                                      False False True def cdef Nothing [] Nothing)
 
 export

@@ -90,7 +90,7 @@ paramPos tyn dcons = do
 
 export
 addData : {auto c : Ref Ctxt Defs} ->
-          List Name -> Visibility -> Int -> DataDef -> Core Int
+          Scope -> Visibility -> Int -> DataDef -> Core Int
 addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
     = do defs <- get Ctxt
          tag <- getNextTypeTag
@@ -104,7 +104,7 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
                             (TCon tag arity
                                   paramPositions
                                   allPos
-                                  defaultFlags [] (map name datacons) Nothing)
+                                  defaultFlags [] (Just $ map name datacons) Nothing)
          (idx, gam') <- addCtxt tyn tydef (gamma defs)
          gam'' <- addDataConstructors 0 datacons gam'
          put Ctxt ({ gamma := gam'' } defs)

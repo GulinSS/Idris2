@@ -16,6 +16,7 @@ import TTImp.Elab.Check
 import Libraries.Data.IntMap
 import Libraries.Data.NameMap
 import Data.List
+import Data.SnocList
 
 %default covering
 
@@ -25,10 +26,10 @@ mkClosedElab : {vars : _} ->
                FC -> Env Term vars ->
                (Core (Term vars, Glued vars)) ->
                Core ClosedTerm
-mkClosedElab fc [] elab
+mkClosedElab fc [<] elab
     = do (tm, _) <- elab
          pure tm
-mkClosedElab {vars = x :: vars} fc (b :: env) elab
+mkClosedElab {vars = vars :< x} fc (env :< b) elab
     = mkClosedElab fc env
           (do (sc', _) <- elab
               let b' = newBinder b
@@ -150,7 +151,7 @@ ambiguous (AmbiguousElab _ _ _) = True
 ambiguous (AmbiguousName _ _) = True
 ambiguous (AmbiguityTooDeep _ _ _) = True
 ambiguous (InType _ _ err) = ambiguous err
-ambiguous (InCon _ _ err) = ambiguous err
+ambiguous (InCon _ err) = ambiguous err
 ambiguous (InLHS _ _ err) = ambiguous err
 ambiguous (InRHS _ _ err) = ambiguous err
 ambiguous (WhenUnifying _ _ _ _ _ err) = ambiguous err
@@ -213,7 +214,7 @@ recoverable (CantSolveEq _ gam env l r)
 recoverable (UndefinedName _ _) = pure False
 recoverable (LinearMisuse _ _ _ _) = pure False
 recoverable (InType _ _ err) = recoverable err
-recoverable (InCon _ _ err) = recoverable err
+recoverable (InCon _ err) = recoverable err
 recoverable (InLHS _ _ err) = recoverable err
 recoverable (InRHS _ _ err) = recoverable err
 recoverable (WhenUnifying _ _ _ _ _ err) = recoverable err
@@ -258,9 +259,9 @@ retryDelayed' errmode p acc (d@(_, i, hints, elab) :: ds)
 
                updateDef (Resolved i) (const (Just
                     (PMDef (MkPMDefInfo NotHole True False)
-                           [] (STerm 0 tm) (STerm 0 tm) [])))
+                           ScopeEmpty (STerm 0 tm) (STerm 0 tm) [])))
                logTerm "elab.update" 5 ("Resolved delayed hole " ++ show i) tm
-               logTermNF "elab.update" 5 ("Resolved delayed hole NF " ++ show i) [] tm
+               logTermNF "elab.update" 5 ("Resolved delayed hole NF " ++ show i) ScopeEmpty tm
                removeHole i
                retryDelayed' errmode True acc ds')
            (\err => do logC "elab" 5 $ do pure $ show errmode ++ ":Error in " ++ show !(getFullName (Resolved i))

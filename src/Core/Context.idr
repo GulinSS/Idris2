@@ -12,6 +12,7 @@ import public Core.Options.Log
 import public Core.TT
 
 import Libraries.Utils.Binary
+import Libraries.Utils.Path
 import Libraries.Utils.Scheme
 import Libraries.Text.PrettyPrint.Prettyprinter
 
@@ -323,7 +324,7 @@ commitCtxt ctxt
 ||| @vis  Visibility, defaulting to private
 ||| @def  actual definition
 export
-newDef : (fc : FC) -> (n : Name) -> (rig : RigCount) -> (vars : List Name) ->
+newDef : (fc : FC) -> (n : Name) -> (rig : RigCount) -> (vars : Scope) ->
          (ty : ClosedTerm) -> (vis : WithDefault Visibility Private) -> (def : Def) -> GlobalDef
 newDef fc n rig vars ty vis def
     = MkGlobalDef
@@ -556,13 +557,13 @@ mutual
 
 export
 HasNames (Env Term vars) where
-  full gam [] = pure []
-  full gam (b :: bs)
-      = pure $ !(traverse (full gam) b) :: !(full gam bs)
+  full gam [<] = pure ScopeEmpty
+  full gam (bs :< b)
+      = pure $ !(full gam bs) :< !(traverse (full gam) b)
 
-  resolved gam [] = pure []
-  resolved gam (b :: bs)
-      = pure $ !(traverse (resolved gam) b) :: !(resolved gam bs)
+  resolved gam [<] = pure ScopeEmpty
+  resolved gam (bs :< b)
+      = pure $ !(resolved gam bs) :< !(traverse (resolved gam) b)
 
 export
 HasNames Clause where
@@ -584,9 +585,9 @@ HasNames Def where
       fullNamesPat (_ ** (env, lhs, rhs))
           = pure $ (_ ** (!(full gam env),
                           !(full gam lhs), !(full gam rhs)))
-  full gam (TCon t a ps ds u ms cs det)
+  full gam (TCon t a ps ds u ms mcs det)
       = pure $ TCon t a ps ds u !(traverse (full gam) ms)
-                                !(traverse (full gam) cs) det
+                                !(traverseOpt (traverse (full gam)) mcs) det
   full gam (BySearch c d def)
       = pure $ BySearch c d !(full gam def)
   full gam (Guess tm b cs)
@@ -602,9 +603,9 @@ HasNames Def where
       resolvedNamesPat (_ ** (env, lhs, rhs))
           = pure $ (_ ** (!(resolved gam env),
                           !(resolved gam lhs), !(resolved gam rhs)))
-  resolved gam (TCon t a ps ds u ms cs det)
+  resolved gam (TCon t a ps ds u ms mcs det)
       = pure $ TCon t a ps ds u !(traverse (resolved gam) ms)
-                                !(traverse (resolved gam) cs) det
+                                !(traverseOpt (traverse (full gam)) mcs) det
   resolved gam (BySearch c d def)
       = pure $ BySearch c d !(resolved gam def)
   resolved gam (Guess tm b cs)
@@ -816,7 +817,7 @@ HasNames Error where
   full gam (FailingDidNotFail fc) = pure (FailingDidNotFail fc)
   full gam (FailingWrongError fc x err) = FailingWrongError fc x <$> traverseList1 (full gam) err
   full gam (InType fc n err) = InType fc <$> full gam n <*> full gam err
-  full gam (InCon fc n err) = InCon fc <$> full gam n <*> full gam err
+  full gam (InCon n err) = InCon <$> traverseFC (full gam) n <*> full gam err
   full gam (InLHS fc n err) = InLHS fc <$> full gam n <*> full gam err
   full gam (InRHS fc n err) = InRHS fc <$> full gam n <*> full gam err
   full gam (MaybeMisspelling err xs) = MaybeMisspelling <$> full gam err <*> pure xs
@@ -914,7 +915,7 @@ HasNames Error where
   resolved gam (FailingDidNotFail fc) = pure (FailingDidNotFail fc)
   resolved gam (FailingWrongError fc x err) = FailingWrongError fc x <$> traverseList1 (resolved gam) err
   resolved gam (InType fc n err) = InType fc <$> resolved gam n <*> resolved gam err
-  resolved gam (InCon fc n err) = InCon fc <$> resolved gam n <*> resolved gam err
+  resolved gam (InCon n err) = InCon <$> traverseFC (resolved gam) n <*> resolved gam err
   resolved gam (InLHS fc n err) = InLHS fc <$> resolved gam n <*> resolved gam err
   resolved gam (InRHS fc n err) = InRHS fc <$> resolved gam n <*> resolved gam err
   resolved gam (MaybeMisspelling err xs) = MaybeMisspelling <$> resolved gam err <*> pure xs
@@ -1353,7 +1354,7 @@ addBuiltin n ty tot op
          , specArgs = []
          , inferrable = []
          , multiplicity = top
-         , localVars = []
+         , localVars = ScopeEmpty
          , visibility = specified Public
          , totality = tot
          , isEscapeHatch = False
@@ -1629,6 +1630,14 @@ hasFlag fc n fl
          pure (fl `elem` flags def)
 
 export
+hasSetTotal : {auto c : Ref Ctxt Defs} -> FC -> Name -> Core Bool
+hasSetTotal fc n
+    = do defs <- get Ctxt
+         Just def <- lookupCtxtExact n (gamma defs)
+             | Nothing => undefinedName fc n
+         pure $ isJust $ findSetTotal def.flags
+
+export
 setSizeChange : {auto c : Ref Ctxt Defs} ->
                 FC -> Name -> List SCCall -> Core ()
 setSizeChange loc n sc
@@ -1786,14 +1795,14 @@ dropMutData n = update Ctxt { mutData $= filter (/= n) }
 
 export
 setDetermining : {auto c : Ref Ctxt Defs} ->
-                 FC -> Name -> List Name -> Core ()
+                 FC -> Name -> List1 Name -> Core ()
 setDetermining fc tyn args
     = do defs <- get Ctxt
          Just g <- lookupCtxtExact tyn (gamma defs)
               | _ => undefinedName fc tyn
          let TCon t a ps _ u cons ms det = definition g
               | _ => throw (GenericMsg fc (show (fullname g) ++ " is not a type constructor [setDetermining]"))
-         apos <- getPos 0 args (type g)
+         apos <- getPos 0 (forget args) (type g)
          updateDef tyn (const (Just (TCon t a ps apos u cons ms det)))
   where
     -- Type isn't normalised, but the argument names refer to those given
@@ -2152,7 +2161,9 @@ addPackageDir dir = update Ctxt { options->dirs->package_dirs $= ((::) dir) . fi
 
 export
 addPackageSearchPath: {auto c : Ref Ctxt Defs} -> String -> Core ()
-addPackageSearchPath dir = update Ctxt { options->dirs->package_search_paths $= ((::) dir) . filter (/= dir) }
+addPackageSearchPath dir =
+  let newPath = parse dir
+   in update Ctxt { options->dirs->package_search_paths $= ((::) newPath) . filter (/= newPath) }
 
 export
 addDataDir : {auto c : Ref Ctxt Defs} -> String -> Core ()
@@ -2251,6 +2262,11 @@ export
 setAmbigLimit : {auto c : Ref Ctxt Defs} ->
                 Nat -> Core ()
 setAmbigLimit max = update Ctxt { options->elabDirectives->ambigLimit := max }
+
+export
+setTotalLimit : {auto c : Ref Ctxt Defs} ->
+                Nat -> Core ()
+setTotalLimit max = update Ctxt { options->elabDirectives->totalLimit := max }
 
 export
 setAutoImplicitLimit : {auto c : Ref Ctxt Defs} ->
