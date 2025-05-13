@@ -83,15 +83,16 @@ mkPatternHole {vars'} loc rig n topenv imode (Just expty_in)
               Nothing => mkPatternHole loc rig n topenv imode Nothing
               Just exp' =>
                   do tm <- implBindVar loc rig env n exp'
-                     pure (apply loc (thin tm sub) (mkArgs sub),
+                     pure (apply loc (thin tm sub) (mkArgs topenv sub),
                            expected,
                            thin exp' sub)
   where
     -- TODO: generalise and get rid of (map weaken)
-    mkArgs : {vs : _} -> Thin newvars vs -> List (Term vs)
-    mkArgs Refl = []
-    mkArgs (Drop p) = Local loc Nothing 0 First :: map weaken (mkArgs p)
-    mkArgs _ = []
+    mkArgs : {vs : _} -> Env Term vs -> Thin newvars vs -> List (RigCount, Term vs)
+    mkArgs _ Refl = []
+    mkArgs (env :< b) (Drop p)
+        = (multiplicity b, Local loc Nothing 0 First) :: map @{Compose} weaken (mkArgs env p)
+    mkArgs _ _ = []
 
     -- This is for the specific situation where we're pattern matching on
     -- function types, which is realistically the only time we'll legitimately
@@ -194,10 +195,10 @@ swapVars : {vs : Scope} ->
 swapVars (Local fc x idx p)
     = let MkVar p' = swapIsVar _ p in Local fc x _ p'
 swapVars (Ref fc x name) = Ref fc x name
-swapVars (Meta fc n i xs) = Meta fc n i (map swapVars xs)
+swapVars (Meta fc n i xs) = Meta fc n i (map @{Compose} swapVars xs)
 swapVars {vs} (Bind fc x b scope)
     = Bind fc x (map swapVars b) (swapVars {vs = vs :< x} scope)
-swapVars (App fc fn arg) = App fc (swapVars fn) (swapVars arg)
+swapVars (App fc fn c arg) = App fc (swapVars fn) c (swapVars arg)
 swapVars (As fc s nm pat) = As fc s (swapVars nm) (swapVars pat)
 swapVars (TDelayed fc x tm) = TDelayed fc x (swapVars tm)
 swapVars (TDelay fc x ty tm) = TDelay fc x (swapVars ty) (swapVars tm)

@@ -329,12 +329,13 @@ mutual
         = do tag 3;
              toBuf b x;
              toBuf b bnd; toBuf b scope
-    toBuf b (App fc fn arg)
-        = do let (fn, args) = getFnArgs (App fc fn arg)
+    toBuf b (App fc fn c arg)
+        = do let (fn, args) = getFnArgsWithCounts (App fc fn c arg)
              case args of
-                  [arg] => do tag 4
-                              toBuf b fn
-                              toBuf b arg
+                  [(c, arg)] => do tag 4
+                                   toBuf b fn
+                                   toBuf b c
+                                   toBuf b arg
                   args => do tag 12
                              toBuf b fn
                              toBuf b args
@@ -374,8 +375,9 @@ mutual
                        bnd <- fromBuf b; scope <- fromBuf b
                        pure (Bind emptyFC x bnd scope)
                4 => do fn <- fromBuf b
+                       c <- fromBuf b
                        arg <- fromBuf b
-                       pure (App emptyFC fn arg)
+                       pure (App emptyFC fn c arg)
                5 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
                        pure (As emptyFC s as tm)
                6 => do lr <- fromBuf b; tm <- fromBuf b

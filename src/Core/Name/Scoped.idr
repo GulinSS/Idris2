@@ -30,7 +30,7 @@ Scope : Type
 Scope = Scopeable Name
 
 public export
-ScopeEmpty : {a: Type} -> Scopeable a
+ScopeEmpty : Scopeable a
 ScopeEmpty = [<]
 
 public export

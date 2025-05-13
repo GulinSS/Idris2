@@ -76,8 +76,15 @@ mutual
        NLocal : Maybe Bool -> (idx : Nat) -> (0 p : IsVar nm idx vars) ->
                 NHead vars
        NRef   : NameType -> Name -> NHead vars
-       NMeta  : Name -> Int -> Scopeable (Closure vars) -> NHead vars
+       NMeta  : Name -> Int -> Scopeable (RigCount, Closure vars) -> NHead vars
 
+  public export
+  0 SpineEntry : Scope -> Type
+  SpineEntry vars = (FC, RigCount, Closure vars)
+
+  public export
+  0 Spine : Scope -> Type
+  Spine = SnocList . SpineEntry
 
   -- Values themselves. 'Closure' is an unevaluated thunk, which means
   -- we can wait until necessary to reduce constructor arguments
@@ -88,15 +95,15 @@ mutual
        -- Each closure is associated with the file context of the App node that
        -- had it as an argument. It's necessary so as to not lose file context
        -- information when creating the normal form.
-       NApp     : FC -> NHead vars -> Scopeable (FC, Closure vars) -> NF vars
+       NApp     : FC -> NHead vars -> Spine vars -> NF vars
        NDCon    : FC -> Name -> (tag : Int) -> (arity : Nat) ->
-                  Scopeable (FC, Closure vars) -> NF vars
+                  Spine vars -> NF vars
        NTCon    : FC -> Name -> (tag : Int) -> (arity : Nat) ->
-                  Scopeable (FC, Closure vars) -> NF vars
+                  Spine vars -> NF vars
        NAs      : FC -> UseSide -> NF vars -> NF vars -> NF vars
        NDelayed : FC -> LazyReason -> NF vars -> NF vars
        NDelay   : FC -> LazyReason -> Closure vars -> Closure vars -> NF vars
-       NForce   : FC -> LazyReason -> NF vars -> Scopeable (FC, Closure vars) -> NF vars
+       NForce   : FC -> LazyReason -> NF vars -> Spine vars -> NF vars
        NPrimVal : FC -> Constant -> NF vars
        NErased  : FC -> WhyErased (NF vars) -> NF vars
        NType    : FC -> Name -> NF vars
@@ -119,7 +126,11 @@ ScopeEmpty : LocalEnv free [<]
 ScopeEmpty = [<]
 
 export
-ntCon : FC -> Name -> Int -> Nat -> Scopeable (FC, Closure vars) -> NF vars
+value : SpineEntry vars -> Closure vars
+value = snd . snd
+
+export
+ntCon : FC -> Name -> Int -> Nat -> Spine vars -> NF vars
 -- Part of the machinery for matching on types - I believe this won't affect
 -- universe checking so put a dummy name.
 ntCon fc (UN (Basic "Type")) tag Z [<] = NType fc (MN "top" 0)
@@ -212,8 +223,8 @@ covering
     = "pty " ++ showCount c ++ show x ++ " : " ++ show ty ++
       " => [closure]"
   show (NApp _ hd args) = show hd ++ " [" ++ show (length args) ++ " closures]"
-  show (NDCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
-  show (NTCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
+  show (NDCon _ n _ _ args) = show n ++ " %DCon [" ++ show (length args) ++ " closures]"
+  show (NTCon _ n _ _ args) = show n ++ " %TCon [" ++ show (length args) ++ " closures]"
   show (NAs _ _ n tm) = show n ++ "@" ++ show tm
   show (NDelayed _ _ tm) = "%Delayed " ++ show tm
   show (NDelay _ _ _ _) = "%Delay [closure]"

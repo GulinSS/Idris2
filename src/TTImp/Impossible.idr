@@ -72,47 +72,47 @@ mutual
                 (namedargs : List (Name, RawImp)) ->
                 Core ClosedTerm
   -- unnamed takes priority
-  processArgs fn (NBind fc x (Pi _ _ Explicit ty) sc) (e :: exps) autos named
+  processArgs fn (NBind fc x (Pi _ c Explicit ty) sc) (e :: exps) autos named
      = do e' <- mkTerm e (Just ty) [] [] []
           defs <- get Ctxt
-          processArgs (App fc fn e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+          processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                       exps autos named
-  processArgs fn (NBind fc x (Pi _ _ Explicit ty) sc) [] autos named
+  processArgs fn (NBind fc x (Pi _ c Explicit ty) sc) [] autos named
      = do defs <- get Ctxt
           case findNamed x named of
             Just ((_, e), named') =>
                do e' <- mkTerm e (Just ty) [] [] []
-                  processArgs (App fc fn e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                  processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                               [] autos named'
             Nothing => badClause fn [] autos named
-  processArgs fn (NBind fc x (Pi _ _ Implicit ty) sc) exps autos named
+  processArgs fn (NBind fc x (Pi _ c Implicit ty) sc) exps autos named
      = do defs <- get Ctxt
           case findNamed x named of
             Nothing => do e' <- nextVar fc
-                          processArgs (App fc fn e')
+                          processArgs (App fc fn c e')
                                       !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                                       exps autos named
             Just ((_, e), named') =>
                do e' <- mkTerm e (Just ty) [] [] []
-                  processArgs (App fc fn e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                  processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                               exps autos named'
-  processArgs fn (NBind fc x (Pi _ _ AutoImplicit ty) sc) exps autos named
+  processArgs fn (NBind fc x (Pi _ c AutoImplicit ty) sc) exps autos named
      = do defs <- get Ctxt
           case autos of
                (e :: autos') => -- unnamed takes priority
                    do e' <- mkTerm e (Just ty) [] [] []
-                      processArgs (App fc fn e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                      processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                                   exps autos' named
                [] =>
                   case findNamed x named of
                      Nothing =>
                         do e' <- nextVar fc
-                           processArgs (App fc fn e')
+                           processArgs (App fc fn c e')
                                        !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                                        exps [] named
                      Just ((_, e), named') =>
                         do e' <- mkTerm e (Just ty) [] [] []
-                           processArgs (App fc fn e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                           processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
                                        exps [] named'
   processArgs fn ty [] [] [] = pure fn
   processArgs fn ty exps autos named

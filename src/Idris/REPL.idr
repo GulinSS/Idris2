@@ -250,9 +250,6 @@ updateFile update
          coreLift_ $ writeFile f (unlines (update (lines content)))
          pure (DisplayEdit emptyDoc)
 
-rtrim : String -> String
-rtrim str = reverse (ltrim (reverse str))
-
 addClause : String -> Nat -> List String -> List String
 addClause c Z [] = rtrim c :: []
 addClause c Z (x :: xs)

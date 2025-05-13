@@ -20,7 +20,7 @@ detagSafe : {auto c : Ref Ctxt Defs} ->
 detagSafe defs (NTCon _ n _ _ args)
     = do Just (TCon _ _ _ _ _ _ _ (Just detags)) <- lookupDefExact n (gamma defs)
               | _ => pure False
-         args' <- traverse (evalClosure defs . snd) args
+         args' <- traverse (evalClosure defs . value) args
          pure $ notErased 0 detags (toList args')
   where
     -- if any argument positions are in the detaggable set, and unerased, then
@@ -199,7 +199,7 @@ termInlineSafe (Local fc isLet idx p)
          else do setUsed p
                  pure True
 termInlineSafe (Meta fc x y xs)
-    = allInlineSafe xs
+    = allInlineSafe (map snd xs)
   where
     allInlineSafe : List (Term vars) -> Core Bool
     allInlineSafe [] = pure True
@@ -217,7 +217,7 @@ termInlineSafe (Bind fc x b scope)
     binderInlineSafe : Binder (Term vars) -> Core Bool
     binderInlineSafe (Let _ _ val _) = termInlineSafe val
     binderInlineSafe _ = pure True
-termInlineSafe (App fc fn arg)
+termInlineSafe (App fc fn _ arg)
     = do fok <- termInlineSafe fn
          if fok
             then termInlineSafe arg

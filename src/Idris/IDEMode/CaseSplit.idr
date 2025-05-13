@@ -252,10 +252,6 @@ dropLast updChars with (snocList updChars)
   dropLast [] | Empty = []
   dropLast (xs ++ [x]) | (Snoc x xs rec) = xs
 
-||| Trim whitespace to the right of the string
-rtrim : String -> String
-rtrim = reverse . ltrim . reverse
-
 -- remove last paren
 dropLastParen : SnocList Char -> SnocList Char
 dropLastParen Lin = Lin

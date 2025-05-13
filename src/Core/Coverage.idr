@@ -121,11 +121,11 @@ conflict defs env nfty n
           = pure (Just [(n, !(quote defs env nf))])
       conflictNF i (NDCon _ n t a args) (NDCon _ n' t' a' args')
           = if t == t'
-               then conflictArgs i (map snd args) (map snd args')
+               then conflictArgs i (map value args) (map value args')
                else pure Nothing
       conflictNF i (NTCon _ n t a args) (NTCon _ n' t' a' args')
           = if n == n'
-               then conflictArgs i (map snd args) (map snd args')
+               then conflictArgs i (map value args) (map value args')
                else pure Nothing
       conflictNF i (NPrimVal _ c) (NPrimVal _ c')
           = if c == c'
@@ -282,8 +282,8 @@ buildArgs : {auto c : Ref Ctxt Defs} ->
             KnownVars vars Int -> -- Things which have definitely match
             KnownVars vars (List Int) -> -- Things an argument *can't* be
                                     -- (because a previous case matches)
-            Scopeable ClosedTerm -> -- ^ arguments, with explicit names
-            CaseTree vars -> Core (List (Scopeable ClosedTerm))
+            Scopeable (RigCount, ClosedTerm) -> -- ^ arguments, with explicit names
+            CaseTree vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
 buildArgs fc defs known not ps cs@(Case {name = var} idx el ty altsIn)
   -- If we've already matched on 'el' in this branch, restrict the alternatives
   -- to the tag we already know. Otherwise, add missing cases and filter out
@@ -300,31 +300,31 @@ buildArgs fc defs known not ps cs@(Case {name = var} idx el ty altsIn)
          buildArgsAlt not altsN
   where
     buildArgAlt : KnownVars vars (List Int) ->
-                  CaseAlt vars -> Core (List (Scopeable ClosedTerm))
+                  CaseAlt vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
     buildArgAlt not' (ConCase n t args sc)
         = do let l = mkSizeOf args
              let con = Ref fc (DataCon t (size l)) n
-             let ps' = map (substName zero var
+             let ps' = map @{Compose} (substName zero var
                              (apply fc
-                                    con (map (Ref fc Bound) args))) ps
+                                    con (map ((top,) . Ref fc Bound) args))) ps
              let known' = (MkVar el, t) :: known
              buildArgs fc defs (weakensN l known')
                                (weakensN l not') ps' sc
     buildArgAlt not' (DelayCase t a sc)
         = let l = mkSizeOf [t, a]
-              ps' = map (substName zero var (TDelay fc LUnknown
-                                             (Ref fc Bound t)
-                                             (Ref fc Bound a))) ps in
+              ps' = map @{Compose} (substName zero var (TDelay fc LUnknown
+                                                       (Ref fc Bound t)
+                                                       (Ref fc Bound a))) ps in
               buildArgs fc defs (weakensN l known)
                                 (weakensN l not') ps' sc
     buildArgAlt not' (ConstCase c sc)
-        = do let ps' = map (substName zero var (PrimVal fc c)) ps
+        = do let ps' = map @{Compose} (substName zero var (PrimVal fc c)) ps
              buildArgs fc defs known not' ps' sc
     buildArgAlt not' (DefaultCase sc)
         = buildArgs fc defs known not' ps sc
 
     buildArgsAlt : KnownVars vars (List Int) -> List (CaseAlt vars) ->
-                   Core (List (Scopeable ClosedTerm))
+                   Core (List (Scopeable (RigCount, ClosedTerm)))
     buildArgsAlt not' [] = pure []
     buildArgsAlt not' (c@(ConCase _ t _ _) :: cs)
         = pure $ !(buildArgAlt not' c) ++
@@ -350,14 +350,14 @@ getMissing : {vars : _} ->
              Core (List ClosedTerm)
 getMissing fc n ctree
    = do defs <- get Ctxt
-        let psIn = map (Ref fc Bound) vars
+        let psIn = map ((top,) . Ref fc Bound) vars
         patss <- buildArgs fc defs [] [] psIn ctree
         let pats = concat patss
         unless (null pats) $
           logC "coverage.missing" 20 $ map (join "\n") $
             flip traverse pats $ \ pat =>
               show <$> toFullNames pat
-        pure (map (apply fc (Ref fc Func n) . toList) patss)
+        pure (map (applySpine fc (Ref fc Func n)) patss)
 
 -- For the given name, get the names it refers to which are not themselves
 -- covering.
@@ -402,7 +402,7 @@ match : Term vs -> Term vs -> Bool
 match (Local _ _ i _) _ = True
 match (Ref _ Bound n) _ = True
 match (Ref _ _ n) (Ref _ _ n') = n == n'
-match (App _ f a) (App _ f' a') = match f f' && match a a'
+match (App _ f _ a) (App _ f' _ a') = match f f' && match a a'
 match (As _ _ _ p) (As _ _ _ p') = match p p'
 match (As _ _ _ p) p' = match p p'
 match (TDelayed _ _ t) (TDelayed _ _ t') = match t t'
@@ -422,25 +422,25 @@ eraseApps : {auto c : Ref Ctxt Defs} ->
 eraseApps {vs} tm
     = case getFnArgsSpine tm of
            (Ref fc Bound n, args) =>
-                do args' <- traverseSnocList eraseApps args
+                do args' <- traverseSnocList (traversePair eraseApps) args
                    pure (applySpine fc (Ref fc Bound n) args')
            (Ref fc nt n, args) =>
                 do defs <- get Ctxt
                    mgdef <- lookupCtxtExact n (gamma defs)
                    let eargs = maybe [] eraseArgs mgdef
-                   args' <- traverseSnocList eraseApps
+                   args' <- traverseSnocList (traversePair eraseApps)
                                   (dropPos fc (length args) eargs args)
                    pure (applySpine fc (Ref fc nt n) args')
            (tm, args) =>
-                do args' <- traverseSnocList eraseApps args
+                do args' <- traverseSnocList (traversePair eraseApps) args
                    pure (applySpine (getLoc tm) tm args')
   where
-    dropPos : FC -> Nat -> List Nat -> Scopeable (Term vs) -> Scopeable (Term vs)
+    dropPos : FC -> Nat -> List Nat -> Scopeable (RigCount, Term vs) -> Scopeable (RigCount, Term vs)
     dropPos fc _ ns [<] = [<]
-    dropPos fc (S i) ns (xs :< x)
+    dropPos fc (S i) ns (xs :< (c, x))
         = if i `elem` ns
-             then dropPos fc i ns xs :< Erased fc Placeholder
-             else dropPos fc i ns xs :< x
+             then dropPos fc i ns xs :< (c, Erased fc Placeholder)
+             else dropPos fc i ns xs :< (c, x)
     dropPos fc _ ns xs = xs
 
 -- if tm would be matched by trylhs, then it's not an impossible case

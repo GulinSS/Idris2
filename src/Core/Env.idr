@@ -171,7 +171,7 @@ mutual
       eqNat : Nat -> Nat -> Bool
       eqNat i j = natToInteger i == natToInteger j
   findUsed env used (Meta _ _ _ args)
-      = findUsedArgs env used args
+      = assert_total $ findUsedArgs env used $ map snd args
     where
       findUsedArgs : Env Term vars -> Scopeable Nat -> List (Term vars) -> Scopeable Nat
       findUsedArgs env u [] = u
@@ -187,7 +187,7 @@ mutual
       dropS [<] = [<]
       dropS (xs :< Z) = dropS xs
       dropS (xs :< S p) = dropS xs :< p
-  findUsed env used (App fc fn arg)
+  findUsed env used (App fc fn _ arg)
       = findUsed env (findUsed env used fn) arg
   findUsed env used (As fc s a p)
       = findUsed env (findUsed env used a) p
