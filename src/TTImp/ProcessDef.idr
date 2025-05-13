@@ -894,10 +894,6 @@ compileRunTime fc atotal
 
          update Ctxt { toCompileCase := [] }
 
-toPats : Clause -> (vs ** (Env Term vs, Term vs, Term vs))
-toPats (MkClause {vars} env lhs rhs)
-    = (_ ** (env, lhs, rhs))
-
 warnUnreachable : {auto c : Ref Ctxt Defs} ->
                   Clause -> Core ()
 warnUnreachable (MkClause env lhs rhs)
@@ -1001,11 +997,11 @@ processDef opts nest env fc n_in cs_in
                traverse (checkClause mult (collapseDefault $ visibility gdef) treq
                                      hashit nidx opts nest env) cs_in
 
-         let pats = map toPats (rights cs)
+         let pats = rights cs
 
          (cargs ** (tree_ct, unreachable)) <-
              logTime 3 ("Building compile time case tree for " ++ show n) $
-                getPMDef fc (CompileTime mult) n ty (rights cs)
+                getPMDef fc (CompileTime mult) n ty pats
 
          traverse_ warnUnreachable unreachable
 
@@ -1022,7 +1018,7 @@ processDef opts nest env fc n_in cs_in
          -- but we'll rebuild that in a later pass once all the case
          -- blocks etc are resolved
          ignore $ addDef (Resolved nidx)
-                  ({ definition := Function pi ?tree_ct ?tree_ct_2 ?pats_2
+                  ({ definition := Function pi ?tree_ct ?tree_ct_2 (Just pats)
                    } gdef)
 
          when (collapseDefault (visibility gdef) == Public) $
