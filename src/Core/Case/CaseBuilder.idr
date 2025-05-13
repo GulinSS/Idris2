@@ -71,6 +71,7 @@ record PatInfo (pvar : Name) (vars : Scope) where
   constructor MkInfo
   {idx : Nat}
   {name : Name}
+  multiplicity : RigCount -- Cached for using in the 'Case' block
   pat : Pat
   0 loc : IsVar name idx vars
   argType : ArgType vars -- Type of the argument being inspected (i.e.
@@ -81,15 +82,15 @@ covering
   show pi = show (pat pi) ++ " : " ++ show (argType pi)
 
 HasNames (PatInfo n vars) where
-  full gam (MkInfo pat loc argType)
+  full gam (MkInfo c pat loc argType)
      = do pat <- full gam pat
           argType <- full gam argType
-          pure $ MkInfo pat loc argType
+          pure $ MkInfo c pat loc argType
 
-  resolved gam (MkInfo pat loc argType)
+  resolved gam (MkInfo c pat loc argType)
      = do pat <- resolved gam pat
           argType <- resolved gam argType
-          pure $ MkInfo pat loc argType
+          pure $ MkInfo c pat loc argType
 
 {-
 NamedPats is a list of patterns on the LHS of a clause. Each entry in
@@ -225,7 +226,7 @@ GenWeaken ArgType where
   genWeakenNs p q (Stuck fty) = Stuck $ genWeakenNs p q fty
 
 Weaken (PatInfo p) where
-  weaken (MkInfo p el fty) = MkInfo p (Later el) (weaken fty)
+  weaken (MkInfo c p el fty) = MkInfo c p (Later el) (weaken fty)
 
 Weaken (NamedPats todo) where
   weaken [] = []
@@ -246,10 +247,10 @@ FreelyEmbeddable ArgType where
   embed (Known c t) = Known c (embed t)
 
 GenWeaken (PatInfo p) where
-  genWeakenNs p q (MkInfo pat loc at) = do
+  genWeakenNs p q (MkInfo c pat loc at) = do
     let MkNVar loc' = genWeakenNs p q $ MkNVar loc
     let at' = genWeakenNs p q at
-    MkInfo pat loc' at'
+    MkInfo c pat loc' at'
 
 GenWeaken (NamedPats todo) where
   genWeakenNs p q [] = []
@@ -291,11 +292,11 @@ substInClause : {a, vars, todo : _} ->
                 {auto c : Ref Ctxt Defs} ->
                 FC -> PatClause (a :: todo) vars ->
                 Core (PatClause (a :: todo) vars)
-substInClause {vars} {a} fc (MkPatClause pvars (MkInfo pat pprf fty :: pats) pid rhs)
+substInClause {vars} {a} fc (MkPatClause pvars (MkInfo c pat pprf fty :: pats) pid rhs)
     = do let tm = mkTerm vars pat
          log "compile.casetree.subst" 50 "Substituting \{show tm} for \{show a} in \{show pat}"
          pats' <- substInPats fc a tm pats
-         pure (MkPatClause pvars (MkInfo pat pprf fty :: pats') pid rhs)
+         pure (MkPatClause pvars (MkInfo c pat pprf fty :: pats') pid rhs)
 
 data Partitions : List (PatClause todo vars) -> Type where
      ConClauses : {todo, vars, ps : _} ->
@@ -320,8 +321,8 @@ data ClauseType = ConClause | VarClause
 
 namesIn : List Name -> Pat -> Bool
 namesIn pvars (PAs _ n p) = (n `elem` pvars) && namesIn pvars p
-namesIn pvars (PCon _ _ _ _ ps) = all (namesIn pvars) ps
-namesIn pvars (PTyCon _ _ _ ps) = all (namesIn pvars) ps
+namesIn pvars (PCon _ _ _ _ ps) = all (namesIn pvars) (map snd ps)
+namesIn pvars (PTyCon _ _ _ ps) = all (namesIn pvars) (map snd ps)
 namesIn pvars (PArrow _ _ s t) = namesIn pvars s && namesIn pvars t
 namesIn pvars (PDelay _ _ t p) = namesIn pvars t && namesIn pvars p
 namesIn pvars (PLoc _ n) = n `elem` pvars
@@ -329,8 +330,8 @@ namesIn pvars _ = True
 
 namesFrom : Pat -> List Name
 namesFrom (PAs _ n p) = n :: namesFrom p
-namesFrom (PCon _ _ _ _ ps) = concatMap namesFrom ps
-namesFrom (PTyCon _ _ _ ps) = concatMap namesFrom ps
+namesFrom (PCon _ _ _ _ ps) = concatMap namesFrom (map snd ps)
+namesFrom (PTyCon _ _ _ ps) = concatMap namesFrom (map snd ps)
 namesFrom (PArrow _ _ s t) = namesFrom s ++ namesFrom t
 namesFrom (PDelay _ _ t p) = namesFrom t ++ namesFrom p
 namesFrom (PLoc _ n) = [n]
@@ -342,12 +343,12 @@ clauseType : Phase -> PatClause (a :: as) vars -> ClauseType
 -- Or, if we're compiling for runtime we won't be able to split on it, so
 -- also treat it as a variable
 -- Or, if it's an under-applied constructor then do NOT attempt to split on it!
-clauseType phase (MkPatClause pvars (MkInfo arg _ ty :: rest) pid rhs)
+clauseType phase (MkPatClause pvars (MkInfo _ arg _ ty :: rest) pid rhs)
     = getClauseType phase arg ty
   where
     -- used when we are tempted to split on a constructor: is
     -- this actually a fully applied one?
-    splitCon : Nat -> Scopeable Pat -> ClauseType
+    splitCon : Nat -> Scopeable (RigCount, Pat) -> ClauseType
     splitCon arity xs
       = if arity == length xs then ConClause else VarClause
 
@@ -363,7 +364,7 @@ clauseType phase (MkPatClause pvars (MkInfo arg _ ty :: rest) pid rhs)
     getClauseType : Phase -> Pat -> ArgType vars -> ClauseType
     getClauseType (CompileTime cr) (PCon _ _ _ a xs) (Known r t)
         = if (isErased r && not (isErased cr) &&
-             all (namesIn (pvars ++ concatMap namesFrom (getPatInfo rest))) xs)
+             all (namesIn (pvars ++ concatMap namesFrom (getPatInfo rest))) (map snd xs))
              then VarClause
              else splitCon a xs
     getClauseType phase (PAs _ _ p) t = getClauseType phase p t
@@ -409,6 +410,7 @@ data Group : List Name -> -- pattern variables still to process
              Type where
      ConGroup : {newargs : _} ->
                 Name -> (tag : Int) ->
+                List RigCount -> -- Cached from constructor type
                 List (PatClause (newargs ++ todo) (vars <>< newargs)) ->
                 Group todo vars
      DelayGroup : {tyarg, valarg : _} ->
@@ -420,23 +422,24 @@ data Group : List Name -> -- pattern variables still to process
 
 covering
 {vars : _} -> {todo : _} -> Show (Group todo vars) where
-  show (ConGroup c t cs) = "Con " ++ show c ++ ": " ++ show cs
+  show (ConGroup c t _ cs) = "Con " ++ show c ++ ": " ++ show cs
   show (DelayGroup cs) = "Delay: " ++ show cs
   show (ConstGroup c cs) = "Const " ++ show c ++ ": " ++ show cs
 
-data GroupMatch : ConType -> List Pat -> Group todo vars -> Type where
+data GroupMatch : ConType -> List (RigCount, Pat) -> Group todo vars -> Type where
   ConMatch : {tag : Int} -> (0 _ : LengthMatch ps newargs) ->
              GroupMatch (CName n tag) ps
-               (ConGroup {newargs} n tag (MkPatClause pvs pats pid rhs :: rest))
+               (ConGroup {newargs} n tag rigs (MkPatClause pvs pats pid rhs :: rest))
   DelayMatch : GroupMatch CDelay []
                (DelayGroup {tyarg} {valarg} (MkPatClause pvs pats pid rhs :: rest))
   ConstMatch : GroupMatch (CConst c) []
                   (ConstGroup c (MkPatClause pvs pats pid rhs :: rest))
   NoMatch : GroupMatch ct ps g
 
-checkGroupMatch : (c : ConType) -> (ps : List Pat) -> (g : Group todo vars) ->
+checkGroupMatch : (c : ConType) -> (ps : List (RigCount, Pat)) -> (g : Group todo vars) ->
                   GroupMatch c ps g
-checkGroupMatch (CName x tag) ps (ConGroup {newargs} x' tag' (MkPatClause pvs pats pid rhs :: rest))
+checkGroupMatch (CName x tag) ps (ConGroup {newargs} x' tag' rigs
+                                           (MkPatClause pvs pats pid rhs :: rest))
     = case checkLengthMatch ps newargs of
            Nothing => NoMatch
            Just prf => case (nameEq x x', decEq tag tag') of
@@ -479,31 +482,32 @@ getArgTys env (_ :: _) (Just t)
          pure [Stuck !(quote empty env t)]
 getArgTys _ _ _ = pure []
 
-nextNames' : (pats : List Pat) ->
+nextNames' : RigCount ->
+             (pats : List (RigCount, Pat)) ->
              (ns : List Name) ->
              (0 _ : LengthMatch pats ns) ->
              List (ArgType vars) ->
              (args ** (SizeOf args, NamedPats args (vars <>< args)))
-nextNames' [] [] NilMatch _ = ([] ** (zero, []))
-nextNames' (p :: pats) (n :: ns) (ConsMatch prf) as
+nextNames' rig [] [] NilMatch _ = ([] ** (zero, []))
+nextNames' rig ((c, p) :: pats) (n :: ns) (ConsMatch prf) as
   = do let (ty, as) : (ArgType (vars :< n), List (ArgType vars))
            := case as of
                 [] => (Unknown, [])
                 (a :: as) => (weaken a, as)
-       let (args ** (l, ps)) = nextNames' pats ns prf as
-       (n :: args ** (suc l, weakensN l (MkInfo p First ty) :: genWeakenFishily l ps))
+       let (args ** (l, ps)) = nextNames' rig pats ns prf as
+       (n :: args ** (suc l, weakensN l (MkInfo (rigMult rig c) p First ty) :: genWeakenFishily l ps))
 
 nextNames : {vars : _} ->
             {auto i : Ref PName Int} ->
             {auto c : Ref Ctxt Defs} ->
-            FC -> String -> List Pat -> Maybe (NF vars) ->
+            RigCount -> FC -> String -> List (RigCount, Pat) -> Maybe (NF vars) ->
             Core (args ** (SizeOf args, NamedPats args (vars <>< args)))
-nextNames _ _ [] _ = pure ([] ** (zero, []))
-nextNames {vars} fc root pats m_nty
+nextNames _ _ _ [] _ = pure ([] ** (zero, []))
+nextNames {vars} rig fc root pats m_nty
      = do (Element args p) <- mkNames pats
           let env = mkEnv fc vars
           argTys <- logQuiet $ getArgTys env args m_nty
-          pure $ nextNames' pats args p argTys
+          pure $ nextNames' rig pats args p argTys
   where
     mkNames : (vars : List a) -> Core $ Subset (List Name) (LengthMatch vars)
     mkNames [] = pure (Element [] NilMatch)
@@ -513,12 +517,13 @@ nextNames {vars} fc root pats m_nty
              pure $ Element (n :: ns) (ConsMatch p)
 
 -- replace the prefix of patterns with 'pargs'
-newPats : (pargs : List Pat) -> (0 _ : LengthMatch pargs ns) ->
+newPats : (pargs : List (RigCount, Pat)) -> (0 _ : LengthMatch pargs ns) ->
           NamedPats (ns ++ todo) vars ->
           NamedPats ns vars
 newPats [] NilMatch rest = []
-newPats (newpat :: xs) (ConsMatch w) (pi :: rest)
-  = { pat := newpat } pi :: newPats xs w rest
+newPats ((c, newpat) :: xs) (ConsMatch w) (pi :: rest)
+  = { multiplicity := c
+    , pat := newpat } pi :: newPats xs w rest
 
 updateNames : List (Name, Pat) -> List (Name, Name)
 updateNames = mapMaybe update
@@ -537,8 +542,8 @@ updatePatNames ns (pi :: ps)
         = case lookup n ns of
                Nothing => PAs fc n (update p)
                Just n' => PAs fc n' (update p)
-    update (PCon fc n i a ps) = PCon fc n i a (map update ps)
-    update (PTyCon fc n a ps) = PTyCon fc n a (map update ps)
+    update (PCon fc n i a ps) = PCon fc n i a (map @{Compose} update ps)
+    update (PTyCon fc n a ps) = PTyCon fc n a (map @{Compose} update ps)
     update (PArrow fc x s t) = PArrow fc x (update s) (update t)
     update (PDelay fc r t p) = PDelay fc r (update t) (update p)
     update (PLoc fc n)
@@ -558,8 +563,8 @@ groupCons fc fn pvars cs
      = gc [] cs
   where
     addConG : {vars', todo' : _} ->
-              Name -> (tag : Int) ->
-              List Pat -> NamedPats todo' vars' ->
+              RigCount -> Name -> (tag : Int) ->
+              List (RigCount, Pat) -> NamedPats todo' vars' ->
               Int -> (rhs : Term vars') ->
               (acc : List (Group todo' vars')) ->
               Core (List (Group todo' vars'))
@@ -567,7 +572,7 @@ groupCons fc fn pvars cs
     -- add new pattern arguments for each of that constructor's arguments.
     -- The type of 'ConGroup' ensures that we refer to the arguments by
     -- the same name in each of the clauses
-    addConG {vars'} {todo'} n tag pargs pats pid rhs []
+    addConG {vars'} {todo'} rig n tag pargs pats pid rhs []
         = do cty <- if n == UN (Basic "->")
                       then pure $ NBind fc (MN "_" 0) (Pi fc top Explicit (MkNFClosure defaultOpts (mkEnv fc vars') (NType fc (MN "top" 0)))) $
                               (\d, a => pure $ NBind fc (MN "_" 1) (Pi fc top Explicit (MkNFClosure defaultOpts (mkEnv fc vars') (NErased fc Placeholder)))
@@ -579,30 +584,30 @@ groupCons fc fn pvars cs
              (patnames ** (l, newargs)) <- logDepth $ do
                 log "compile.casetree" 25 $ "addConG nextNames for " ++ show pargs
                 logNF "compile.casetree" 25 "addConG nextNames cty" (mkEnv fc vars') cty
-                nextNames {vars=vars'} fc "e" pargs (Just cty)
+                nextNames {vars=vars'} rig fc "e" pargs (Just cty)
              log "compile.casetree" 25 $ "addConG patnames  " ++ show patnames
              log "compile.casetree" 25 $ "addConG newargs  " ++ show newargs
              -- Update non-linear names in remaining patterns (to keep
              -- explicit dependencies in types accurate)
-             let pats' = updatePatNames (updateNames (zip patnames pargs))
+             let pats' = updatePatNames (updateNames (zip patnames (map snd pargs)))
                                         (weakensN l pats)
              let clause = MkPatClause pvars (newargs ++ pats') pid (weakensN l rhs)
-             pure [ConGroup n tag [clause]]
-    addConG {vars'} {todo'} n tag pargs pats pid rhs (g :: gs) with (checkGroupMatch (CName n tag) pargs g)
-      addConG {vars'} {todo'} n tag pargs pats pid rhs
-              ((ConGroup {newargs} n tag ((MkPatClause pvars ps tid tm) :: rest)) :: gs)
+             pure [ConGroup n tag (map fst pargs) [clause]]
+    addConG {vars'} {todo'} rig n tag pargs pats pid rhs (g :: gs) with (checkGroupMatch (CName n tag) pargs g)
+      addConG {vars'} {todo'} _ n tag pargs pats pid rhs
+              ((ConGroup {newargs} n tag rigs ((MkPatClause pvars ps tid tm) :: rest)) :: gs)
                    | (ConMatch {newargs} lprf)
         = do let newps = newPats pargs lprf ps
              let l = mkSizeOf newargs
-             let pats' = updatePatNames (updateNames (zip newargs pargs))
+             let pats' = updatePatNames (updateNames (zip newargs (map snd pargs)))
                                         (weakensN l pats)
              let newclause = MkPatClause pvars (newps ++ pats') pid (weakensN l rhs)
              -- put the new clause at the end of the group, since we
              -- match the clauses top to bottom.
-             pure ((ConGroup n tag (MkPatClause pvars ps tid tm :: rest ++ [newclause]))
+             pure ((ConGroup n tag rigs (MkPatClause pvars ps tid tm :: rest ++ [newclause]))
                          :: gs)
-      addConG n tag pargs pats pid rhs (g :: gs) | NoMatch
-        = do gs' <- addConG n tag pargs pats pid rhs gs
+      addConG rig n tag pargs pats pid rhs (g :: gs) | NoMatch
+        = do gs' <- addConG rig n tag pargs pats pid rhs gs
              pure (g :: gs')
 
     -- This rather ugly special case is to deal with laziness, where Delay
@@ -620,7 +625,7 @@ groupCons fc fn pvars cs
                             do a' <- evalClosure d a
                                pure (NBind fc (MN "x" 0) (Pi fc top Explicit a)
                                        (\dv, av => pure (NDelayed fc LUnknown a'))))
-             ([tyname, argname] ** (l, newargs)) <- nextNames {vars=vars'} fc "e" [pty, parg]
+             ([tyname, argname] ** (l, newargs)) <- nextNames {vars=vars'} top fc "e" [(top, pty), (top, parg)]
                                                   (Just dty)
                 | _ => throw (InternalError "Error compiling Delay pattern match")
              let pats' = updatePatNames (updateNames [(tyname, pty), (argname, parg)])
@@ -632,7 +637,7 @@ groupCons fc fn pvars cs
           ((DelayGroup {tyarg} {valarg} ((MkPatClause pvars ps tid tm) :: rest)) :: gs)
                  | (DelayMatch {tyarg} {valarg})
          = do let l = mkSizeOf [tyarg, valarg]
-              let newps = newPats [pty, parg] (ConsMatch (ConsMatch NilMatch)) ps
+              let newps = newPats [(top, pty), (top, parg)] (ConsMatch (ConsMatch NilMatch)) ps
               let pats' = updatePatNames (updateNames [(valarg, parg), (tyarg, pty)])
                                          (weakensN l pats)
               let newclause : PatClause (tyarg :: valarg :: todo')
@@ -664,31 +669,31 @@ groupCons fc fn pvars cs
                pure (g :: gs')
 
     addGroup : {vars, todo, idx : _} ->
-               Pat -> (0 p : IsVar nm idx vars) ->
+               RigCount -> Pat -> (0 p : IsVar nm idx vars) ->
                NamedPats todo vars -> Int -> Term vars ->
                List (Group todo vars) ->
                Core (List (Group todo vars))
     -- In 'As' replace the name on the RHS with a reference to the
     -- variable we're doing the case split on
-    addGroup (PAs fc n p) pprf pats pid rhs acc
-         = addGroup p pprf pats pid (substName zero n (Local fc (Just True) _ pprf) rhs) acc
-    addGroup (PCon cfc n t a pargs) pprf pats pid rhs acc
+    addGroup rig (PAs fc n p) pprf pats pid rhs acc
+         = addGroup rig p pprf pats pid (substName zero n (Local fc (Just True) _ pprf) rhs) acc
+    addGroup rig (PCon cfc n t a pargs) pprf pats pid rhs acc
          = if a == length pargs
-              then addConG n t (cast pargs) pats pid rhs acc
+              then addConG rig n t (cast pargs) pats pid rhs acc
               else throw (CaseCompile cfc fn (NotFullyApplied n))
-    addGroup (PTyCon cfc n a pargs) pprf pats pid rhs acc
+    addGroup rig (PTyCon cfc n a pargs) pprf pats pid rhs acc
          = if a == length pargs
-           then addConG n 0 (cast pargs) pats pid rhs acc
+           then addConG rig n 0 (cast pargs) pats pid rhs acc
            else throw (CaseCompile cfc fn (NotFullyApplied n))
-    addGroup (PArrow _ _ s t) pprf pats pid rhs acc
-         = addConG (UN $ Basic "->") 0 [s, t] pats pid rhs acc
+    addGroup rig (PArrow _ _ s t) pprf pats pid rhs acc
+         = addConG rig (UN $ Basic "->") 0 [(top, s), (top, t)] pats pid rhs acc
     -- Go inside the delay; we'll flag the case as needing to force its
     -- scrutinee (need to check in 'caseGroups below)
-    addGroup (PDelay _ _ pty parg) pprf pats pid rhs acc
+    addGroup _ (PDelay _ _ pty parg) pprf pats pid rhs acc
          = addDelayG pty parg pats pid rhs acc
-    addGroup (PConst _ c) pprf pats pid rhs acc
+    addGroup _ (PConst _ c) pprf pats pid rhs acc
          = addConstG c pats pid rhs acc
-    addGroup _ pprf pats pid rhs acc = pure acc -- Can't happen, not a constructor
+    addGroup _ _ pprf pats pid rhs acc = pure acc -- Can't happen, not a constructor
            -- FIXME: Is this possible to rule out with a type? Probably.
 
     gc : {a, vars, todo : _} ->
@@ -696,8 +701,8 @@ groupCons fc fn pvars cs
          List (PatClause (a :: todo) vars) ->
          Core (List (Group todo vars))
     gc acc [] = pure acc
-    gc {a} acc ((MkPatClause _ (MkInfo pat pprf _ :: pats) pid rhs) :: cs)
-        = do acc' <- addGroup pat pprf pats pid rhs acc
+    gc {a} acc ((MkPatClause _ (MkInfo c pat pprf _ :: pats) pid rhs) :: cs)
+        = do acc' <- addGroup c pat pprf pats pid rhs acc
              gc acc' cs
 
 getFirstPat : NamedPats (p :: ps) ns -> Pat
@@ -1062,10 +1067,10 @@ mutual
       altGroups [] = maybe (pure [])
                            (\e => pure [DefaultCase e])
                            errorCase
-      altGroups (ConGroup {newargs} cn tag rest :: cs)
+      altGroups (ConGroup {newargs} cn tag rigs rest :: cs)
           = do crest <- match fc fn phase rest (map (weakensN (mkSizeOf newargs)) errorCase)
                cs' <- altGroups cs
-               pure (ConCase cn tag (mkScope (cast newargs) ?rigcount (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
+               pure (ConCase cn tag (mkScope (cast newargs) (cast rigs) (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
       altGroups (DelayGroup {tyarg} {valarg} rest :: cs)
           = do crest <- match fc fn phase rest (map (weakenNs (mkSizeOf [<tyarg, valarg])) errorCase)
                cs' <- altGroups cs
@@ -1087,7 +1092,7 @@ mutual
   -- the same variable (pprf) for the first argument. If not, the result
   -- will be a broken case tree... so we should find a way to express this
   -- in the type if we can.
-  conRule {a} fc fn phase cs@(MkPatClause pvars (MkInfo pat pprf fty :: pats) pid rhs :: rest) err
+  conRule {a} fc fn phase cs@(MkPatClause pvars (MkInfo _ pat pprf fty :: pats) pid rhs :: rest) err
       = do refinedcs <- traverse (substInClause fc) cs
            log "compile.casetree" 5 $ "conRule refinedcs: " ++ show refinedcs
            groups <- groupCons fc fn pvars refinedcs
@@ -1114,7 +1119,7 @@ mutual
     where
       updateVar : PatClause (a :: todo) vars -> Core (PatClause todo vars)
       -- replace the name with the relevant variable on the rhs
-      updateVar (MkPatClause pvars (MkInfo {idx} {name} (PLoc pfc n) prf fty :: pats) pid rhs)
+      updateVar (MkPatClause pvars (MkInfo {idx} {name} _ (PLoc pfc n) prf fty :: pats) pid rhs)
           = do log "compile.casetree.updateVar" 50
                   "Replacing \{show n} with \{show name}[\{show idx}] in \{show rhs}"
                log "compile.casetree" 5 $ "Var update " ++
@@ -1126,16 +1131,16 @@ mutual
                         pid (substName zero n (Local pfc (Just False) _ prf) rhs)
       -- If it's an as pattern, replace the name with the relevant variable on
       -- the rhs then continue with the inner pattern
-      updateVar (MkPatClause pvars (MkInfo (PAs pfc n pat) prf fty :: pats) pid rhs)
+      updateVar (MkPatClause pvars (MkInfo c (PAs pfc n pat) prf fty :: pats) pid rhs)
           = do log "compile.casetree" 5 $ "Var replace " ++
                     show a ++ ", " ++ show n ++ ", vars: " ++ show (toList vars) ++ " ==> " ++ show !(toFullNames rhs)
                pats' <- substInPats fc a (mkTerm _ pat) pats
                let rhs' = substName zero n (Local pfc (Just True) _ prf) rhs
                logTerm "compile.casetree" 5 "updateVar-3 rhs'" rhs'
-               updateVar (MkPatClause pvars (MkInfo pat prf fty :: pats') pid rhs')
+               updateVar (MkPatClause pvars (MkInfo c pat prf fty :: pats') pid rhs')
       -- match anything, name won't appear in rhs but need to update
       -- LHS pattern types based on what we've learned
-      updateVar (MkPatClause pvars (MkInfo pat prf fty :: pats) pid rhs)
+      updateVar (MkPatClause pvars (MkInfo _ pat prf fty :: pats) pid rhs)
           = do log "compile.casetree" 5 $ "Forced Var update " ++
                      show a ++ ", vars: " ++ show (toList vars) ++ ", " ++ show !(toFullNames pat) ++ " ==> "
                      ++ show !(toFullNames rhs)
@@ -1162,13 +1167,13 @@ mutual
       = pure err
 
 export
-mkPat : {auto c : Ref Ctxt Defs} -> List Pat -> ClosedTerm -> ClosedTerm -> Core Pat
+mkPat : {auto c : Ref Ctxt Defs} -> List (RigCount, Pat) -> ClosedTerm -> ClosedTerm -> Core Pat
 mkPat [] orig (Ref fc Bound n) = pure $ PLoc fc n
 mkPat args orig (Ref fc (DataCon t a) n) = pure $ PCon fc n t a (cast args)
 mkPat args orig (Ref fc (TyCon t a) n) = pure $ PTyCon fc n a (cast args)
 mkPat args orig (Ref fc Func n)
   = do prims <- getPrimitiveNames
-       mtm <- normalisePrims (const True) isPConst True prims n (cast args) orig ScopeEmpty
+       mtm <- normalisePrims (const True) isPConst True prims n (cast $ map snd args) orig ScopeEmpty
        case mtm of
          Just tm => if tm /= orig -- check we made progress; if there's an
                                   -- unresolved interface, we might be stuck
@@ -1187,7 +1192,7 @@ mkPat args orig (Bind fc x (Pi _ _ _ s) t)
         t' =>  pure $ PArrow fc x !(mkPat [] s s) !(mkPat [] t' t')
 mkPat args orig (App fc fn arg)
     = do parg <- mkPat [] arg arg
-         mkPat (parg :: args) orig fn
+         mkPat ((?rig, parg) :: args) orig fn
 -- Assumption is that clauses are converted to explicit names
 mkPat args orig (As fc _ (Ref _ Bound n) ptm)
     = pure $ PAs fc n !(mkPat [] ptm ptm)
@@ -1205,13 +1210,13 @@ mkPat args orig tm
         pure $ PUnmatchable (getLoc orig) orig
 
 export
-argToPat : {auto c : Ref Ctxt Defs} -> ClosedTerm -> Core Pat
-argToPat tm = mkPat [] tm tm
+argToPat : {auto c : Ref Ctxt Defs} -> (RigCount, ClosedTerm) -> Core (RigCount, Pat)
+argToPat = traversePair $ \tm => mkPat [] tm tm
 
 mkPatClause : {auto c : Ref Ctxt Defs} ->
               FC -> Name ->
               (args : List Name) -> SizeOf args -> ClosedTerm ->
-              Int -> (List Pat, ClosedTerm) ->
+              Int -> (List (RigCount, Pat), ClosedTerm) ->
               Core (PatClause args (cast args))
 mkPatClause fc fn args s ty pid (ps, rhs)
     = maybe (throw (CaseCompile fc fn DifferingArgNumbers))
@@ -1231,25 +1236,25 @@ mkPatClause fc fn args s ty pid (ps, rhs)
                   pure (MkPatClause [] ns pid (weakensN s rhs)))
             (checkLengthMatch args ps)
   where
-    mkNames : (vars : List Name) -> (ps : List Pat) ->
+    mkNames : (vars : List Name) -> (ps : List (RigCount, Pat)) ->
               (0 _ : LengthMatch vars ps) ->
               {n : _} -> (0 _ : HasLength n vars) ->
               List (ArgType [<]) ->
               Core (NamedPats vars (cast vars))
     mkNames [] [] NilMatch _ _ = pure []
-    mkNames (r :: args) (p :: ps) (ConsMatch eq) (S h) as
+    mkNames (r :: args) ((c, p) :: ps) (ConsMatch eq) (S h) as
       = do let (ty, as) : (ArgType ([<r] <>< args), List (ArgType [<]))
                := case as of
                       [] => (Unknown, [])
                       (a :: as) => (embed a, as)
-           let info = MkInfo {name=r} p (fishyIsVar {outer=[<]} h) ty
+           let info = MkInfo {name=r} c p (fishyIsVar {outer=[<]} h) ty
            rest <- mkNames args ps eq h as
            pure (info :: rewrite fishAsSnocAppend [<r] args in embed rest)
 
 export
 patCompile : {auto c : Ref Ctxt Defs} ->
              FC -> Name -> Phase ->
-             ClosedTerm -> List (List Pat, ClosedTerm) ->
+             ClosedTerm -> List (List (RigCount, Pat), ClosedTerm) ->
              Maybe (CaseTree ScopeEmpty) ->
              Core (args ** CaseTree args)
 patCompile fc fn phase ty [] def
@@ -1273,7 +1278,7 @@ patCompile fc fn phase ty (p :: ps) def
          pure (_ ** cases)
   where
     mkPatClausesFrom : Int -> (args : List Name) -> SizeOf args ->
-                       List (List Pat, ClosedTerm) ->
+                       List (List (RigCount, Pat), ClosedTerm) ->
                        Core (List (PatClause args (cast args)))
     mkPatClausesFrom _ _ _ [] = pure []
     mkPatClausesFrom i ns s (p :: ps)
@@ -1281,15 +1286,15 @@ patCompile fc fn phase ty (p :: ps) def
              ps' <- mkPatClausesFrom (i + 1) ns s ps
              pure (p' :: ps')
 
-    getNames : Int -> List Pat -> List Name
+    getNames : Int -> List (RigCount, Pat) -> List Name
     getNames i [] = []
     getNames i (_ :: xs) = MN "arg" i :: getNames (i + 1) xs
 
 toPatClause : {auto c : Ref Ctxt Defs} ->
               FC -> Name -> (ClosedTerm, ClosedTerm) ->
-              Core (List Pat, ClosedTerm)
+              Core (List (RigCount, Pat), ClosedTerm)
 toPatClause fc n (lhs, rhs)
-    = case getFnArgs lhs of
+    = case getFnArgsWithCounts lhs of
            (Ref ffc Func fn, args)
               => do defs <- get Ctxt
                     (np, _) <- getPosition n (gamma defs)

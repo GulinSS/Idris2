@@ -336,6 +336,9 @@ getFnArgs tm = getFA [] tm
     getFA args tm = (tm, args)
 
 export
+getFnArgsWithCounts : Term vars -> (Term vars, List (RigCount, Term vars))
+
+export
 getFnArgsSpine : Term vars -> (Term vars, SnocList (Term vars))
 getFnArgsSpine (App _ f a)
     = let (fn, sp) = getFnArgsSpine f in
