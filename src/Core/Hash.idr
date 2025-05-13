@@ -218,7 +218,7 @@ mutual
   Hashable (CaseScope vars) where
     hashWithSalt h (RHS tm)
         = hashWithSalt h 0 `hashWithSalt` tm
-    hashWithSalt h (Arg x sc)
+    hashWithSalt h (Arg _ x sc)
         = hashWithSalt h 1 `hashWithSalt` x `hashWithSalt` sc
 
   export

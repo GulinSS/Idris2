@@ -280,7 +280,7 @@ mutual
       toCExpScope : {vars : _} -> Nat -> List Nat ->
                     CaseScope vars -> Core (CCaseScope vars)
       toCExpScope i es (RHS tm) = pure $ CRHS !(toCExpTree n tm)
-      toCExpScope {vars} i es (Arg x sc)
+      toCExpScope {vars} i es (Arg c x sc)
         = if i `elem` es
                 then pure $ shrinkCScope (Drop Refl) $
                             !(toCExpScope {vars = vars :< x} (S i) es sc)
@@ -332,7 +332,7 @@ mutual
       substScr i pos x env (RHS tm)
           = do tm' <- toCExpTree n tm
                pure $ Just (substs (mkSizeOf _) env tm')
-      substScr i pos x env (Arg n sc)
+      substScr i pos x env (Arg c n sc)
           = if i == pos
               then substScr (S i) pos x (env :< x) sc
               else substScr (S i) pos x (env :< CErased fc) sc
@@ -353,7 +353,7 @@ mutual
                           (rewrite sym (appendAssociative vars [<MN "eff" 0] args)
                                       in tm'))
                pure $ Just rettm
-      substLetScr i pos x env (Arg n sc)
+      substLetScr i pos x env (Arg c n sc)
           = if i == pos
               then substLetScr (S i) pos x (env :< CLocal fc First) sc
               else substLetScr (S i) pos x (env :< CErased fc) sc

@@ -39,7 +39,7 @@ mutual
   public export
   data CaseScope : Scope -> Type where
       RHS : CaseTree vars -> CaseScope vars
-      Arg : (x : Name) -> CaseScope (vars :< x) -> CaseScope vars
+      Arg : RigCount -> (x : Name) -> CaseScope (vars :< x) -> CaseScope vars
 
   ||| Case alternatives. Unlike arbitrary patterns, they can be at most
   ||| one constructor deep.
@@ -76,10 +76,10 @@ mutual
   export
   StripNamespace (CaseScope vars) where
     trimNS ns (RHS ct) = RHS (trimNS ns ct)
-    trimNS ns (Arg arg t) = Arg arg (trimNS ns t)
+    trimNS ns (Arg ty arg t) = Arg ty arg (trimNS ns t)
 
     restoreNS ns (RHS ct) = RHS (restoreNS ns ct)
-    restoreNS ns (Arg arg t) = Arg arg (restoreNS ns t)
+    restoreNS ns (Arg ty arg t) = Arg ty arg (restoreNS ns t)
 
   export
   StripNamespace (CaseAlt vars) where
@@ -130,7 +130,7 @@ showCA indent (ConCase n tag sc)
   where
     showScope : {vars : _} -> CaseScope vars -> String
     showScope (RHS tm) = " => " ++ showCT indent tm
-    showScope (Arg x sc) = show x ++ " " ++ showScope sc
+    showScope (Arg c x sc) = show x ++ " " ++ showScope sc
 showCA indent (DelayCase _ arg sc)
         = "Delay " ++ show arg ++ " => " ++ showCT indent sc
 showCA indent (ConstCase c sc)
@@ -141,7 +141,7 @@ showCA indent (DefaultCase sc)
 export
 {vars : _} -> Show (CaseScope vars) where
     show (RHS rhs) = " => rhs" --++ showCT "" rhs
-    show (Arg nm sc) = " " ++ show nm ++ show sc
+    show (Arg r nm sc) = " " ++ show nm ++ show sc
 
 export
 covering
@@ -167,7 +167,7 @@ mutual
 
   eqScope : forall vs, vs' . CaseScope vs -> CaseScope vs' -> Bool
   eqScope (RHS tm) (RHS tm') = eqTree tm tm'
-  eqScope (Arg _ sc) (Arg _ sc') = eqScope sc sc'
+  eqScope (Arg _ _ sc) (Arg _ _ sc') = eqScope sc sc'
   eqScope _ _ = False
 
   eqAlt : CaseAlt vs -> CaseAlt vs' -> Bool
@@ -225,8 +225,8 @@ mutual
                         CaseScope (inner ++ outer) ->
                         CaseScope (inner ++ ns ++ outer)
   insertCaseScopeNames outer ns (RHS tm) = RHS (insertCaseNames outer ns tm)
-  insertCaseScopeNames outer ns (Arg x sc)
-      = Arg x (insertCaseScopeNames (suc outer) ns sc)
+  insertCaseScopeNames outer ns (Arg c x sc)
+      = Arg c x (insertCaseScopeNames (suc outer) ns sc)
 
   insertCaseAltNames : SizeOf outer ->
                        SizeOf ns ->
@@ -265,7 +265,7 @@ getNames add ns sc = getSet ns sc
 
       getScope : NameMap Bool -> CaseScope vs -> NameMap Bool
       getScope ns (RHS tm) = getSet ns tm
-      getScope ns (Arg x sc) = getScope ns sc
+      getScope ns (Arg _ x sc) = getScope ns sc
 
       getAltSets : NameMap Bool -> List (CaseAlt vs) -> NameMap Bool
       getAltSets ns [] = ns

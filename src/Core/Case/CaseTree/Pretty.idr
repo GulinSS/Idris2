@@ -31,7 +31,7 @@ namespace Raw
   prettyTree Impossible = "Impossible"
 
   prettyScope (RHS tm) = fatArrow <++> byShow tm
-  prettyScope (Arg x sc) = annotate Bound (pretty0 x) <++> prettyScope sc
+  prettyScope (Arg c x sc) = annotate Bound (pretty0 x) <++> prettyScope sc
 
   prettyAlt (ConCase n tag sc)
       = annotate (DCon (Just n)) (pretty0 n) <++> prettyScope sc
@@ -89,7 +89,7 @@ namespace Resugared
   prettyScope env (RHS tm) = do
       tm <- prettyTree env tm
       pure $ fatArrow <++> tm
-  prettyScope env (Arg x sc) = do
+  prettyScope env (Arg c x sc) = do
       sc <- prettyScope (env :< PVar emptyFC top Explicit (Erased emptyFC Placeholder)) sc
       pure $ annotate Bound (pretty0 x) <++> sc
 

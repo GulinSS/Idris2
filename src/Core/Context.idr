@@ -552,10 +552,10 @@ mutual
   export
   HasNames (CaseScope vars) where
     full gam (RHS x) = pure (RHS !(full gam x))
-    full gam (Arg x sc) = pure (Arg x !(full gam sc))
+    full gam (Arg c x sc) = pure (Arg c x !(full gam sc))
 
     resolved gam (RHS x) = pure (RHS !(resolved gam x))
-    resolved gam (Arg x sc) = pure (Arg x !(resolved gam sc))
+    resolved gam (Arg c x sc) = pure (Arg c x !(resolved gam sc))
 
   export
   HasNames (CaseAlt vars) where

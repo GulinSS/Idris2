@@ -316,7 +316,7 @@ buildArgs fc defs known not ps cs@(Case {name = var} idx el ty altsIn)
                              (map (Ref fc Bound) args)
              let ps' = map (substName zero var app) ps
              buildArgs emptyFC defs (weakenNs s known) (weakenNs s not') ps' tm
-    buildArgSc s fc var known not' n t args (Arg x sc)
+    buildArgSc s fc var known not' n t args (Arg c x sc)
         = buildArgSc (suc s) fc var known not' n t (args :< x) sc
 
     buildArgAlt : KnownVars vars (List Int) ->
