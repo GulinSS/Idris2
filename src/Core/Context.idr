@@ -485,6 +485,11 @@ HasNames (Term vars) where
   resolved gam tm = pure tm
 
 export
+HasNames a => HasNames (RigCount, a) where
+  full gam (c, t) = pure $ (c, !(full gam t))
+  resolved gam (c, t) = pure $ (c, !(resolved gam t))
+
+export
 HasNames Pat where
   full gam (PAs fc n p)
      = [| PAs (pure fc) (full gam n) (full gam p) |]
