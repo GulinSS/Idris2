@@ -77,29 +77,21 @@ mutual
            log "eval.ref" 50 $ "quoteArg evalClosure a: " ++ (show a)
            quoteGenNF q opts defs bounds env a
 
-  quoteArgWithFC : {auto c : Ref Ctxt Defs} ->
-                   {bound, free : _} ->
-                   Ref QVar Int -> QuoteOpts -> Defs -> Bounds bound ->
-                   Env Term free -> (FC, Closure free) ->
-                   Core ((FC, Term (free ++ bound)))
-  quoteArgWithFC q opts defs bounds env
-       = traversePair (quoteArg q opts defs bounds env)
-
   quoteArgs : {auto c : Ref Ctxt Defs} ->
               {bound, free : _} ->
               Ref QVar Int -> QuoteOpts -> Defs -> Bounds bound ->
-              Env Term free -> Scopeable (Closure free) ->
-              Core (Scopeable (Term (free ++ bound)))
-  quoteArgs q opts defs bounds env = traverse (quoteArg q opts defs bounds env)
+              Env Term free -> Scopeable (RigCount, Closure free) ->
+              Core (Scopeable (RigCount, Term (free ++ bound)))
+  quoteArgs q opts defs bounds env = traverse $ traversePair $ quoteArg q opts defs bounds env
 
   quoteArgsWithFC : {auto c : Ref Ctxt Defs} ->
                     {bound, free : _} ->
                     Ref QVar Int -> QuoteOpts -> Defs -> Bounds bound ->
-                    Env Term free -> Scopeable (FC, Closure free) ->
-                    Core (Scopeable (FC, Term (free ++ bound)))
+                    Env Term free -> Spine free ->
+                    Core (Scopeable (FC, RigCount, Term (free ++ bound)))
   quoteArgsWithFC q opts defs bounds env
       -- [Note] Restore logging sequence
-      = map reverse . traverse (quoteArgWithFC q opts defs bounds env) . reverse
+      = map reverse . traverse (traversePair $ traversePair $ quoteArg q opts defs bounds env) . reverse
 
   quoteHead : {auto c : Ref Ctxt Defs} ->
               {bound, free : _} ->

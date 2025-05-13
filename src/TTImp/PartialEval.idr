@@ -64,8 +64,8 @@ substLoc i tm (Local fc l idx p)
 substLoc i tm (Bind fc x b sc)
     = Bind fc x (map (substLoc i tm) b) (substLoc (1 + i) (weaken tm) sc)
 substLoc i tm (Meta fc n r args)
-    = Meta fc n r (map (substLoc i tm) args)
-substLoc i tm (App fc f a) = App fc (substLoc i tm f) (substLoc i tm a)
+    = Meta fc n r (map @{Compose} (substLoc i tm) args)
+substLoc i tm (App fc f c a) = App fc (substLoc i tm f) c (substLoc i tm a)
 substLoc i tm (As fc s f a) = As fc s (substLoc i tm f) (substLoc i tm a)
 substLoc i tm (TDelayed fc r d) = TDelayed fc r (substLoc i tm d)
 substLoc i tm (TDelay fc r ty d) = TDelay fc r (substLoc i tm ty) (substLoc i tm d)
@@ -96,11 +96,11 @@ mkSubsts i specs (arg :: args) rhs
 -- In the case where all the specialised positions are variables on the LHS,
 -- substitute the term in on the RHS
 specPatByVar : List (Nat, ClosedTerm) ->
-                Clause ->
-                Maybe Clause
+               Clause ->
+               Maybe Clause
 specPatByVar specs (MkClause env lhs rhs)
-    = do let (fn, args) = getFnArgs lhs
-         psubs <- mkSubsts 0 specs args rhs
+    = do let (fn, args) = getFnArgsWithCounts lhs
+         psubs <- mkSubsts 0 specs (map snd args) rhs
          let lhs' = apply (getLoc fn) fn args
          pure (MkClause env (substLocs psubs lhs') (substLocs psubs rhs))
 
@@ -122,7 +122,7 @@ dropSpec i sargs (x :: xs)
 
 getSpecPats : {auto c : Ref Ctxt Defs} ->
               FC -> Name ->
-              (fn : Name) -> (stk : List (FC, Term vars)) ->
+              (fn : Name) -> (stk : List (FC, RigCount, Term vars)) ->
               ClosedNF -> -- Type of 'fn'
               List (Nat, ArgMode) -> -- All the arguments
               List (Nat, ClosedTerm) -> -- Just the static ones
@@ -248,7 +248,7 @@ mkSpecDef : {auto c : Ref Ctxt Defs} ->
             {auto s : Ref Syn SyntaxInfo} ->
             {auto o : Ref ROpts REPLOpts} ->
             FC -> GlobalDef ->
-            Name -> List (Nat, ArgMode) -> Name -> List (FC, Term vars) ->
+            Name -> List (Nat, ArgMode) -> Name -> List (FC, RigCount, Term vars) ->
             Core (Term vars)
 mkSpecDef {vars} fc gdef pename sargs fn stk
     = handleUnify {unResolve = True}
@@ -372,25 +372,25 @@ eraseInferred (Bind fc x b tm)
          tm' <- eraseInferred tm
          pure (Bind fc x b' tm')
 eraseInferred tm
-    = case getFnArgs tm of
+    = case getFnArgsWithCounts tm of
            (f, []) => pure f
            (Ref fc Func n, args) =>
                 do defs <- get Ctxt
                    Just gdef <- lookupCtxtExact n (gamma defs)
                         | Nothing => pure tm
                    let argsE = dropErased fc 0 (inferrable gdef) args
-                   argsE' <- traverse eraseInferred argsE
+                   argsE' <- traverse (traversePair eraseInferred) argsE
                    pure (apply fc (Ref fc Func n) argsE')
            (f, args) =>
-                do args' <- traverse eraseInferred args
+                do args' <- traverse (traversePair eraseInferred) args
                    pure (apply (getLoc f) f args)
   where
-    dropErased : FC -> Nat -> List Nat -> List (Term vars) -> List (Term vars)
+    dropErased : FC -> Nat -> List Nat -> List (RigCount, Term vars) -> List (RigCount, Term vars)
     dropErased fc pos ps [] = []
-    dropErased fc pos ps (n :: ns)
+    dropErased fc pos ps ((c, n) :: ns)
         = if pos `elem` ps
-             then Erased fc Placeholder :: dropErased fc (1 + pos) ps ns
-             else n :: dropErased fc (1 + pos) ps ns
+             then (c, Erased fc Placeholder) :: dropErased fc (1 + pos) ps ns
+             else (c, n) :: dropErased fc (1 + pos) ps ns
 
 -- Specialise a function name according to arguments. Return the specialised
 -- application on success, or Nothing if it's not specialisable (due to static
@@ -402,7 +402,7 @@ specialise : {vars : _} ->
              {auto s : Ref Syn SyntaxInfo} ->
              {auto o : Ref ROpts REPLOpts} ->
              FC -> Env Term vars -> GlobalDef ->
-             Name -> List (FC, Term vars) ->
+             Name -> List (FC, RigCount, Term vars) ->
              Core (Maybe (Term vars))
 specialise {vars} fc env gdef fn stk
     = case specArgs gdef of
@@ -429,10 +429,10 @@ specialise {vars} fc env gdef fn stk
                Term vars -> Maybe ClosedTerm
     concrete tm = shrink tm none
 
-    getSpecArgs : Nat -> List Nat -> List (FC, Term vars) ->
+    getSpecArgs : Nat -> List Nat -> List (FC, RigCount, Term vars) ->
                   Core (Maybe (List (Nat, ArgMode)))
     getSpecArgs i specs [] = pure (Just [])
-    getSpecArgs i specs ((_, x) :: xs)
+    getSpecArgs i specs ((_, _, x) :: xs)
         = do Just xs' <- getSpecArgs (1 + i) specs xs
                  | Nothing => pure Nothing
              if i `elem` specs
@@ -450,7 +450,7 @@ findSpecs : {vars : _} ->
             {auto u : Ref UST UState} ->
             {auto s : Ref Syn SyntaxInfo} ->
             {auto o : Ref ROpts REPLOpts} ->
-            Env Term vars -> List (FC, Term vars) -> Term vars ->
+            Env Term vars -> List (FC, RigCount, Term vars) -> Term vars ->
             Core (Term vars)
 findSpecs env stk (Ref fc Func fn)
     = do defs <- get Ctxt
@@ -460,15 +460,15 @@ findSpecs env stk (Ref fc Func fn)
               | Nothing => pure (applyStackWithFC (Ref fc Func fn) stk)
          pure r
 findSpecs env stk (Meta fc n i args)
-    = do args' <- traverse (findSpecs env []) args
+    = do args' <- traverse (traversePair $ findSpecs env []) args
          pure $ applyStackWithFC (Meta fc n i args') stk
 findSpecs env stk (Bind fc x b sc)
     = do b' <- traverse (findSpecs env []) b
          sc' <- findSpecs (env :< b') [] sc
          pure $ applyStackWithFC (Bind fc x b' sc') stk
-findSpecs env stk (App fc fn arg)
+findSpecs env stk (App fc fn c arg)
     = do arg' <- findSpecs env [] arg
-         findSpecs env ((fc, arg') :: stk) fn
+         findSpecs env ((fc, c, arg') :: stk) fn
 findSpecs env stk (TDelayed fc r tm)
     = do tm' <- findSpecs env [] tm
          pure $ applyStackWithFC (TDelayed fc r tm') stk
@@ -501,12 +501,12 @@ mutual
               {auto s : Ref Syn SyntaxInfo} ->
               {auto o : Ref ROpts REPLOpts} ->
               Ref QVar Int -> Defs -> Bounds bound ->
-              Env Term free -> Scopeable (Closure free) ->
-              Core (Scopeable (Term (free ++ bound)))
+              Env Term free -> Scopeable (RigCount, Closure free) ->
+              Core (Scopeable (RigCount, Term (free ++ bound)))
   quoteArgs q defs bounds env [<] = pure ScopeEmpty
-  quoteArgs q defs bounds env (args :< a)
+  quoteArgs q defs bounds env (args :< (c, a))
       = pure $ (!(quoteArgs q defs bounds env args) :<
-                !(quoteGenNF q defs bounds env !(evalClosure defs a)))
+                (c, !(quoteGenNF q defs bounds env !(evalClosure defs a))))
 
   quoteArgsWithFC : {auto c : Ref Ctxt Defs} ->
                     {auto m : Ref MD Metadata} ->
@@ -515,8 +515,8 @@ mutual
                     {auto o : Ref ROpts REPLOpts} ->
                     {bound, free : _} ->
                     Ref QVar Int -> Defs -> Bounds bound ->
-                    Env Term free -> Scopeable (FC, Closure free) ->
-                    Core (Scopeable (FC, Term (free ++ bound)))
+                    Env Term free -> Spine free ->
+                    Core (Scopeable (FC, RigCount, Term (free ++ bound)))
   quoteArgsWithFC q defs bounds env terms
            -- [Note] Restore logging sequence
       = do let rev_terms = reverse terms

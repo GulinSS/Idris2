@@ -21,7 +21,7 @@ detagSafe : {auto c : Ref Ctxt Defs} ->
 detagSafe defs (NTCon _ n _ _ args)
     = do Just (TCon _ _ _ _ _ _ _ (Just detags)) <- lookupDefExact n (gamma defs)
               | _ => pure False
-         args' <- traverse (evalClosure defs . snd) args
+         args' <- traverse (evalClosure defs . value) args
          pure $ notErased 0 detags (toList args')
   where
     -- if any argument positions are in the detaggable set, and unerased, then

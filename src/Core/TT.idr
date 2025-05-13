@@ -437,14 +437,14 @@ mkLocals outer bs (Ref fc Bound name)
 mkLocals outer bs (Ref fc nt name)
     = Ref fc nt name
 mkLocals outer bs (Meta fc name y xs)
-    = fromMaybe (Meta fc name y (map (mkLocals outer bs) xs)) $ do
+    = fromMaybe (Meta fc name y (map @{Compose} (mkLocals outer bs) xs)) $ do
         MkVar p <- resolveRef outer [<] bs fc name
         pure (Local fc Nothing _ p)
 mkLocals outer bs (Bind fc x b scope)
     = Bind fc x (map (mkLocals outer bs) b)
            (mkLocals (suc outer) bs scope)
-mkLocals outer bs (App fc fn arg)
-    = App fc (mkLocals outer bs fn) (mkLocals outer bs arg)
+mkLocals outer bs (App fc fn c arg)
+    = App fc (mkLocals outer bs fn) c (mkLocals outer bs arg)
 mkLocals outer bs (As fc s as tm)
     = As fc s (mkLocals outer bs as) (mkLocals outer bs tm)
 mkLocals outer bs (TDelayed fc x y)
@@ -478,13 +478,13 @@ substName s x new (Ref fc nt name)
            Nothing => Ref fc nt name
            Just Refl => weakenNs s new
 substName s x new (Meta fc n i xs)
-    = Meta fc n i (map (substName s x new) xs)
+    = Meta fc n i (map @{Compose} (substName s x new) xs)
 -- ASSUMPTION: When we substitute under binders, the name has always been
 -- resolved to a Local, so no need to check that x isn't shadowing
 substName s x new (Bind fc y b scope)
     = Bind fc y (map (substName s x new) b) (substName (suc s) x new scope)
-substName s x new (App fc fn arg)
-    = App fc (substName s x new fn) (substName s x new arg)
+substName s x new (App fc fn c arg)
+    = App fc (substName s x new fn) c (substName s x new arg)
 substName s x new (As fc use as pat)
     = As fc use (substName s x new as) (substName s x new pat)
 substName s x new (TDelayed fc y z)
@@ -500,7 +500,7 @@ addMetas : (usingResolved : Bool) -> NameMap Bool -> Term vars -> NameMap Bool
 addMetas res ns (Local fc x idx y) = ns
 addMetas res ns (Ref fc x name) = ns
 addMetas res ns (Meta fc n i xs)
-  = addMetaArgs (insert (ifThenElse res (Resolved i) n) False ns) xs
+  = addMetaArgs (insert (ifThenElse res (Resolved i) n) False ns) $ map snd xs
   where
     addMetaArgs : NameMap Bool -> List (Term vars) -> NameMap Bool
     addMetaArgs ns [] = ns
@@ -509,7 +509,7 @@ addMetas res ns (Bind fc x (Let _ c val ty) scope)
     = addMetas res (addMetas res (addMetas res ns val) ty) scope
 addMetas res ns (Bind fc x b scope)
     = addMetas res (addMetas res ns (binderType b)) scope
-addMetas res ns (App fc fn arg)
+addMetas res ns (App fc fn _ arg)
     = addMetas res (addMetas res ns fn) arg
 addMetas res ns (As fc s as tm) = addMetas res ns tm
 addMetas res ns (TDelayed fc x y) = addMetas res ns y
@@ -532,7 +532,7 @@ addRefs : (underAssert : Bool) -> (aTotal : Name) ->
 addRefs ua at ns (Local fc x idx y) = ns
 addRefs ua at ns (Ref fc x name) = insert name ua ns
 addRefs ua at ns (Meta fc n i xs)
-    = addRefsArgs ns xs
+    = addRefsArgs ns $ map snd xs
   where
     addRefsArgs : NameMap Bool -> List (Term vars) -> NameMap Bool
     addRefsArgs ns [] = ns
@@ -541,11 +541,11 @@ addRefs ua at ns (Bind fc x (Let _ c val ty) scope)
     = addRefs ua at (addRefs ua at (addRefs ua at ns val) ty) scope
 addRefs ua at ns (Bind fc x b scope)
     = addRefs ua at (addRefs ua at ns (binderType b)) scope
-addRefs ua at ns (App _ (App _ (Ref fc _ name) x) y)
+addRefs ua at ns (App _ (App _ (Ref fc _ name) _ x) _ y)
     = if name == at
          then addRefs True at (insert name True ns) y
          else addRefs ua at (addRefs ua at (insert name ua ns) x) y
-addRefs ua at ns (App fc fn arg)
+addRefs ua at ns (App fc fn _ arg)
     = addRefs ua at (addRefs ua at ns fn) arg
 addRefs ua at ns (As fc s as tm) = addRefs ua at ns tm
 addRefs ua at ns (TDelayed fc x y) = addRefs ua at ns y

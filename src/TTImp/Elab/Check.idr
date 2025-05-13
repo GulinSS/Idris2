@@ -242,17 +242,18 @@ strengthenedEState {n} {vars} c e fc env
     -- never actualy *use* that hole - this process is only to ensure that the
     -- unbound implicit doesn't depend on any variables it doesn't have
     -- in scope.
-    removeArgVars : Scopeable (Term (vs :< n)) -> Maybe (Scopeable (Term vs))
+    removeArgVars : Scopeable (RigCount, Term (vs :< n)) ->
+                    Maybe (Scopeable (RigCount, Term vs))
     removeArgVars [<] = pure [<]
-    removeArgVars (args :< Local fc r (S k) p)
+    removeArgVars (args :< (c, Local fc r (S k) p))
         = do args' <- removeArgVars args
-             pure (args' :< Local fc r _ (dropLater p))
-    removeArgVars (args :< Local fc r Z p)
+             pure (args' :< (c, Local fc r _ (dropLater p)))
+    removeArgVars (args :< (_, Local fc r Z p))
         = removeArgVars args
-    removeArgVars (args :< a)
+    removeArgVars (args :< (c, a))
         = do a' <- shrink a (Drop Refl)
              args' <- removeArgVars args
-             pure (args' :< a')
+             pure (args' :< (c, a'))
 
     removeArg : Term (vs :< n) -> Maybe (Term vs)
     removeArg tm

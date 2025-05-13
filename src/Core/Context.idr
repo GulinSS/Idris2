@@ -449,6 +449,11 @@ HasNames UConstraint where
            pure (ULE x' y')
 
 export
+HasNames a => HasNames (RigCount, a) where
+  full gam (c, t) = pure $ (c, !(full gam t))
+  resolved gam (c, t) = pure $ (c, !(resolved gam t))
+
+export
 HasNames (Term vars) where
   full gam (Ref fc x (Resolved i))
       = do Just gdef <- lookupCtxtExact (Resolved i) gam
@@ -461,8 +466,8 @@ HasNames (Term vars) where
              Just gdef => Meta fc (fullname gdef) i xs
   full gam (Bind fc x b scope)
       = pure (Bind fc x !(traverse (full gam) b) !(full gam scope))
-  full gam (App fc fn arg)
-      = pure (App fc !(full gam fn) !(full gam arg))
+  full gam (App fc fn c arg)
+      = pure (App fc !(full gam fn) c !(full gam arg))
   full gam (As fc s p tm)
       = pure (As fc s !(full gam p) !(full gam tm))
   full gam (TDelayed fc x y)
@@ -488,8 +493,8 @@ HasNames (Term vars) where
            pure (Meta fc x i xs')
   resolved gam (Bind fc x b scope)
       = pure (Bind fc x !(traverse (resolved gam) b) !(resolved gam scope))
-  resolved gam (App fc fn arg)
-      = pure (App fc !(resolved gam fn) !(resolved gam arg))
+  resolved gam (App fc fn c arg)
+      = pure (App fc !(resolved gam fn) c !(resolved gam arg))
   resolved gam (As fc s p tm)
       = pure (As fc s !(resolved gam p) !(resolved gam tm))
   resolved gam (TDelayed fc x y)
@@ -503,11 +508,6 @@ HasNames (Term vars) where
                 | Nothing => pure (TType fc n)
            pure (TType fc (Resolved i))
   resolved gam tm = pure tm
-
-export
-HasNames a => HasNames (RigCount, a) where
-  full gam (c, t) = pure $ (c, !(full gam t))
-  resolved gam (c, t) = pure $ (c, !(resolved gam t))
 
 export
 HasNames Pat where

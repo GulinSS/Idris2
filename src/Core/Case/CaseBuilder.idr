@@ -1188,11 +1188,11 @@ mkPat args orig (Ref fc Func n)
 mkPat args orig (Bind fc x (Pi _ _ _ s) t)
     -- For (b:Nat) -> b, the codomain looks like b [__], but we want `b` as the pattern
     = case subst (Erased fc Placeholder) t of
-        App _ t'@(Ref fc Bound n) (Erased _ _) =>  pure $ PArrow fc x !(mkPat [] s s) !(mkPat [] t' t')
+        App _ t'@(Ref fc Bound n) _ (Erased _ _) => pure $ PArrow fc x !(mkPat [] s s) !(mkPat [] t' t')
         t' =>  pure $ PArrow fc x !(mkPat [] s s) !(mkPat [] t' t')
-mkPat args orig (App fc fn arg)
+mkPat args orig (App fc fn c arg)
     = do parg <- mkPat [] arg arg
-         mkPat ((?rig, parg) :: args) orig fn
+         mkPat ((c, parg) :: args) orig fn
 -- Assumption is that clauses are converted to explicit names
 mkPat args orig (As fc _ (Ref _ Bound n) ptm)
     = pure $ PAs fc n !(mkPat [] ptm ptm)

@@ -104,10 +104,10 @@ findInferrable defs ty = fi 0 0 [] [] ty
                  Nothing => pure acc
                  Just p => if p `elem` acc then pure acc else pure (p :: acc)
       findInf acc pos (NDCon _ _ _ _ args)
-          = do args' <- traverse (evalClosure defs . snd) (toList args)
+          = do args' <- traverse (evalClosure defs . value) (toList args)
                findInfs acc pos args'
       findInf acc pos (NTCon _ _ _ _ args)
-          = do args' <- traverse (evalClosure defs . snd) (toList args)
+          = do args' <- traverse (evalClosure defs . value) (toList args)
                findInfs acc pos args'
       findInf acc pos (NDelayed _ _ t) = findInf acc pos t
       findInf acc _ _ = pure acc

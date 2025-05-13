@@ -53,11 +53,11 @@ mutual
   mismatchNF defs (NTCon _ xn xt _ xargs) (NTCon _ yn yt _ yargs)
       = if xn /= yn
            then pure True
-           else anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs)
+           else anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs)
   mismatchNF defs (NDCon _ _ xt _ xargs) (NDCon _ _ yt _ yargs)
       = if xt /= yt
            then pure True
-           else anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs)
+           else anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs)
   mismatchNF defs (NPrimVal _ xc) (NPrimVal _ yc) = pure (xc /= yc)
   mismatchNF defs (NDelayed _ _ x) (NDelayed _ _ y) = mismatchNF defs x y
   mismatchNF defs (NDelay _ _ _ x) (NDelay _ _ _ y)
@@ -101,12 +101,12 @@ impossibleOK : {auto c : Ref Ctxt Defs} ->
 impossibleOK defs (NTCon _ xn xt xa xargs) (NTCon _ yn yt ya yargs)
     = if xn /= yn
          then pure True
-         else anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs)
+         else anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs)
 -- If it's a data constructor, any mismatch will do
 impossibleOK defs (NDCon _ _ xt _ xargs) (NDCon _ _ yt _ yargs)
     = if xt /= yt
          then pure True
-         else anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs)
+         else anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs)
 impossibleOK defs (NPrimVal _ x) (NPrimVal _ y) = pure (x /= y)
 
 -- NPrimVal is apart from NDCon, NTCon, NBind, and NType
@@ -163,7 +163,7 @@ recoverable : {auto c : Ref Ctxt Defs} ->
 recoverable defs (NTCon _ xn xt xa xargs) (NTCon _ yn yt ya yargs)
     = if xn /= yn
          then pure False
-         else pure $ not !(anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs))
+         else pure $ not !(anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs))
 -- Type constructor vs. primitive type
 recoverable defs (NTCon _ _ _ _ _) (NPrimVal _ _) = pure False
 recoverable defs (NPrimVal _ _) (NTCon _ _ _ _ _) = pure False
@@ -181,7 +181,7 @@ recoverable defs _ (NTCon _ _ _ _ _) = pure True
 recoverable defs (NDCon _ _ xt _ xargs) (NDCon _ _ yt _ yargs)
     = if xt /= yt
          then pure False
-         else pure $ not !(anyM (mismatch defs) (zipWith (curry $ mapHom snd) xargs yargs))
+         else pure $ not !(anyM (mismatch defs) (zipWith (curry $ mapHom value) xargs yargs))
 -- Data constructor vs. primitive constant
 recoverable defs (NDCon _ _ _ _ _) (NPrimVal _ _) = pure False
 recoverable defs (NPrimVal _ _) (NDCon _ _ _ _ _) = pure False
@@ -681,10 +681,10 @@ checkClause {vars} mult vis totreq hashit n opts nest env
           wvalTy' := weaken wvalTy
           eqTy : Term (xs :< MN "warg" 0)
                := apply vfc eqTyCon
-                           [ wvalTy'
-                           , wvalTy'
-                           , weaken wval
-                           , Local vfc (Just False) Z First
+                           [ (erased, wvalTy')
+                           , (erased, wvalTy')
+                           , (top, weaken wval)
+                           , (top, Local vfc (Just False) Z First)
                            ]
 
           scenv : Env Term (xs ++ wargs)
@@ -847,10 +847,11 @@ mkRunTime fc n
     mkCrash : {vars : _} -> String -> Term vars
     mkCrash msg
        = apply fc (Ref fc Func (UN $ Basic "prim__crash"))
-               [Erased fc Placeholder, PrimVal fc (Str msg)]
+               [(erased, Erased fc Placeholder),
+                (top, PrimVal fc (Str msg))]
 
     matchAny : Term vars -> Term vars
-    matchAny (App fc f a) = App fc (matchAny f) (Erased fc Placeholder)
+    matchAny (App fc f c a) = App fc (matchAny f) c (Erased fc Placeholder)
     matchAny tm = tm
 
     makeErrorClause : {vars : _} -> Env Term vars -> Term vars -> Clause

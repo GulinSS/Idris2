@@ -25,8 +25,8 @@ used {vars} idx (Bind _ x b sc) = usedBinder b || used (1 + idx) sc
     usedBinder : Binder (Term vars) -> Bool
     usedBinder (Let _ _ val ty) = used idx val || used idx ty
     usedBinder b = used idx (binderType b)
-used idx (Meta _ _ _ args) = any (used idx) args
-used idx (App _ f a) = used idx f || used idx a
+used idx (Meta _ _ _ args) = any (used idx . snd) args
+used idx (App _ f _ a) = used idx f || used idx a
 used idx (As _ _ _ pat) = used idx pat
 used idx (TDelayed _ _ tm) = used idx tm
 used idx (TDelay _ _ _ tm) = used idx tm
@@ -140,7 +140,7 @@ mutual
          = if n `elem` vs
               then uniqueLocal vs (next n)
               else n
-  unelabTy' umode nest env tm@(App fc fn arg)
+  unelabTy' umode nest env tm@(App fc fn _ arg)
       = do (fn', gfnty) <- unelabTy umode nest env fn
            (arg', gargty) <- unelabTy umode nest env arg
            fnty <- getNF gfnty
@@ -276,7 +276,7 @@ unelabNest : {vars : _} ->
              Env Term vars ->
              Term vars -> Core IRawImp
 unelabNest mode nest env (Meta fc n i args)
-    = do let mkn = nameRoot n ++ (showScope $ toList args)
+    = do let mkn = nameRoot n ++ (showScope $ toList $ map snd args)
          pure (IHole fc mkn)
   where
     toName : Term vars -> Maybe Name
