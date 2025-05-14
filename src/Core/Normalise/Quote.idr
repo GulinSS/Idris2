@@ -155,6 +155,45 @@ mutual
       = do ty' <- quoteGenNF q opts defs bounds env !(evalClosure defs ty)
            pure (PVTy fc r ty')
 
+  quoteAlt : {auto c : Ref Ctxt Defs} ->
+             {vars, bound : _} ->
+             Ref QVar Int -> QuoteOpts -> Defs -> Bounds bound ->
+             Env Term vars -> NCaseAlt vars -> Core (CaseAlt (vars ++ bound))
+  quoteAlt {vars} q opts defs bounds env (NConCase n t a sc)
+      = do sc' <- quoteScope a bounds sc
+           pure $ ConCase n t sc'
+    where
+      quoteScope : {bound : _} ->
+                   (args : SnocList (RigCount, Name)) ->
+                   Bounds bound ->
+                   NCaseScope args vars ->
+                   Core (CaseScope (vars ++ bound))
+      quoteScope {bound} [<] bounds rhs_in
+          = do rhs <- rhs_in
+               rhs' <- quoteGenNF q opts defs bounds env !(evalClosure defs rhs)
+               pure (RHS rhs')
+      quoteScope (as :< (r, a)) bounds sc
+          = do an <- genName "c"
+               let sc' = sc (pure $ toClosure defaultOpts env (Ref emptyFC Bound an))
+               -- let sc' = sc (mkTmpVar fc an)
+               rhs' <- quoteScope as (Add a an bounds) sc'
+               pure (Arg r a rhs')
+
+  quoteAlt q opts defs bounds env (NDelayCase ty arg sc)
+      = do tyn <- genName "ty"
+           argn <- genName "arg"
+           let argr = toClosure defaultOpts env (Ref emptyFC Bound tyn)
+           rhs <- sc (pure $ toClosure defaultOpts env (Ref emptyFC Bound tyn))
+                     (pure $ toClosure defaultOpts env (Ref emptyFC Bound argn))
+           sc' <- quoteGenNF q opts defs (Add arg argn (Add ty tyn bounds)) env !(evalClosure defs rhs)
+           pure (DelayCase ty arg sc')
+  quoteAlt q opts defs bounds env (NConstCase c sc)
+      = do sc' <- quoteGenNF q opts defs bounds env !(evalClosure defs sc)
+           pure (ConstCase c sc')
+  quoteAlt q opts defs bounds env (NDefaultCase sc)
+      = do sc' <- quoteGenNF q opts defs bounds env !(evalClosure defs sc)
+           pure (DefaultCase sc')
+
   quoteGenNF : {auto c : Ref Ctxt Defs} ->
                {bound, vars : _} ->
                Ref QVar Int -> QuoteOpts ->
@@ -192,6 +231,19 @@ mutual
       = do n' <- quoteGenNF q opts defs bound env n
            pat' <- quoteGenNF q opts defs bound env pat
            pure (As fc s n' pat')
+  quoteGenNF q opts defs bound env (NCase fc t rig sc scTy alts)
+    = do sc' <- quoteGenNF q opts defs bound env sc
+         scTy' <- quoteGenNF q opts defs bound env !(evalClosure defs scTy)
+         alts' <- traverse (quoteAlt q opts defs bound env) alts
+         pure $ Case fc t rig sc' scTy' alts'
+    -- = do sc' <- quoteGen bounds env sc s
+    --      scTy' <- quoteGen bounds env scTy s
+    --      let s' = case s of
+    --                    NF _ => ExpandHoles
+    --                    ExpandHoles => ExpandHoles
+    --                    _ => BlockApp
+    --      alts' <- traverse (quoteAlt s' bounds env) alts
+    --      pure $ Case fc t rig sc' scTy' alts'
   quoteGenNF q opts defs bound env (NDelayed fc r arg)
       = do argQ <- quoteGenNF q opts defs bound env arg
            pure (TDelayed fc r argQ)

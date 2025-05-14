@@ -127,6 +127,17 @@ isStrict (Meta _ _ i args) = all (isStrict . snd) args
 isStrict (Bind _ _ b s) = isStrict (binderType b) && isStrict s
 isStrict (App _ f _ x) = isStrict f && isStrict x
 isStrict (As _ _ a p) = isStrict a && isStrict p
+isStrict (Case _ _ _ _ _ alts) = all isStrictAlt alts
+  where
+    isStrictScope : forall vs . CaseScope vs -> Bool
+    isStrictScope (RHS tm) = isStrict tm
+    isStrictScope (Arg _ _ sc) = isStrictScope sc
+
+    isStrictAlt : forall vs . CaseAlt vs -> Bool
+    isStrictAlt (ConCase _ _ sc) = isStrictScope sc
+    isStrictAlt (DelayCase _ _ tm) = isStrict tm
+    isStrictAlt (ConstCase _ tm) = isStrict tm
+    isStrictAlt (DefaultCase tm) = isStrict tm
 isStrict (TDelayed _ _ _) = False
 isStrict (TDelay _ _ f x) = isStrict f && isStrict x
 isStrict (TForce _ _ tm) = isStrict tm

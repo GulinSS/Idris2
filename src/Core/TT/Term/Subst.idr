@@ -28,6 +28,8 @@ substTerm : Substitutable Term Term
 substTerms : Substitutable Term (List . Term)
 substBinder : Substitutable Term (Binder . Term)
 substTaggedTerms : forall a. Substitutable Term (List . (a,) . Term)
+substAlt : Substitutable Term CaseAlt
+substCaseScope : Substitutable Term CaseScope
 
 substTerm outer dropped env (Local fc r _ prf)
     = find (\ (MkVar p) => Local fc r _ p) outer dropped (MkVar prf) env
@@ -41,6 +43,10 @@ substTerm outer dropped env (App fc fn c arg)
     = App fc (substTerm outer dropped env fn) c (substTerm outer dropped env arg)
 substTerm outer dropped env (As fc s as pat)
     = As fc s (substTerm outer dropped env as) (substTerm outer dropped env pat)
+substTerm outer dropped env (Case fc t c sc scty alts)
+    = Case fc t c (substTerm outer dropped env sc)
+                  (substTerm outer dropped env scty)
+                  (map (assert_total $ substAlt outer dropped env) alts)
 substTerm outer dropped env (TDelayed fc x y) = TDelayed fc x (substTerm outer dropped env y)
 substTerm outer dropped env (TDelay fc x t y)
     = TDelay fc x (substTerm outer dropped env t) (substTerm outer dropped env y)
@@ -60,6 +66,14 @@ substBinder outer dropped env b
 
 substTaggedTerms outer dropped env b
   = assert_total $ map @{Compose} (substTerm outer dropped env) b
+
+substCaseScope outer dropped env (RHS tm) = RHS (substTerm outer dropped env tm)
+substCaseScope outer dropped env (Arg c x sc) = Arg c x (substCaseScope (suc outer) dropped env sc)
+
+substAlt outer dropped env (ConCase n t sc) = ConCase n t (substCaseScope outer dropped env sc)
+substAlt outer dropped env (DelayCase ty arg sc) = DelayCase ty arg (substTerm (suc (suc outer)) dropped env sc)
+substAlt outer dropped env (ConstCase c sc) = ConstCase c (substTerm outer dropped env sc)
+substAlt outer dropped env (DefaultCase sc) = DefaultCase (substTerm outer dropped env sc)
 
 export
 substs : SizeOf dropped -> SubstEnv dropped vars -> Term (vars ++ dropped) -> Term vars

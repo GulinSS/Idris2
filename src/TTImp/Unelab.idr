@@ -1,6 +1,5 @@
 module TTImp.Unelab
 
-import Core.Case.CaseTree
 import Core.Context
 import Core.Context.Log
 import Core.Env
@@ -166,6 +165,74 @@ mutual
                          NoSugar _ => pure (IAs fc (getLoc p) s n.rawName tm', ty)
                          _ => pure (tm', ty)
                 _ => pure (tm', ty) -- Should never happen!
+  unelabTy' umode nest env (Case fc ty c sc scty alts)
+      = do (sc', _) <- unelabTy' umode nest env sc
+           (scty', _) <- unelabTy' umode nest env scty
+           alts' <- traverse unelabAlt alts
+           pure (ICase fc [] sc' scty' alts', gErased fc)
+    where
+      unelabScope : {vars : _} ->
+                    FC -> Name -> SnocList (Maybe Name, Name) ->
+                    Env Term vars -> NF [<] ->
+                    CaseScope vars -> Core IImpClause
+      unelabScope fc n args env _ (RHS tm)
+          = do (tm', _) <- unelabTy' umode nest env tm
+               let n' = MkKindedName (Just Bound) n n
+               pure (PatClause fc (applySpine (IVar fc n') args) tm')
+        where
+          applySpine : IRawImp -> SnocList (Maybe Name, Name) -> IRawImp
+          applySpine fn [<] = fn
+          applySpine fn (args :< (Nothing, arg))
+              = let arg' = MkKindedName (Just Bound) arg arg in
+                    IApp fc (applySpine fn args) (IVar fc arg')
+          applySpine fn (args :< (Just n, arg))
+              = let arg' = MkKindedName (Just Bound) arg arg in
+                    case umode of
+                        ImplicitHoles => applySpine fn args
+                        _ => INamedApp fc (applySpine fn args) n (IVar fc arg')
+
+      unelabScope fc n args env (NBind _ v (Pi _ rig p ty) tsc) (Arg c x sc)
+          = do defs <- get Ctxt
+               p' <- the (Core (PiInfo (Term [<]))) $ case p of
+                          Explicit => pure Explicit
+                          Implicit => pure Implicit
+                          AutoImplicit => pure AutoImplicit
+                          DefImplicit t => pure $ DefImplicit !(quote defs [<] t)
+               vty <- quote defs [<] ty
+               let env' = env :< PVar fc rig (map embed p') (embed vty)
+               -- We only need the type to make sure we're getting the plicities
+               -- right, so use an explicit name to feed to the scope type
+               tsc' <- tsc defs (toClosure defaultOpts [<] (Ref fc Bound n))
+               let xn = case p' of
+                             Explicit => Nothing
+                             _ => Just v
+               unelabScope fc n (args :< (xn, x)) env' tsc' sc
+      unelabScope fc n args env ty (Arg c x sc)
+          = do let env' = env :< PVar fc top Explicit (Erased fc Placeholder)
+               unelabScope fc n (args :< (Nothing, x)) env' (NErased fc Placeholder) sc
+
+      unelabAlt : CaseAlt vars -> Core IImpClause
+      unelabAlt (ConCase n t sc)
+          = do defs <- get Ctxt
+               nty <- lookupTyExact n (gamma defs)
+               let ty = case nty of
+                             Nothing => Erased fc Placeholder
+                             Just t => t
+               unelabScope fc !(getFullName n) [<] env !(nf defs [<] ty) sc
+      unelabAlt (DelayCase t a tm)
+          = do let env' = env :<
+                       PVar fc top Explicit (Erased fc Placeholder) :<
+                       PVar fc erased Implicit (Erased fc Placeholder)
+               (tm', _) <- unelabTy' umode nest env' tm
+               let a' = MkKindedName (Just Bound) a a
+               pure (PatClause fc (IDelay fc (IVar fc a')) tm')
+      unelabAlt (ConstCase c tm)
+          = do (tm', _) <- unelabTy' umode nest env tm
+               pure (PatClause fc (IPrimVal fc c) tm')
+      unelabAlt (DefaultCase tm)
+          = do (tm', _) <- unelabTy' umode nest env tm
+               pure (PatClause fc (Implicit fc False) tm')
+
   unelabTy' umode nest env (TDelayed fc r tm)
       = do (tm', ty) <- unelabTy' umode nest env tm
            defs <- get Ctxt

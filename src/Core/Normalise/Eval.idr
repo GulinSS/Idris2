@@ -1,6 +1,5 @@
 module Core.Normalise.Eval
 
-import Core.Case.CaseTree
 import Core.Context
 import Core.Context.Log
 import Core.Core
@@ -137,6 +136,8 @@ parameters (defs : Defs) (topopts : EvalOpts)
              else do n' <- eval env locs n stk
                      tm' <- eval env locs tm stk
                      pure (NAs fc s n' tm')
+    eval env locs (Case fc ct r sc scTy alts) stk
+      = ?evalCase
     eval env locs (TDelayed fc r ty) stk
         = do ty' <- eval env locs ty stk
              pure (NDelayed fc r ty')
@@ -190,6 +191,8 @@ parameters (defs : Defs) (topopts : EvalOpts)
             else do p' <- applyToStack env p []
                     t' <- applyToStack env t stk
                     pure (NAs fc s p' t')
+    applyToStack env (NCase fc ct rc sc scTy alts) stk
+      = ?evalNCase
     applyToStack env (NDelayed fc r tm) stk
        = do tm' <- applyToStack env tm stk
             pure (NDelayed fc r tm')
@@ -328,135 +331,6 @@ parameters (defs : Defs) (topopts : EvalOpts)
     getCaseBound [<]           (_ :< _)  loc = Nothing -- mismatched arg length
     getCaseBound (args :< arg) [<]       loc = Nothing -- mismatched arg length
     getCaseBound (args :< arg) (ns :< n) loc = pure $ !(getCaseBound args ns loc) :< arg
-
-    -- Returns the case term from the matched pattern with the LocalEnv (arguments from constructor pattern ConCase)
-    evalConAlt : {auto c : Ref Ctxt Defs} ->
-                 {more, free : _} ->
-                 Env Term free ->
-                 LocalEnv free more -> EvalOpts -> FC ->
-                 Stack free ->
-                 (args : List Name) ->
-                 Scopeable (Closure free) ->
-                 CaseTree (more <>< args) ->
-                 Core (CaseResult (TermWithEnv free))
-    evalConAlt env loc opts fc stk args args' sc
-         = do let Just bound = getCaseBound args' (cast args) loc
-                   | Nothing => pure GotStuck
-              evalTree env bound opts fc stk $
-                rewrite sym $ fishAsSnocAppend more args in sc
-
-    evalCaseScope : {auto c : Ref Ctxt Defs} ->
-                    {more, free : _} ->
-                    Env Term free ->
-                    LocalEnv free more -> EvalOpts -> FC ->
-                    Stack free ->
-                    SnocList (FC, Closure free) ->
-                    CaseScope more ->
-                    Core (CaseResult (TermWithEnv free))
-    evalCaseScope {more} env loc opts fc stk [<] (RHS tm)
-        = evalTree env loc opts fc stk tm
-    evalCaseScope {more} env loc opts fc stk (sp :< e) (Arg r x sc)
-        = evalCaseScope env (loc :< snd e) opts fc stk sp sc
-    evalCaseScope _ _ _ _ _ _ _ = pure GotStuck
-
-    tryAlt : {auto c : Ref Ctxt Defs} ->
-             {free, more : _} ->
-             Env Term free ->
-             LocalEnv free more -> EvalOpts -> FC ->
-             Stack free -> NF free -> CaseAlt more ->
-             Core (CaseResult (TermWithEnv free))
-    -- Dotted values should still reduce at compile time
-    tryAlt {more} env loc opts fc stk (NErased _ (Dotted tm)) alt
-         = tryAlt {more} env loc opts fc stk tm alt
-    -- Ordinary constructor matching
-    tryAlt {more} env loc opts fc stk (NDCon _ _ t a sp) (ConCase _ t' cscope)
-        = if t == t' then evalCaseScope env loc opts fc stk (map @{Compose} snd sp) cscope
-            else pure NoMatch
-    -- Type constructor matching, in typecase
-    tryAlt {more} env loc opts fc stk (NTCon _ nm arity args') (ConCase nm' args sc)
-         = if nm == nm'
-              then evalCaseScope env loc opts fc stk (map @{Compose} snd args') sc
-              else pure NoMatch
-    -- Primitive type matching, in typecase
-    tryAlt env loc opts fc stk (NPrimVal _ c) (ConstCase c' rhs)
-        = if c == c'
-            then evalTree env loc opts fc stk rhs
-            else pure NoMatch
-    -- Type of type matching, in typecase
-    -- tryAlt env loc opts fc stk (NType _ _) (ConCase (UN (Basic "Type")) tag [] sc)
-    --      = evalTree env loc opts fc stk sc
-    -- tryAlt env loc opts fc stk (NType _ _) (ConCase _ _ _ _)
-    --      = pure NoMatch
-    -- Arrow matching, in typecase
-    -- tryAlt {more}
-    --        env loc opts fc stk (NBind pfc x (Pi fc' r e aty) scty) (ConCase (UN (Basic "->")) tag [s,t] sc)
-    --    = evalConAlt {more} env loc opts fc stk [s,t]
-    --               [<MkNFClosure opts env (NBind pfc x (Lam fc' r e aty) scty),
-    --               aty]
-    --               sc
-    -- tryAlt {more}
-    --        env loc opts fc stk (NBind pfc x (Pi fc' r e aty) scty) (ConCase nm tag args sc)
-    --    = pure NoMatch
-    -- Delay matching
-    tryAlt env loc opts fc stk (NDelay _ _ ty arg) (DelayCase tyn argn sc)
-         = evalTree env (loc :< ty :< arg) opts fc stk sc
-    -- Constant matching
-    tryAlt env loc opts fc stk (NPrimVal _ c') (ConstCase c sc)
-         = if c == c' then evalTree env loc opts fc stk sc
-                      else pure NoMatch
-    -- Default case matches against any *concrete* value
-    tryAlt env loc opts fc stk val (DefaultCase sc)
-         = if concrete val
-              then evalTree env loc opts fc stk sc
-              else pure GotStuck
-      where
-        concrete : NF free -> Bool
-        concrete (NDCon _ _ _ _ _) = True
-        concrete (NTCon _ _ _ _) = True
-        concrete (NPrimVal _ _) = True
-        concrete (NBind _ _ _ _) = True
-        concrete (NType _ _) = True
-        concrete (NDelay _ _ _ _) = True
-        concrete _ = False
-    tryAlt _ _ _ _ _ _ _ = pure GotStuck
-
-    findAlt : {auto c : Ref Ctxt Defs} ->
-              {args, free : _} ->
-              Env Term free ->
-              LocalEnv free args -> EvalOpts -> FC ->
-              Stack free -> NF free -> List (CaseAlt args) ->
-              Core (CaseResult (TermWithEnv free))
-    findAlt env loc opts fc stk val [] = do
-      log "eval.casetree.stuck" 2 "Ran out of alternatives"
-      pure GotStuck
-    findAlt env loc opts fc stk val (x :: xs)
-         = do res@(Result {}) <- tryAlt env loc opts fc stk val x
-                   | NoMatch => findAlt env loc opts fc stk val xs
-                   | GotStuck => do
-                       logC "eval.casetree.stuck" 5 $ do
-                         val <- toFullNames val
-                         x <- toFullNames x
-                         pure $ "Got stuck matching \{show val} against \{show x}"
-                       pure GotStuck
-              pure res
-
-    evalTree : {auto c : Ref Ctxt Defs} ->
-               {args, free : _} -> Env Term free -> LocalEnv free args ->
-               EvalOpts -> FC ->
-               Stack free -> CaseTree args ->
-               Core (CaseResult (TermWithEnv free))
-    evalTree env loc opts fc stk (Case {name} idx x _ alts)
-      = do xval <- evalLocal env fc Nothing idx (embedIsVar x) [] loc
-           -- we have not defined quote yet (it depends on eval itself) so we show the NF
-           -- i.e. only the top-level constructor.
-           logC "eval.casetree" 5 $ do
-             xval <- toFullNames xval
-             pure "Evaluated \{show name} to \{show xval}"
-           let loc' = updateLocal opts env idx (embedIsVar x) loc xval
-           findAlt env loc' opts fc stk xval alts
-    evalTree env loc opts fc stk (STerm _ tm)
-          = pure (Result $ MkTermEnv loc $ embed tm)
-    evalTree env loc opts fc stk _ = pure GotStuck
 
     -- Take arguments from the stack, as long as there's enough.
     -- Returns the arguments, and the rest of the stack

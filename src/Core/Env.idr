@@ -23,7 +23,7 @@ data Env : (tm : Scoped) -> Scope -> Type where
 %name Env rho
 
 public export
-ScopeEmpty : {tm: _} -> Env tm [<]
+ScopeEmpty : Env tm [<]
 ScopeEmpty = [<]
 
 export

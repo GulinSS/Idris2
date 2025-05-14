@@ -1,7 +1,6 @@
 module Compiler.CompileExpr
 
 import Compiler.Opts.Constructor
-import Core.Case.CaseTree
 import public Core.CompileExpr
 import Core.Context
 import Core.Context.Log
@@ -182,12 +181,20 @@ dconFlag n
 
 toCExpTm : {vars : _} ->
            {auto c : Ref Ctxt Defs} ->
+           {auto s : Ref NextMN Int} ->
            Name -> Term vars ->
            Core (CExp vars)
 toCExp : {vars : _} ->
          {auto c : Ref Ctxt Defs} ->
+         {auto s : Ref NextMN Int} ->
          Name -> Term vars ->
          Core (CExp vars)
+
+toCExpCase : {vars : _} ->
+             {auto c : Ref Ctxt Defs} ->
+             {auto s : Ref NextMN Int} ->
+             Name -> FC -> CExp vars -> List (CaseAlt vars) ->
+             Core (CExp vars)
 
 toCExpTm n (Local fc _ _ prf)
     = pure $ CLocal fc prf
@@ -221,6 +228,8 @@ toCExpTm n (App fc tm _ arg)
     = pure $ CApp fc !(toCExp n tm) [!(toCExp n arg)]
 -- This shouldn't be in terms any more, but here for completeness
 toCExpTm n (As _ _ _ p) = toCExpTm n p
+toCExpTm n (Case fc _ _ sc _ alts)
+    = toCExpCase n fc !(toCExp n sc) alts
 -- TODO: Either make sure 'Delayed' is always Rig0, or add to typecase
 toCExpTm n (TDelayed fc _ _) = pure $ CErased fc
 toCExpTm n (TDelay fc lr _ arg)
@@ -246,175 +255,6 @@ toCExp n tm
                         pure $ eraseConArgs arity epos f' args'
                       Arity a =>
                         pure $ expandToArity a f' args'
-
-mutual
-  conCases : {vars : _} ->
-             {auto c : Ref Ctxt Defs} ->
-             Name -> List (CaseAlt vars) ->
-             Core (List (CConAlt vars))
-  conCases n [] = pure []
-  conCases {vars} n (ConCase x tag sc :: ns)
-    = do defs <- get Ctxt
-         Just gdef <- lookupCtxtExact x (gamma defs)
-              | Nothing => -- primitive type match
-                   do xn <- getFullName x
-                      pure $ MkConAlt xn TYCON Nothing !(toCExpScope 0 [] sc)
-                               :: !(conCases n ns)
-         let nt = case definition gdef of
-                       DCon di _ arity => newTypeArg di
-                       _ => Nothing
-         case nt of
-              Just pos => conCases n ns -- skip it
-              _ => do xn <- getFullName x
-                      sc' <- toCExpScope 0 (eraseArgs gdef) sc
-                      ns' <- conCases n ns
-                      if dcon (definition gdef)
-                         then pure $ MkConAlt xn !(dconFlag xn) (Just tag) sc' :: ns'
-                         else pure $ MkConAlt xn !(dconFlag xn) Nothing sc' :: ns'
-    where
-      dcon : Def -> Bool
-      dcon (DCon _ _ _) = True
-      dcon _ = False
-
-      toCExpScope : {vars : _} -> Nat -> List Nat ->
-                    CaseScope vars -> Core (CCaseScope vars)
-      toCExpScope i es (RHS tm) = pure $ CRHS !(toCExpTree n tm)
-      toCExpScope {vars} i es (Arg c x sc)
-        = if i `elem` es
-                then pure $ shrinkCScope (Drop Refl) $
-                            !(toCExpScope {vars = vars :< x} (S i) es sc)
-                else pure $ CArg x !(toCExpScope {vars = vars :< x} (S i) es sc)
-
-  conCases n (_ :: ns) = conCases n ns
-
-  constCases : {vars : _} ->
-               {auto c : Ref Ctxt Defs} ->
-               Name -> List (CaseAlt vars) ->
-               Core (List (CConstAlt vars))
-  constCases n [] = pure []
-  constCases n (ConstCase WorldVal sc :: ns)
-      = constCases n ns
-  constCases n (ConstCase x sc :: ns)
-      = pure $ MkConstAlt x !(toCExpTree n sc) ::
-                    !(constCases n ns)
-  constCases n (_ :: ns) = constCases n ns
-
-  -- If there's a case which matches on a 'newtype', return the RHS
-  -- without matching.
-  -- Take some care if the newtype involves a WorldVal - in that case we
-  -- still need to let bind the scrutinee to ensure it's evaluated exactly
-  -- once.
-  getNewType : {vars : _} ->
-               {auto c : Ref Ctxt Defs} ->
-               FC -> CExp vars ->
-               Name -> List (CaseAlt vars) ->
-               Core (Maybe (CExp vars))
-  getNewType fc scr n [] = pure Nothing
-  getNewType fc scr n (DefaultCase sc :: ns)
-      = pure $ Nothing
-  getNewType fc scr n (ConCase x tag sc :: ns)
-      = do  defs <- get Ctxt
-            Just (DCon di t a) <- lookupDefExact x (gamma defs)
-                | _ => pure Nothing
-            let Just (noworld, pos) = newTypeArg di
-                | _ => pure Nothing
-            if noworld
-                then substScr 0 pos scr Lin sc
-                else substLetScr 0 pos scr Lin sc
-  where
-      -- no %World, so substitute diretly
-      substScr : {args : _} ->
-              Nat -> Nat -> CExp vars ->
-              SubstCEnv args vars ->
-              CaseScope (vars ++ args) ->
-              Core (Maybe (CExp vars))
-      substScr i pos x env (RHS tm)
-          = do tm' <- toCExpTree n tm
-               pure $ Just (substs (mkSizeOf _) env tm')
-      substScr i pos x env (Arg c n sc)
-          = if i == pos
-              then substScr (S i) pos x (env :< x) sc
-              else substScr (S i) pos x (env :< CErased fc) sc
-
-      -- When we find the scrutinee, let bind it and substitute the name into
-      -- the RHS, so the thing still gets evaluated if it's an action on %World
-      substLetScr : {args : _} ->
-              Nat -> Nat -> CExp vars ->
-              SubstCEnv args (vars :< MN "eff" 0) ->
-              CaseScope (vars ++ args) ->
-              Core (Maybe (CExp vars))
-      substLetScr i pos x env (RHS tm)
-          = do tm' <- toCExpTree n tm
-               let tm' = insertNames {outer = args} {inner = vars} {ns = [<MN "eff" 0]}
-                              (mkSizeOf _) (mkSizeOf _) tm'
-               let rettm = CLet fc (MN "eff" 0) NotInline x
-                      (substs (mkSizeOf _) env
-                          (rewrite sym (appendAssociative vars [<MN "eff" 0] args)
-                                      in tm'))
-               pure $ Just rettm
-      substLetScr i pos x env (Arg c n sc)
-          = if i == pos
-              then substLetScr (S i) pos x (env :< CLocal fc First) sc
-              else substLetScr (S i) pos x (env :< CErased fc) sc
-
-  getNewType fc scr n (_ :: ns) = getNewType fc scr n ns
-
-  getDef : {vars : _} ->
-           {auto c : Ref Ctxt Defs} ->
-           Name -> List (CaseAlt vars) ->
-           Core (Maybe (CExp vars))
-  getDef n [] = pure Nothing
-  getDef n (DefaultCase sc :: ns)
-      = pure $ Just !(toCExpTree n sc)
-  getDef n (ConstCase WorldVal sc :: ns)
-      = pure $ Just !(toCExpTree n sc)
-  getDef n (_ :: ns) = getDef n ns
-
-  toCExpTree : {vars : _} ->
-               {auto c : Ref Ctxt Defs} ->
-               Name -> CaseTree vars ->
-               Core (CExp vars)
-  toCExpTree n alts@(Case _ x scTy (DelayCase ty arg sc :: rest))
-      = let fc = getLoc scTy in
-            pure $
-              CLet fc ty YesInline (CErased fc) $
-              CLet fc arg YesInline (CForce fc LInf (CLocal (getLoc scTy) (Later x)))
-                   !(toCExpTree n sc)
-  toCExpTree n alts
-      = toCExpTree' n alts
-
-  toCExpTree' : {vars : _} ->
-                {auto c : Ref Ctxt Defs} ->
-                Name -> CaseTree vars ->
-                Core (CExp vars)
-  toCExpTree' n (Case _ x scTy alts@(ConCase _ _ _ :: _))
-      = let fc = getLoc scTy in
-            do Nothing <- getNewType fc (CLocal fc x) n alts
-                   | Just def => pure def
-               defs <- get Ctxt
-               cases <- conCases n alts
-               def <- getDef n alts
-               if isNil cases
-                  then pure $ fromMaybe (CErased fc) def
-                  else pure $ CConCase fc (CLocal fc x) cases def
-  toCExpTree' n (Case _ x scTy alts@(DelayCase _ _ _ :: _))
-      = throw (InternalError "Unexpected DelayCase")
-  toCExpTree' n (Case fc x scTy alts@(ConstCase _ _ :: _))
-      = let fc = getLoc scTy in
-            do cases <- constCases n alts
-               def <- getDef n alts
-               if isNil cases
-                  then pure (fromMaybe (CErased fc) def)
-                  else pure $ CConstCase fc (CLocal fc x) cases def
-  toCExpTree' n (Case _ x scTy alts@(DefaultCase sc :: _))
-      = toCExpTree n sc
-  toCExpTree' n (Case _ x scTy [])
-      = pure $ CCrash (getLoc scTy) $ "Missing case tree in " ++ show n
-  toCExpTree' n (STerm _ tm) = toCExp n tm
-  toCExpTree' n (TUnmatched msg)
-      = pure $ CCrash emptyFC ("Unmatched: " ++ show msg)
-  toCExpTree' n Impossible
-      = pure $ CCrash emptyFC ("Impossible case encountered in " ++ show n)
 
 -- Need this for ensuring that argument list matches up to operator arity for
 -- builtins
@@ -601,8 +441,7 @@ toCDef : Ref Ctxt Defs => Ref NextMN Int =>
 toCDef n ty _ None
     = pure $ MkError $ CCrash emptyFC ("Encountered undefined name " ++ show !(getFullName n))
 toCDef n ty erased (Function fi _ tree _)
-    = do s <- newRef NextMN 0
-         t <- toCExp n tree
+    = do t <- toCExp n tree
          let (args ** comptree) = mergeLambdas [<] t
          let (args' ** p) = mkSub args erased
          pure $ toLam (externalDecl fi) $ if isNil erased

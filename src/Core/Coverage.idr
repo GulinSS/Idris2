@@ -1,6 +1,5 @@
 module Core.Coverage
 
-import Core.Case.CaseTree
 import Core.Case.Util
 import Core.Context
 import Core.Context.Log
@@ -168,27 +167,27 @@ getMissingAlts : {auto c : Ref Ctxt Defs} ->
 -- check, so require a catch all
 getMissingAlts fc defs (NPrimVal _ $ PrT WorldType) alts
     = if isNil alts
-         then pure [DefaultCase (TUnmatched "Coverage check")]
+         then pure [DefaultCase (Unmatched fc "Coverage check")]
          else pure []
 getMissingAlts fc defs (NPrimVal _ c) alts
   = do log "coverage.missing" 50 $ "Looking for missing alts at type " ++ show c
        if any isDefault alts
          then do log "coverage.missing" 20 "Found default"
                  pure []
-         else pure [DefaultCase (TUnmatched "Coverage check")]
+         else pure [DefaultCase (Unmatched fc "Coverage check")]
 -- Similarly for types
 getMissingAlts fc defs (NType _ _) alts
     = do log "coverage.missing" 50 "Looking for missing alts at type Type"
          if any isDefault alts
            then do log "coverage.missing" 20 "Found default"
                    pure []
-           else pure [DefaultCase (TUnmatched "Coverage check")]
+           else pure [DefaultCase (Unmatched fc "Coverage check")]
 getMissingAlts fc defs nfty alts
     = do log "coverage.missing" 50 $ "Getting constructors for: " ++ show nfty
          logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
          allCons <- getCons defs nfty
          pure (filter (noneOf alts)
-                 (map (mkAlt fc (TUnmatched "Coverage check")) allCons))
+                 (map (mkAltTm fc (Unmatched fc "Coverage check")) allCons))
   where
     -- Return whether the alternative c matches none of the given cases in alts
     noneOf : List (CaseAlt vars) -> CaseAlt vars -> Bool
@@ -266,7 +265,7 @@ replaceDefaults fc defs nfty cs
     rep : CaseAlt vars -> Core (List (CaseAlt vars))
     rep (DefaultCase sc)
         = do allCons <- getCons defs nfty
-             pure (map (mkAlt fc sc) allCons)
+             pure (map (mkAltTm fc sc) allCons)
     rep c = pure [c]
 
     dropRep : List (CaseAlt vars) -> List (CaseAlt vars)
@@ -274,7 +273,7 @@ replaceDefaults fc defs nfty cs
     dropRep (c@(ConCase n t sc) :: rest)
           -- assumption is that there's no defaultcase in 'rest' because
           -- we've just removed it
-        = c :: dropRep (filter (not . tagIs t) rest)
+        = c :: dropRep (filter (not . tagIsTm t) rest)
     dropRep (c :: rest) = c :: dropRep rest
 
 -- Traverse a case tree and refine the arguments while matching, so that
@@ -283,74 +282,76 @@ replaceDefaults fc defs nfty cs
 -- The returned patterns are those arising from the *missing* cases
 buildArgs : {auto c : Ref Ctxt Defs} ->
             {vars : _} ->
-            FC -> Defs ->
+            Defs ->
             KnownVars vars Int -> -- Things which have definitely match
             KnownVars vars (List Int) -> -- Things an argument *can't* be
                                     -- (because a previous case matches)
             Scopeable (RigCount, ClosedTerm) -> -- ^ arguments, with explicit names
-            CaseTree vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
-buildArgs fc defs known not ps cs@(Case {name = var} idx el ty altsIn)
+            Term vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
+buildArgs defs known not ps (Bind fc x (Lam lfc c p ty) sc)
+    = buildArgs defs (weaken known) (weaken not) (ps :< (c, Ref fc Bound x)) sc
+buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsIn)
   -- If we've already matched on 'el' in this branch, restrict the alternatives
   -- to the tag we already know. Otherwise, add missing cases and filter out
   -- the ones it can't possibly be (the 'not') because a previous case
   -- has matched.
     = do let fenv = mkEnv fc _
+         defs <- get Ctxt
          nfty <- nf defs fenv ty
          alts <- replaceDefaults fc defs nfty altsIn
          let alts' = alts ++ !(getMissingAlts fc defs nfty alts)
-         let altsK = maybe alts' (\t => filter (tagIs t) alts')
+         let altsK = maybe alts' (\t => filter (tagIsTm t) alts')
                               (findTag el known)
          let altsN = maybe altsK (\ts => filter (tagIsNot ts) altsK)
                               (findTag el not)
-         buildArgsAlt not altsN
+         let var = nameAt el
+         buildArgsAlt var not altsN
   where
     buildArgSc : {vars, more : _} ->
                  SizeOf more ->
-                 FC -> Name ->
+                 Name ->
                  KnownVars vars Int -> KnownVars vars (List Int) ->
                  Name -> Int -> SnocList (RigCount, Name) ->
                  CaseScope (vars ++ more) -> Core (List (SnocList (RigCount, ClosedTerm)))
-    buildArgSc s fc var known not' n t args (RHS tm)
+    buildArgSc s var known not' n t args (RHS tm)
         = do let con = Ref fc (DataCon t (length args)) n
              let app = applySpine fc con
                              (map @{Compose} (Ref fc Bound) args)
              let ps' = map @{Compose} (substName zero var app) ps
-             buildArgs emptyFC defs (weakenNs s known) (weakenNs s not') ps' tm
-    buildArgSc s fc var known not' n t args (Arg c x sc)
-        = buildArgSc (suc s) fc var known not' n t (args :< (c, x)) sc
+             buildArgs defs (weakenNs s known) (weakenNs s not') ps' tm
+    buildArgSc s var known not' n t args (Arg c x sc)
+        = buildArgSc (suc s) var known not' n t (args :< (c, x)) sc
 
-    buildArgAlt : KnownVars vars (List Int) ->
-                  CaseAlt vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
-    buildArgAlt not' (ConCase n t sc)
-        = buildArgSc zero fc var ((MkVar el, t) :: known) not' n t [<] sc
-    buildArgAlt not' (DelayCase t a sc)
-        = let l = mkSizeOf [t, a]
-              ps' = map @{Compose} (substName zero var (TDelay fc LUnknown
-                                                       (Ref fc Bound t)
-                                                       (Ref fc Bound a))) ps in
-              buildArgs fc defs (weakensN l known)
-                                (weakensN l not') ps' sc
-    buildArgAlt not' (ConstCase c sc)
-        = do let ps' = map @{Compose} (substName zero var (PrimVal fc c)) ps
-             buildArgs fc defs known not' ps' sc
-    buildArgAlt not' (DefaultCase sc)
-        = buildArgs fc defs known not' ps sc
+    buildArgAlt : Name -> KnownVars vars (List Int) ->
+                  CaseAlt vars -> Core (List (SnocList (RigCount, ClosedTerm)))
+    buildArgAlt var not' (ConCase n t sc)
+        = buildArgSc zero var ((MkVar el, t) :: known) not' n t [<] sc
+    buildArgAlt var not' (DelayCase t a sc)
+        = let l = mkSizeOf [< t, a]
+              ps' = map @{Compose} (substName zero var
+                                              (TDelay fc LUnknown
+                                                      (Ref fc Bound t)
+                                                      (Ref fc Bound a))) ps in
+              buildArgs defs (weakenNs l known) (weakenNs l not') ps' sc
+    buildArgAlt var not' (ConstCase i sc)
+        = do let ps' = map @{Compose} (substName zero var (PrimVal fc i)) ps
+             buildArgs defs known not' ps' sc
+    buildArgAlt var not' (DefaultCase sc)
+        = buildArgs defs known not' ps sc
 
-    buildArgsAlt : KnownVars vars (List Int) -> List (CaseAlt vars) ->
-                   Core (List (Scopeable (RigCount, ClosedTerm)))
-    buildArgsAlt not' [] = pure []
-    buildArgsAlt not' (c@(ConCase _ t _) :: cs)
-        = pure $ !(buildArgAlt not' c) ++
-                 !(buildArgsAlt (addNot el t not') cs)
-    buildArgsAlt not' (c :: cs)
-        = pure $ !(buildArgAlt not' c) ++ !(buildArgsAlt not' cs)
+    buildArgsAlt : Name -> KnownVars vars (List Int) -> List (CaseAlt vars) ->
+                   Core (List (SnocList (RigCount, ClosedTerm)))
+    buildArgsAlt var not' [] = pure []
+    buildArgsAlt var not' (c@(ConCase _ t _) :: cs)
+        = pure $ !(buildArgAlt var not' c) ++
+                 !(buildArgsAlt var (addNot el t not') cs)
+    buildArgsAlt var not' (c :: cs)
+        = pure $ !(buildArgAlt var not' c) ++ !(buildArgsAlt var not' cs)
 
-buildArgs fc defs known not ps (STerm _ vs)
-    = pure [] -- matched, so return nothing
-buildArgs fc defs known not ps (TUnmatched msg)
+buildArgs defs known not ps (Unmatched _ msg)
     = pure [ps] -- unmatched, so return it
-buildArgs fc defs known not ps Impossible
-    = pure [] -- not a possible match, so return nothing
+buildArgs defs known not ps _
+    = pure [] -- matched, or not possible, so return nothing
 
 -- Traverse a case tree and return pattern clauses which are not
 -- matched. These might still be invalid patterns, or patterns which are covered
@@ -359,16 +360,16 @@ buildArgs fc defs known not ps Impossible
 export
 getMissing : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
-             FC -> Name -> CaseTree vars ->
+             FC -> Name -> Term vars ->
              Core (List ClosedTerm)
 getMissing fc n ctree
    = do defs <- get Ctxt
         let psIn = map ((top,) . Ref fc Bound) vars
-        patss <- buildArgs fc defs [] [] psIn ctree
+        patss <- buildArgs defs [] [] psIn ctree
         let pats = concat patss
         unless (null pats) $
           logC "coverage.missing" 20 $ map (join "\n") $
-            flip traverse pats $ \ pat =>
+            flip traverseSnocList pats $ \ pat =>
               show <$> toFullNames pat
         pure (map (applySpine fc (Ref fc Func n)) patss)
 

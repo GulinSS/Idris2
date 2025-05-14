@@ -885,6 +885,18 @@ mapTermM f = goTerm where
     goTerm (Bind fc x bd sc) = f =<< Bind fc x <$> traverse goTerm bd <*> goTerm sc
     goTerm (App fc fn c arg) = f =<< App fc <$> goTerm fn <*> pure c <*> goTerm arg
     goTerm (As fc u as pat) = f =<< As fc u <$> goTerm as <*> goTerm pat
+    goTerm (Case fc t c sc sct alts)
+        = f =<< Case fc t c <$> goTerm sc <*> goTerm sct <*> traverse goAlt alts
+      where
+        goScope : {vars : _} -> CaseScope vars -> Core (CaseScope vars)
+        goScope (RHS tm) = pure $ RHS !(goTerm tm)
+        goScope (Arg c x sc) = pure $ Arg c x !(goScope sc)
+
+        goAlt : {vars : _} -> CaseAlt vars -> Core (CaseAlt vars)
+        goAlt (ConCase n t sc) = pure $ ConCase n t !(goScope sc)
+        goAlt (DelayCase t a sc) = pure $ DelayCase t a !(goTerm sc)
+        goAlt (ConstCase c tm) = pure $ ConstCase c !(goTerm tm)
+        goAlt (DefaultCase tm) = pure $ DefaultCase !(goTerm tm)
     goTerm (TDelayed fc la d) = f =<< TDelayed fc la <$> goTerm d
     goTerm (TDelay fc la ty arg) = f =<< TDelay fc la <$> goTerm ty <*> goTerm arg
     goTerm (TForce fc la t) = f =<< TForce fc la <$> goTerm t

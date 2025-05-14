@@ -374,6 +374,7 @@ mutual
            (as', _, _) <- lcheck rig erase env as
            (pat', pty, u) <- lcheck rig erase env pat
            pure (As fc s as' pat', pty, u)
+  lcheck rig erase env (Case fc t r sc scty alts) = ?lcheckCase
   lcheck rig erase env (TDelayed fc r ty)
       = do log "quantity" 15 "lcheck Delayed"
            (ty', _, u) <- lcheck rig erase env ty

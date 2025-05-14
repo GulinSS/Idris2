@@ -3,7 +3,6 @@ module Core.Normalise.Convert
 import public Core.Normalise.Eval
 import public Core.Normalise.Quote
 
-import Core.Case.CaseTree
 import Core.Context
 import Core.Core
 import Core.Env
@@ -69,43 +68,6 @@ interface Convert tm where
   convertInf defs env tm tm'
       = do q <- newRef QVar 0
            convGen q True defs env tm tm'
-
-tryUpdate : {vars, vars' : _} ->
-            List (Var vars, Var vars') ->
-            Term vars -> Maybe (Term vars')
-tryUpdate ms (Local fc l idx p)
-    = do MkVar p' <- findIdx ms idx
-         pure $ Local fc l _ p'
-tryUpdate ms (Ref fc nt n) = pure $ Ref fc nt n
-tryUpdate ms (Meta fc n i args) = pure $ Meta fc n i !(traverse @{Compose} (tryUpdate ms) args)
-tryUpdate ms (Bind fc x b sc)
-    = do b' <- tryUpdateB b
-         pure $ Bind fc x b' !(tryUpdate (map weakenP ms) sc)
-  where
-    tryUpdatePi : PiInfo (Term vars) -> Maybe (PiInfo (Term vars'))
-    tryUpdatePi Explicit = pure Explicit
-    tryUpdatePi Implicit = pure Implicit
-    tryUpdatePi AutoImplicit = pure AutoImplicit
-    tryUpdatePi (DefImplicit t) = pure $ DefImplicit !(tryUpdate ms t)
-
-    tryUpdateB : Binder (Term vars) -> Maybe (Binder (Term vars'))
-    tryUpdateB (Lam fc r p t) = pure $ Lam fc r !(tryUpdatePi p) !(tryUpdate ms t)
-    tryUpdateB (Let fc r v t) = pure $ Let fc r !(tryUpdate ms v) !(tryUpdate ms t)
-    tryUpdateB (Pi fc r p t) = pure $ Pi fc r !(tryUpdatePi p) !(tryUpdate ms t)
-    tryUpdateB _ = Nothing
-
-    weakenP : {n : _} -> (Var vars, Var vars') ->
-              (Var (vars :< n), Var (vars' :< n))
-    weakenP (v, vs) = (weaken v, weaken vs)
-tryUpdate ms (App fc f c a) = pure $ App fc !(tryUpdate ms f) c !(tryUpdate ms a)
-tryUpdate ms (As fc s a p) = pure $ As fc s !(tryUpdate ms a) !(tryUpdate ms p)
-tryUpdate ms (TDelayed fc r tm) = pure $ TDelayed fc r !(tryUpdate ms tm)
-tryUpdate ms (TDelay fc r ty tm) = pure $ TDelay fc r !(tryUpdate ms ty) !(tryUpdate ms tm)
-tryUpdate ms (TForce fc r tm) = pure $ TForce fc r !(tryUpdate ms tm)
-tryUpdate ms (PrimVal fc c) = pure $ PrimVal fc c
-tryUpdate ms (Erased fc a) = Erased fc <$> traverse (tryUpdate ms) a
-tryUpdate ms (Unmatched fc str) = pure $ Unmatched fc str
-tryUpdate ms (TType fc u) = pure $ TType fc u
 
 mutual
   allConvNF : {auto c : Ref Ctxt Defs} ->

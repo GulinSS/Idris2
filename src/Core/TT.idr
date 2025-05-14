@@ -420,6 +420,9 @@ resolveRef {outer} {done} p q (Add {xs} new old bs) fc n
           rewrite sym $ appendAssociative xs (ScopeSingle new) done
           resolveRef p (sucR q) bs fc n
 
+mkLocalsAlt : SizeOf outer -> Bounds bound ->
+              CaseAlt (vars ++ outer) -> CaseAlt (vars ++ (bound ++ outer))
+
 mkLocals : SizeOf outer -> Bounds bound ->
            Term (vars ++ outer) -> Term (vars ++ (bound ++ outer))
 mkLocals outer bs (Local fc r idx p)
@@ -441,6 +444,9 @@ mkLocals outer bs (App fc fn c arg)
     = App fc (mkLocals outer bs fn) c (mkLocals outer bs arg)
 mkLocals outer bs (As fc s as tm)
     = As fc s (mkLocals outer bs as) (mkLocals outer bs tm)
+mkLocals outer bs (Case fc t r sc scTy alts)
+    = Case fc t r (mkLocals outer bs sc) (mkLocals outer bs scTy)
+           (map (mkLocalsAlt outer bs) alts)
 mkLocals outer bs (TDelayed fc x y)
     = TDelayed fc x (mkLocals outer bs y)
 mkLocals outer bs (TDelay fc x t y)
@@ -453,6 +459,20 @@ mkLocals outer bs (Erased fc Placeholder) = Erased fc Placeholder
 mkLocals outer bs (Erased fc (Dotted t)) = Erased fc (Dotted (mkLocals outer bs t))
 mkLocals outer bs (Unmatched fc u) = Unmatched fc u
 mkLocals outer bs (TType fc u) = TType fc u
+
+mkLocalsCaseScope
+    : SizeOf outer -> Bounds bound ->
+      CaseScope (vars ++ outer) -> CaseScope (vars ++ (bound ++ outer))
+mkLocalsCaseScope outer bs (RHS tm) = RHS (mkLocals outer bs tm)
+mkLocalsCaseScope outer bs (Arg r x scope)
+    = Arg r x (mkLocalsCaseScope (suc outer) bs scope)
+
+mkLocalsAlt outer bs (ConCase n t scope)
+    = ConCase n t (mkLocalsCaseScope outer bs scope)
+mkLocalsAlt outer bs (DelayCase ty arg rhs)
+    = DelayCase ty arg (mkLocals (suc (suc outer)) bs rhs)
+mkLocalsAlt outer bs (ConstCase c rhs) = ConstCase c (mkLocals outer bs rhs)
+mkLocalsAlt outer bs (DefaultCase rhs) = DefaultCase (mkLocals outer bs rhs)
 
 export
 refsToLocals : Bounds bound -> Term vars -> Term (vars ++ bound)
@@ -506,6 +526,22 @@ addMetas res ns (Bind fc x b scope)
 addMetas res ns (App fc fn _ arg)
     = addMetas res (addMetas res ns fn) arg
 addMetas res ns (As fc s as tm) = addMetas res ns tm
+addMetas res ns (Case fc t c sc scty alts)
+    = addMetaAlts (addMetas res ns sc) alts
+  where
+    addMetaScope : forall vars . NameMap Bool -> CaseScope vars -> NameMap Bool
+    addMetaScope ns (RHS tm) = addMetas res ns tm
+    addMetaScope ns (Arg c x sc) = addMetaScope ns sc
+
+    addMetaAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
+    addMetaAlt ns (ConCase n t sc) = addMetaScope ns sc
+    addMetaAlt ns (DelayCase ty arg tm) = addMetas res ns tm
+    addMetaAlt ns (ConstCase c tm) = addMetas res ns tm
+    addMetaAlt ns (DefaultCase tm) = addMetas res ns tm
+
+    addMetaAlts : NameMap Bool -> List (CaseAlt vars) -> NameMap Bool
+    addMetaAlts ns [] = ns
+    addMetaAlts ns (t :: ts) = addMetaAlts (addMetaAlt ns t) ts
 addMetas res ns (TDelayed fc x y) = addMetas res ns y
 addMetas res ns (TDelay fc x t y)
     = addMetas res (addMetas res ns t) y
@@ -542,6 +578,27 @@ addRefs ua at ns (App _ (App _ (Ref fc _ name) _ x) _ y)
 addRefs ua at ns (App fc fn _ arg)
     = addRefs ua at (addRefs ua at ns fn) arg
 addRefs ua at ns (As fc s as tm) = addRefs ua at ns tm
+addRefs ua at ns (Case fc t c sc scty alts)
+    = let ns' = case t of
+                 -- if it came from a case block, record which one so that
+                 -- we can know if it's a 'case' under an assert_total
+                     CaseBlock n => insert n ua ns
+                     _ => ns in
+          addRefAlts (addRefs ua at ns' sc) alts
+  where
+    addRefScope : forall vars . NameMap Bool -> CaseScope vars -> NameMap Bool
+    addRefScope ns (RHS tm) = addRefs ua at ns tm
+    addRefScope ns (Arg c x sc) = addRefScope ns sc
+
+    addRefAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
+    addRefAlt ns (ConCase n t sc) = addRefScope ns sc
+    addRefAlt ns (DelayCase ty arg tm) = addRefs ua at ns tm
+    addRefAlt ns (ConstCase c tm) = addRefs ua at ns tm
+    addRefAlt ns (DefaultCase tm) = addRefs ua at ns tm
+
+    addRefAlts : NameMap Bool -> List (CaseAlt vars) -> NameMap Bool
+    addRefAlts ns [] = ns
+    addRefAlts ns (t :: ts) = addRefAlts (addRefAlt ns t) ts
 addRefs ua at ns (TDelayed fc x y) = addRefs ua at ns y
 addRefs ua at ns (TDelay fc x t y)
     = addRefs ua at (addRefs ua at ns t) y

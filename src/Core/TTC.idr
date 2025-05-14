@@ -1,7 +1,6 @@
 module Core.TTC
 
 import Core.Binary.Prims
-import Core.Case.CaseTree
 import Core.CompileExpr
 import Core.Context
 import Core.Core
@@ -278,6 +277,17 @@ getName Z (xs :< x) = Just x
 getName (S k) (xs :< x) = getName k xs
 getName _ [<] = Nothing
 
+export
+TTC CaseType where
+  toBuf b PatMatch = tag 0
+  toBuf b (CaseBlock n) = do tag 1; toBuf b n
+
+  fromBuf b
+      = case !getTag of
+              0 => pure PatMatch
+              1 => do n <- fromBuf b; pure (CaseBlock n)
+              _ => corrupt "CaseType"
+
 mutual
   export
   {vars : _} -> TTC (Binder (Term vars)) where
@@ -336,28 +346,32 @@ mutual
                                    toBuf b fn
                                    toBuf b c
                                    toBuf b arg
-                  args => do tag 12
+                  args => do tag 13
                              toBuf b fn
                              toBuf b args
     toBuf b (As fc s as tm)
         = do tag 5;
              toBuf b as; toBuf b s; toBuf b tm
+    toBuf b (Case fc t c sc scty alts)
+        = do tag 6
+             toBuf b t; toBuf b c; toBuf b sc; toBuf b scty
+             toBuf b alts
     toBuf b (TDelayed fc r tm)
-        = do tag 6;
+        = do tag 7;
              toBuf b r; toBuf b tm
     toBuf b (TDelay fc r ty tm)
-        = do tag 7;
+        = do tag 8;
              toBuf b r; toBuf b ty; toBuf b tm
     toBuf b (TForce fc r tm)
-        = do tag 8;
+        = do tag 9;
              toBuf b r; toBuf b tm
     toBuf b (PrimVal fc c)
-        = do tag 9;
+        = do tag 10;
              toBuf b c
     toBuf b (Erased fc _)
-        = tag 10
+        = tag 11
     toBuf b (Unmatched fc u)
-        = do tag 13; toBuf b u
+        = do tag 12; toBuf b u
     toBuf b (TType fc u)
         = do tag 14; toBuf b u
 
@@ -382,18 +396,21 @@ mutual
                        pure (App emptyFC fn c arg)
                5 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
                        pure (As emptyFC s as tm)
-               6 => do lr <- fromBuf b; tm <- fromBuf b
+               6 => do t <- fromBuf b; c <- fromBuf b; sc <- fromBuf b; scty <- fromBuf b
+                       alts <- fromBuf b
+                       pure (Case emptyFC t c sc scty alts)
+               7 => do lr <- fromBuf b; tm <- fromBuf b
                        pure (TDelayed emptyFC lr tm)
-               7 => do lr <- fromBuf b;
+               8 => do lr <- fromBuf b;
                        ty <- fromBuf b; tm <- fromBuf b
                        pure (TDelay emptyFC lr ty tm)
-               8 => do lr <- fromBuf b; tm <- fromBuf b
+               9 => do lr <- fromBuf b; tm <- fromBuf b
                        pure (TForce emptyFC lr tm)
-               9 => do c <- fromBuf b
-                       pure (PrimVal emptyFC c)
-               10 => pure (Erased emptyFC Placeholder)
-               11 => do u <- fromBuf b; pure (TType emptyFC u)
-               12 => do fn <- fromBuf b
+               10 => do c <- fromBuf b
+                        pure (PrimVal emptyFC c)
+               11 => pure (Erased emptyFC Placeholder)
+               12 => do u <- fromBuf b; pure (TType emptyFC u)
+               13 => do fn <- fromBuf b
                         args <- fromBuf b
                         pure (apply emptyFC fn args)
                idxp => do c <- fromBuf b
@@ -402,78 +419,9 @@ mutual
                               | Nothing => corrupt "Term"
                           pure (Local {name} emptyFC c idx (mkPrf idx))
 
-export
-TTC Pat where
-  toBuf b (PAs fc x y)
-      = do tag 0; toBuf b fc; toBuf b x; toBuf b y
-  toBuf b (PCon fc x t arity xs)
-      = do tag 1; toBuf b fc; toBuf b x; toBuf b t; toBuf b arity; toBuf b xs
-  toBuf b (PTyCon fc x arity xs)
-      = do tag 2; toBuf b fc; toBuf b x; toBuf b arity; toBuf b xs
-  toBuf b (PConst fc c)
-      = do tag 3; toBuf b fc; toBuf b c
-  toBuf b (PArrow fc x s t)
-      = do tag 4; toBuf b fc; toBuf b x; toBuf b s; toBuf b t
-  toBuf b (PDelay fc x t y)
-      = do tag 5; toBuf b fc; toBuf b x; toBuf b t; toBuf b y
-  toBuf b (PLoc fc x)
-      = do tag 6; toBuf b fc; toBuf b x
-  toBuf b (PUnmatchable fc x)
-      = do tag 7; toBuf b fc; toBuf b x
-
-  fromBuf b
-      = case !getTag of
-             0 => do fc <- fromBuf b; x <- fromBuf b;
-                     y <- fromBuf b
-                     pure (PAs fc x y)
-             1 => do fc <- fromBuf b; x <- fromBuf b
-                     t <- fromBuf b; arity <- fromBuf b
-                     xs <- fromBuf b
-                     pure (PCon fc x t arity xs)
-             2 => do fc <- fromBuf b; x <- fromBuf b
-                     arity <- fromBuf b
-                     xs <- fromBuf b
-                     pure (PTyCon fc x arity xs)
-             3 => do fc <- fromBuf b; c <- fromBuf b
-                     pure (PConst fc c)
-             4 => do fc <- fromBuf b; x <- fromBuf b
-                     s <- fromBuf b; t <- fromBuf b
-                     pure (PArrow fc x s t)
-             5 => do fc <- fromBuf b; x <- fromBuf b;
-                     t <- fromBuf b; y <- fromBuf b
-                     pure (PDelay fc x t y)
-             6 => do fc <- fromBuf b; x <- fromBuf b
-                     pure (PLoc fc x)
-             7 => do fc <- fromBuf b; x <- fromBuf b
-                     pure (PUnmatchable fc x)
-             _ => corrupt "Pat"
-
-mutual
-  export
-  {vars : _} -> TTC (CaseTree vars) where
-    toBuf b (Case {name} idx x scTy xs)
-        = do tag 0; toBuf b name; toBuf b idx; toBuf b xs
-    toBuf b (STerm _ x)
-        = do tag 1; toBuf b x
-    toBuf b (TUnmatched msg)
-        = do tag 2; toBuf b msg
-    toBuf b Impossible = tag 3
-
-    fromBuf b
-        = case !getTag of
-               0 => do name <- fromBuf b; idx <- fromBuf b
-                       xs <- fromBuf b
-                       pure (Case {name} idx (mkPrf idx) (Erased emptyFC Placeholder) xs)
-               1 => do x <- fromBuf b
-                       pure (STerm 0 x)
-               2 => do msg <- fromBuf b
-                       pure (TUnmatched msg)
-               3 => pure Impossible
-               _ => corrupt "CaseTree"
-
   export
   {vars : _} -> TTC (CaseScope vars) where
-    toBuf b(RHS tm) = do tag 0; toBuf b tm
+    toBuf b (RHS tm) = do tag 0; toBuf b tm
     toBuf b (Arg c x sc) = do tag 1; toBuf b c; toBuf b x; toBuf b sc
 
     fromBuf b

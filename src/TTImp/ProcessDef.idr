@@ -2,9 +2,9 @@ module TTImp.ProcessDef
 
 import Core.Case.CaseBuilder
 import Core.Case.CaseTree
-import Core.Case.CaseTree.Pretty
 import Core.Context
 import Core.Context.Log
+import Core.Context.Pretty
 import Core.Core
 import Core.Coverage
 import Core.Env
@@ -812,7 +812,7 @@ mkRunTime fc n
                                                 pure $ addErrorCase pats'
                            _ => pure pats'
 
-           (rargs ** (tree_rt, _)) <- getPMDef (location gdef) RunTime n ty clauses
+           (tree_rt, _) <- getPMDef (location gdef) RunTime n ty clauses
            logC "compile.casetree" 5 $ do
              tree_rt <- toFullNames tree_rt
              pure $ unlines
@@ -822,7 +822,7 @@ mkRunTime fc n
                ]
            log "compile.casetree" 10 $ "tree_rt " ++ show tree_rt
            ignore $ addDef n $
-                       { definition := Function r tree_ct ?tree_rt (Just pats)
+                       { definition := Function r tree_ct tree_rt (Just pats)
                        } gdef
   where
     -- check if the flags contain explicit inline or noinline directives:
@@ -992,7 +992,7 @@ processDef opts nest env fc n_in cs_in
 
          let pats = rights cs
 
-         (cargs ** (tree_ct, unreachable)) <-
+         (tree_ct, unreachable) <-
              logTime 3 ("Building compile time case tree for " ++ show n) $
                 getPMDef fc (CompileTime mult) n ty pats
 
@@ -1011,11 +1011,11 @@ processDef opts nest env fc n_in cs_in
          -- but we'll rebuild that in a later pass once all the case
          -- blocks etc are resolved
          ignore $ addDef (Resolved nidx)
-                  ({ definition := Function pi ?tree_ct ?tree_ct_2 (Just pats)
+                  ({ definition := Function pi tree_ct tree_ct (Just pats)
                    } gdef)
 
          when (collapseDefault (visibility gdef) == Public) $
-             do let rmetas = CaseTree.getMetas tree_ct
+             do let rmetas = getMetas tree_ct
                 log "declare.def" 10 $ "Saving from " ++ show n ++ ": " ++ show (keys rmetas)
                 traverse_ addToSave (keys rmetas)
          when (isUserName n && collapseDefault (visibility gdef) /= Private) $
@@ -1128,7 +1128,7 @@ processDef opts nest env fc n_in cs_in
                $ "Using clauses :"
                :: map (("  " ++) . show) !(traverse toFullNames covcs')
              let covcs = mapMaybe id covcs'
-             (_ ** (ctree, _)) <-
+             (ctree, _) <-
                  getPMDef fc (CompileTime mult) (Resolved n) ty covcs
              logC "declare.def" 3 $ do pure $ "Working from " ++ show !(toFullNames ctree)
              missCase <- if any catchAll covcs

@@ -200,6 +200,24 @@ swapVars {vs} (Bind fc x b scope)
     = Bind fc x (map swapVars b) (swapVars {vs = vs :< x} scope)
 swapVars (App fc fn c arg) = App fc (swapVars fn) c (swapVars arg)
 swapVars (As fc s nm pat) = As fc s (swapVars nm) (swapVars pat)
+swapVars (Case fc ct c sc scty alts)
+    = Case fc ct c (swapVars sc) (swapVars scty) (map swapAlt alts)
+  where
+    swapScope : {vs : _} -> forall ys, x, y .
+              CaseScope (ys :< y :< x ++ vs) ->
+              CaseScope (ys :< x :< y ++ vs)
+    swapScope (RHS tm) = RHS (swapVars tm)
+    swapScope {vs} (Arg c x sc) = Arg c x (swapScope {vs = vs :< x} sc)
+
+    swapAlt : {vs : _} -> forall ys, x, y .
+              CaseAlt (ys :< y :< x ++ vs) ->
+              CaseAlt (ys :< x :< y ++ vs)
+    swapAlt (ConCase n t sc) = ConCase n t (swapScope sc)
+    swapAlt {vs} (DelayCase t a tm)
+        = DelayCase t a (swapVars {vs = vs :< t :< a} tm)
+    swapAlt (ConstCase c tm) = ConstCase c (swapVars tm)
+    swapAlt (DefaultCase tm) = DefaultCase (swapVars tm)
+
 swapVars (TDelayed fc x tm) = TDelayed fc x (swapVars tm)
 swapVars (TDelay fc x ty tm) = TDelay fc x (swapVars ty) (swapVars tm)
 swapVars (TForce fc r tm) = TForce fc r (swapVars tm)

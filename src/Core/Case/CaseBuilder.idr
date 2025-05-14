@@ -1026,7 +1026,7 @@ mutual
        = maybe (pure (TUnmatched "No patterns"))
                pure err
   match {todo = []} fc fn phase ((MkPatClause pvars [] pid (Erased _ Impossible)) :: _) err
-       = pure Impossible
+       = pure TImpossible
   match {todo = []} fc fn phase ((MkPatClause pvars [] pid rhs) :: _) err
        = pure $ STerm pid rhs
 
@@ -1039,32 +1039,32 @@ mutual
                Core (CaseTree vars)
   caseGroups {vars} fc fn phase el ty gs errorCase
       = do g <- altGroups gs
-           pure (Case _ el (resolveNames vars ty) g)
+           pure (TCase _ el (resolveNames vars ty) g)
     where
       mkScope : forall vars . (vs : SnocList Name) ->
                               (ms : SnocList RigCount) ->
-                              CaseScope (vars ++ vs) ->
-                CaseScope vars
+                              TCaseScope (vars ++ vs) ->
+                TCaseScope vars
       mkScope [<] _ rhs = rhs
-      mkScope (sx :< y) (ms :< c) rhs = mkScope sx ms (Arg c y rhs)
-      mkScope (sx :< y) _ rhs = mkScope sx [<] (Arg top y rhs)
+      mkScope (sx :< y) (ms :< c) rhs = mkScope sx ms (TArg c y rhs)
+      mkScope (sx :< y) _ rhs = mkScope sx [<] (TArg top y rhs)
 
-      altGroups : List (Group todo vars) -> Core (List (CaseAlt vars))
+      altGroups : List (Group todo vars) -> Core (List (TCaseAlt vars))
       altGroups [] = maybe (pure [])
-                           (\e => pure [DefaultCase e])
+                           (\e => pure [TDefaultCase e])
                            errorCase
       altGroups (ConGroup {newargs} cn tag rigs rest :: cs)
           = do crest <- match fc fn phase rest (map (weakensN (mkSizeOf newargs)) errorCase)
                cs' <- altGroups cs
-               pure (ConCase cn tag (mkScope (cast newargs) ?rigcount (rewrite sym $ fishAsSnocAppend vars newargs in RHS crest)) :: cs')
+               pure (TConCase cn tag (mkScope (cast newargs) (cast rigs) (rewrite sym $ fishAsSnocAppend vars newargs in TRHS crest)) :: cs')
       altGroups (DelayGroup {tyarg} {valarg} rest :: cs)
           = do crest <- match fc fn phase rest (map (weakenNs (mkSizeOf [<tyarg, valarg])) errorCase)
                cs' <- altGroups cs
-               pure (DelayCase tyarg valarg crest :: cs')
+               pure (TDelayCase tyarg valarg crest :: cs')
       altGroups (ConstGroup c rest :: cs)
           = do crest <- match fc fn phase rest errorCase
                cs' <- altGroups cs
-               pure (ConstCase c crest :: cs')
+               pure (TConstCase c crest :: cs')
 
   conRule : {a, vars, todo : _} ->
             {auto i : Ref PName Int} ->
@@ -1284,18 +1284,18 @@ simpleCase fc phase fn ty def clauses
          patCompile fc fn phase ty ps def
 
 mutual
-  findReachedAlts : CaseAlt ns' -> List Int
-  findReachedAlts (ConCase _ _ t) = findReachedCaseScope t
-  findReachedAlts (DelayCase _ _ t) = findReached t
-  findReachedAlts (ConstCase _ t) = findReached t
-  findReachedAlts (DefaultCase t) = findReached t
+  findReachedAlts : TCaseAlt ns' -> List Int
+  findReachedAlts (TConCase _ _ t) = findReachedCaseScope t
+  findReachedAlts (TDelayCase _ _ t) = findReached t
+  findReachedAlts (TConstCase _ t) = findReached t
+  findReachedAlts (TDefaultCase t) = findReached t
 
-  findReachedCaseScope : CaseScope a -> List Int
-  findReachedCaseScope (RHS tm) = findReached tm
-  findReachedCaseScope (Arg _ _ cs) = findReachedCaseScope cs
+  findReachedCaseScope : TCaseScope a -> List Int
+  findReachedCaseScope (TRHS tm) = findReached tm
+  findReachedCaseScope (TArg _ _ cs) = findReachedCaseScope cs
 
   findReached : CaseTree ns -> List Int
-  findReached (Case _ _ _ alts) = concatMap findReachedAlts alts
+  findReached (TCase _ _ _ alts) = concatMap findReachedAlts alts
   findReached (STerm i _) = [i]
   findReached _ = []
 
@@ -1306,7 +1306,7 @@ mutual
 -- followed by a removal of duplicate cases there is one _fewer_ total case alts.
 identifyUnreachableDefaults : {auto c : Ref Ctxt Defs} ->
                               {vars : _} ->
-                              FC -> Defs -> NF vars -> List (CaseAlt vars) ->
+                              FC -> Defs -> NF vars -> List (TCaseAlt vars) ->
                               Core (SortedSet Int)
 -- Leave it alone if it's a primitive type though, since we need the catch
 -- all case there
@@ -1326,15 +1326,15 @@ identifyUnreachableDefaults fc defs nfty cs
              "Marking the following clause indices as unreachable under the current branch of the tree: " ++ (show extraClauseIdxs')
          pure extraClauseIdxs'
   where
-    rep : CaseAlt vars -> Core (List (CaseAlt vars))
-    rep (DefaultCase sc)
+    rep : TCaseAlt vars -> Core (List (TCaseAlt vars))
+    rep (TDefaultCase sc)
         = do allCons <- getCons defs nfty
              pure (map (mkAlt fc sc) allCons)
     rep c = pure [c]
 
-    dropRep : List (CaseAlt vars) -> SortedSet Int -> (List (CaseAlt vars), SortedSet Int)
+    dropRep : List (TCaseAlt vars) -> SortedSet Int -> (List (TCaseAlt vars), SortedSet Int)
     dropRep [] extra = ([], extra)
-    dropRep (c@(ConCase n t sc) :: rest) extra
+    dropRep (c@(TConCase n t sc) :: rest) extra
           -- assumption is that there's no defaultcase in 'rest' because
           -- we've just removed it
         = let (filteredClauses, extraCases) = partition (not . tagIs t) rest
@@ -1356,23 +1356,23 @@ findExtraDefaults : {auto c : Ref Ctxt Defs} ->
                    {vars : _} ->
                    FC -> Defs -> CaseTree vars ->
                    Core (List Int)
-findExtraDefaults fc defs ctree@(Case {name = var} idx el ty altsIn)
+findExtraDefaults fc defs ctree@(TCase {name = var} idx el ty altsIn)
   = do let fenv = mkEnv fc _
        nfty <- nf defs fenv ty
        extraCases <- identifyUnreachableDefaults fc defs nfty altsIn
        extraCases' <- concat <$> traverse findExtraAlts altsIn
        pure (Prelude.toList extraCases ++ extraCases')
   where
-    findExtraAltsScope : {vars : _} -> CaseScope vars -> Core (List Int)
-    findExtraAltsScope (RHS tm) = findExtraDefaults fc defs tm
-    findExtraAltsScope (Arg c x sc) = findExtraAltsScope sc
+    findExtraAltsScope : {vars : _} -> TCaseScope vars -> Core (List Int)
+    findExtraAltsScope (TRHS tm) = findExtraDefaults fc defs tm
+    findExtraAltsScope (TArg c x sc) = findExtraAltsScope sc
 
-    findExtraAlts : CaseAlt vars -> Core (List Int)
-    findExtraAlts (ConCase x tag ctree') = findExtraAltsScope ctree'
-    findExtraAlts (DelayCase x arg ctree') = findExtraDefaults fc defs ctree'
-    findExtraAlts (ConstCase x ctree') = findExtraDefaults fc defs ctree'
+    findExtraAlts : TCaseAlt vars -> Core (List Int)
+    findExtraAlts (TConCase x tag ctree') = findExtraAltsScope ctree'
+    findExtraAlts (TDelayCase x arg ctree') = findExtraDefaults fc defs ctree'
+    findExtraAlts (TConstCase x ctree') = findExtraDefaults fc defs ctree'
     -- already handled defaults by elaborating them to all possible cons
-    findExtraAlts (DefaultCase ctree') = pure []
+    findExtraAlts (TDefaultCase ctree') = pure []
 
 findExtraDefaults fc defs ctree = pure []
 
@@ -1380,45 +1380,45 @@ findExtraDefaults fc defs ctree = pure []
 export
 getPMDef : {auto c : Ref Ctxt Defs} ->
            FC -> Phase -> Name -> ClosedTerm -> List Clause ->
-           Core (args ** (CaseTree args, List Clause))
--- If there's no clauses, make a definition with the right number of arguments
--- for the type, which we can use in coverage checking to ensure that one of
--- the arguments has an empty type
-getPMDef fc phase fn ty []
-    = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
-         defs <- get Ctxt
-         pure (cast !(getArgs 0 !(nf defs ScopeEmpty ty)) ** (TUnmatched "No clauses", []))
-  where
-    getArgs : Int -> ClosedNF -> Core (List Name)
-    getArgs i (NBind fc x (Pi _ _ _ _) sc)
-        = do defs <- get Ctxt
-             sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
-             pure (MN "arg" i :: !(getArgs i sc'))
-    getArgs i _ = pure []
-getPMDef fc phase fn ty clauses
-    = do defs <- get Ctxt
-         let cs = map (toClosed defs) (labelPat 0 clauses)
-         (_ ** t) <- simpleCase fc phase fn ty Nothing cs
-         logC "compile.casetree.getpmdef" 20 $
-           pure $ "Compiled to: " ++ show !(toFullNames t)
-         let reached = findReached t
-         log "compile.casetree.clauses" 25 $
-           "Reached clauses: " ++ (show reached)
-         extraDefaults <- findExtraDefaults fc defs t
-         let unreachable = getUnreachable 0 (reached \\ extraDefaults) clauses
-         pure (_ ** (t, unreachable))
-  where
-    getUnreachable : Int -> List Int -> List Clause -> List Clause
-    getUnreachable i is [] = []
-    getUnreachable i is (c :: cs)
-        = if i `elem` is
-             then getUnreachable (i + 1) is cs
-             else c :: getUnreachable (i + 1) is cs
+           Core (ClosedTerm, List Clause)
+-- -- If there's no clauses, make a definition with the right number of arguments
+-- -- for the type, which we can use in coverage checking to ensure that one of
+-- -- the arguments has an empty type
+-- getPMDef fc phase fn ty []
+--     = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
+--          defs <- get Ctxt
+--          pure (cast !(getArgs 0 !(nf defs ScopeEmpty ty)) ** (TUnmatched "No clauses", []))
+--   where
+--     getArgs : Int -> ClosedNF -> Core (List Name)
+--     getArgs i (NBind fc x (Pi _ _ _ _) sc)
+--         = do defs <- get Ctxt
+--              sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+--              pure (MN "arg" i :: !(getArgs i sc'))
+--     getArgs i _ = pure []
+-- getPMDef fc phase fn ty clauses
+--     = do defs <- get Ctxt
+--          let cs = map (toClosed defs) (labelPat 0 clauses)
+--          (_ ** t) <- simpleCase fc phase fn ty Nothing cs
+--          logC "compile.casetree.getpmdef" 20 $
+--            pure $ "Compiled to: " ++ show !(toFullNames t)
+--          let reached = findReached t
+--          log "compile.casetree.clauses" 25 $
+--            "Reached clauses: " ++ (show reached)
+--          extraDefaults <- findExtraDefaults fc defs t
+--          let unreachable = getUnreachable 0 (reached \\ extraDefaults) clauses
+--          pure (_ ** (t, unreachable))
+--   where
+--     getUnreachable : Int -> List Int -> List Clause -> List Clause
+--     getUnreachable i is [] = []
+--     getUnreachable i is (c :: cs)
+--         = if i `elem` is
+--              then getUnreachable (i + 1) is cs
+--              else c :: getUnreachable (i + 1) is cs
 
-    labelPat : Int -> List a -> List (String, a)
-    labelPat i [] = []
-    labelPat i (x :: xs) = ("pat" ++ show i ++ ":", x) :: labelPat (i + 1) xs
+--     labelPat : Int -> List a -> List (String, a)
+--     labelPat i [] = []
+--     labelPat i (x :: xs) = ("pat" ++ show i ++ ":", x) :: labelPat (i + 1) xs
 
-    toClosed : Defs -> (String, Clause) -> (ClosedTerm, ClosedTerm)
-    toClosed defs (pname, MkClause env lhs rhs)
-          = (close fc pname env lhs, close fc pname env rhs)
+--     toClosed : Defs -> (String, Clause) -> (ClosedTerm, ClosedTerm)
+--     toClosed defs (pname, MkClause env lhs rhs)
+--           = (close fc pname env lhs, close fc pname env rhs)

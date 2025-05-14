@@ -65,9 +65,9 @@ tryReplace ms (App fc f c a)
          a' <- tryReplace ms a
          pure (App fc f' c a')
 tryReplace ms (As fc s a p)
-    = do a' <- tryReplace ms a
-         p' <- tryReplace ms p
-         pure (As fc s a' p')
+    = Nothing -- No 'As' on RHS of a rule
+tryReplace ms (Case{})
+    = Nothing -- As for 'Bind', can't do this yet
 tryReplace ms (TDelayed fc r tm)
     = do tm' <- tryReplace ms tm
          pure (TDelayed fc r tm')

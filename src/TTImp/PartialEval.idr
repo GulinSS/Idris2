@@ -657,6 +657,8 @@ mutual
       = do n' <- quoteGenNF q defs bound env n
            pat' <- quoteGenNF q defs bound env pat
            pure (As fc s n' pat')
+  quoteGenNF q defs bound env (NCase fc t rig sc scTy alts)
+      = ?quoteGenNFCase
   quoteGenNF q defs bound env (NDelayed fc r arg)
       = do argQ <- quoteGenNF q defs bound env arg
            pure (TDelayed fc r argQ)

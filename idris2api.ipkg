@@ -52,7 +52,6 @@ modules =
     Core.Binary.Prims,
     Core.Case.CaseBuilder,
     Core.Case.CaseTree,
-    Core.Case.CaseTree.Pretty,
     Core.Case.Util,
     Core.CompileExpr,
     Core.CompileExpr.Pretty,

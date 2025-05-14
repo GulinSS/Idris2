@@ -102,6 +102,15 @@ Traversable WhyErased where
 -- Core Terms
 
 public export
+data CaseAlt : SnocList Name -> Type
+
+-- A 'Case' arises either from a top level pattern match, or a 'case' block,
+-- and it's useful to know the difference so we know when to stop reducing due
+-- to a blocked top level function
+public export
+data CaseType = PatMatch | CaseBlock Name
+
+public export
 data Term : Scoped where
      Local : FC -> (isLet : Maybe Bool) ->
              (idx : Nat) -> (0 p : IsVar name idx vars) -> Term vars
@@ -122,6 +131,10 @@ data Term : Scoped where
      -- names (Ref) and resolved names (Local) without having to define a
      -- special purpose thing. (But it'd be nice to tidy that up, nevertheless)
      As : FC -> UseSide -> (as : Term vars) -> (pat : Term vars) -> Term vars
+     Case : FC -> CaseType ->
+            RigCount -> (sc : Term vars) -> (scTy : Term vars) ->
+            List (CaseAlt vars) ->
+            Term vars
      -- Typed laziness annotations
      TDelayed : FC -> LazyReason -> Term vars -> Term vars
      TDelay : FC -> LazyReason -> (ty : Term vars) -> (arg : Term vars) -> Term vars
@@ -138,17 +151,45 @@ public export
 ClosedTerm : Type
 ClosedTerm = Term [<]
 
+public export
+data CaseScope : Scope -> Type where
+     RHS : Term vars -> CaseScope vars
+     Arg : RigCount -> (x : Name) -> CaseScope (vars :< x) -> CaseScope vars
+
+||| Case alternatives. Unlike arbitrary patterns, they can be at most
+||| one constructor deep.
+public export
+data CaseAlt : Scoped where
+     ||| Constructor for a data type; bind the arguments and subterms.
+     ConCase : Name -> (tag : Int) -> CaseScope vars -> CaseAlt vars
+     ||| Lazy match for the Delay type use for codata types
+     DelayCase : (ty : Name) -> (arg : Name) ->
+                 Term (vars :< ty :< arg) -> CaseAlt vars
+     ||| Match against a literal
+     ConstCase : Constant -> Term vars -> CaseAlt vars
+     ||| Catch-all case
+     DefaultCase : Term vars -> CaseAlt vars
+
+export
+isDefault : CaseAlt vars -> Bool
+isDefault (DefaultCase _) = True
+isDefault _ = False
+
 ------------------------------------------------------------------------
 -- Weakening
 
-export covering
+insertNamesAlt : SizeOf outer -> SizeOf ns ->
+                 CaseAlt (inner ++ outer) ->
+                 CaseAlt (inner ++ ns ++ outer)
+
+export
 insertNames : GenWeakenable Term
 insertNames out ns (Local fc r idx prf)
    = let MkNVar prf' = insertNVarNames out ns (MkNVar prf) in
      Local fc r _ prf'
 insertNames out ns (Ref fc nt name) = Ref fc nt name
 insertNames out ns (Meta fc name idx args)
-    = Meta fc name idx (map @{Compose} (insertNames out ns) args)
+    = Meta fc name idx (assert_total $ map @{Compose} (insertNames out ns) args)
 insertNames out ns (Bind fc x b scope)
     = Bind fc x (assert_total (map (insertNames out ns) b))
            (insertNames (suc out) ns scope)
@@ -156,6 +197,9 @@ insertNames out ns (App fc fn c arg)
     = App fc (insertNames out ns fn) c (insertNames out ns arg)
 insertNames out ns (As fc s as tm)
     = As fc s (insertNames out ns as) (insertNames out ns tm)
+insertNames out ns (Case fc t r sc scTy xs)
+    = Case fc t r (insertNames out ns sc) (insertNames out ns scTy)
+           (assert_total $ map (insertNamesAlt out ns) xs)
 insertNames out ns (TDelayed fc r ty) = TDelayed fc r (insertNames out ns ty)
 insertNames out ns (TDelay fc r ty tm)
     = TDelay fc r (insertNames out ns ty) (insertNames out ns tm)
@@ -166,6 +210,21 @@ insertNames out ns (Erased fc Placeholder) = Erased fc Placeholder
 insertNames out ns (Erased fc (Dotted t)) = Erased fc (Dotted (insertNames out ns t))
 insertNames out ns (Unmatched fc x) = Unmatched fc x
 insertNames out ns (TType fc u) = TType fc u
+
+insertNamesScope : forall outer . SizeOf outer -> SizeOf ns ->
+              CaseScope (inner ++ outer) ->
+              CaseScope (inner ++ ns ++ outer)
+insertNamesScope out ns (RHS tm) = RHS (insertNames out ns tm)
+insertNamesScope out ns (Arg r x sc) = Arg r x (insertNamesScope (suc out) ns sc)
+
+insertNamesAlt out sns (ConCase n t scope)
+    = ConCase n t (insertNamesScope out sns scope)
+insertNamesAlt out ns (DelayCase ty arg scope)
+    = DelayCase ty arg (insertNames (suc (suc out)) ns scope)
+insertNamesAlt out ns (ConstCase c scope)
+    = ConstCase c (insertNames out ns scope)
+insertNamesAlt out ns (DefaultCase scope)
+    = DefaultCase (insertNames out ns scope)
 
 export
 compatTerm : CompatibleVars xs ys -> Term xs -> Term ys
@@ -192,98 +251,128 @@ compatTerm compat tm = believe_me tm -- no names in term, so it's identity
 -- compatTerm prf (Erased fc i) = Erased fc i
 -- compatTerm prf (TType fc) = TType fc
 
+export
+shrinkTerm : Shrinkable Term
 
-mutual
-  export
-  shrinkPi : Shrinkable (PiInfo . Term)
-  shrinkPi pinfo th
-    = assert_total
-    $ traverse (\ t => shrinkTerm t th) pinfo
+export
+shrinkPi : Shrinkable (PiInfo . Term)
+shrinkPi pinfo th
+  = assert_total
+  $ traverse (\ t => shrinkTerm t th) pinfo
 
-  export
-  shrinkBinder : Shrinkable (Binder . Term)
-  shrinkBinder binder th
-    = assert_total
-    $ traverse (\ t => shrinkTerm t th) binder
+export
+shrinkBinder : Shrinkable (Binder . Term)
+shrinkBinder binder th
+  = assert_total
+  $ traverse (\ t => shrinkTerm t th) binder
 
-  export
-  shrinkTerms : Shrinkable (List . Term)
-  shrinkTerms ts th
-    = assert_total
-    $ traverse (\ t => shrinkTerm t th) ts
+export
+shrinkTerms : Shrinkable (List . Term)
+shrinkTerms ts th
+  = assert_total
+  $ traverse (\ t => shrinkTerm t th) ts
 
-  export
-  shrinkTaggedTerms : Shrinkable (List . (RigCount,) . Term)
-  shrinkTaggedTerms ts th
-    = assert_total
-    $ traverse @{Compose} (\ t => shrinkTerm t th) ts
+export
+shrinkTaggedTerms : Shrinkable (List . (RigCount,) . Term)
+shrinkTaggedTerms ts th
+  = assert_total
+  $ traverse @{Compose} (\ t => shrinkTerm t th) ts
 
-  shrinkTerm : Shrinkable Term
-  shrinkTerm (Local fc r idx loc) prf
-    = do MkVar loc' <- shrinkIsVar loc prf
-         pure (Local fc r _ loc')
-  shrinkTerm (Ref fc x name) prf = Just (Ref fc x name)
-  shrinkTerm (Meta fc x y xs) prf
-     = do Just (Meta fc x y !(shrinkTaggedTerms xs prf))
-  shrinkTerm (Bind fc x b scope) prf
-     = Just (Bind fc x !(shrinkBinder b prf) !(shrinkTerm scope (Keep prf)))
-  shrinkTerm (App fc fn c arg) prf
-     = Just (App fc !(shrinkTerm fn prf) c !(shrinkTerm arg prf))
-  shrinkTerm (As fc s as tm) prf
-     = Just (As fc s !(shrinkTerm as prf) !(shrinkTerm tm prf))
-  shrinkTerm (TDelayed fc x y) prf
-     = Just (TDelayed fc x !(shrinkTerm y prf))
-  shrinkTerm (TDelay fc x t y) prf
-     = Just (TDelay fc x !(shrinkTerm t prf) !(shrinkTerm y prf))
-  shrinkTerm (TForce fc r x) prf
-     = Just (TForce fc r !(shrinkTerm x prf))
-  shrinkTerm (PrimVal fc c) prf = Just (PrimVal fc c)
-  shrinkTerm (Erased fc Placeholder) prf = Just (Erased fc Placeholder)
-  shrinkTerm (Erased fc Impossible) prf = Just (Erased fc Impossible)
-  shrinkTerm (Erased fc (Dotted t)) prf = Erased fc . Dotted <$> shrinkTerm t prf
-  shrinkTerm (Unmatched fc s) prf = Just (Unmatched fc s)
-  shrinkTerm (TType fc u) prf = Just (TType fc u)
+shrinkScope : Shrinkable CaseScope
+shrinkScope (RHS tm) prf = RHS <$> shrinkTerm tm prf
+shrinkScope (Arg r x sc) prf = Arg r x <$> shrinkScope sc (Keep prf)
+
+shrinkAlt : Shrinkable CaseAlt
+shrinkAlt (ConCase x tag sc) prf
+  = ConCase x tag <$> shrinkScope sc prf
+shrinkAlt (DelayCase ty arg sc) prf
+  = DelayCase ty arg <$> shrinkTerm sc (Keep (Keep prf))
+shrinkAlt (ConstCase c sc) prf = ConstCase c <$> shrinkTerm sc prf
+shrinkAlt (DefaultCase sc) prf = DefaultCase <$> shrinkTerm sc prf
+
+shrinkTerm (Local fc r idx loc) prf
+  = do MkVar loc' <- shrinkIsVar loc prf
+       pure (Local fc r _ loc')
+shrinkTerm (Ref fc x name) prf = Just (Ref fc x name)
+shrinkTerm (Meta fc x y xs) prf
+    = do Just (Meta fc x y !(shrinkTaggedTerms xs prf))
+shrinkTerm (Bind fc x b scope) prf
+    = Just (Bind fc x !(shrinkBinder b prf) !(shrinkTerm scope (Keep prf)))
+shrinkTerm (App fc fn c arg) prf
+    = Just (App fc !(shrinkTerm fn prf) c !(shrinkTerm arg prf))
+shrinkTerm (As fc s as tm) prf
+    = Just (As fc s !(shrinkTerm as prf) !(shrinkTerm tm prf))
+shrinkTerm (Case fc t r sc scTy alts) prf
+   = Just (Case fc t r !(shrinkTerm sc prf) !(shrinkTerm scTy prf)
+                !(assert_total $ traverse (\alt => shrinkAlt alt prf) alts))
+shrinkTerm (TDelayed fc x y) prf
+    = Just (TDelayed fc x !(shrinkTerm y prf))
+shrinkTerm (TDelay fc x t y) prf
+    = Just (TDelay fc x !(shrinkTerm t prf) !(shrinkTerm y prf))
+shrinkTerm (TForce fc r x) prf
+    = Just (TForce fc r !(shrinkTerm x prf))
+shrinkTerm (PrimVal fc c) prf = Just (PrimVal fc c)
+shrinkTerm (Erased fc Placeholder) prf = Just (Erased fc Placeholder)
+shrinkTerm (Erased fc Impossible) prf = Just (Erased fc Impossible)
+shrinkTerm (Erased fc (Dotted t)) prf = Erased fc . Dotted <$> shrinkTerm t prf
+shrinkTerm (Unmatched fc s) prf = Just (Unmatched fc s)
+shrinkTerm (TType fc u) prf = Just (TType fc u)
 
 
-mutual
-  export
-  thinPi : Thinnable (PiInfo . Term)
-  thinPi pinfo th = assert_total $ map (\ t => thinTerm t th) pinfo
+thinTerm : Thinnable Term
 
-  export
-  thinBinder : Thinnable (Binder . Term)
-  thinBinder binder th = assert_total $ map (\ t => thinTerm t th) binder
+export
+thinPi : Thinnable (PiInfo . Term)
+thinPi pinfo th = assert_total $ map (\ t => thinTerm t th) pinfo
 
-  export
-  thinTerms : Thinnable (List . Term)
-  thinTerms ts th = assert_total $ map (\ t => thinTerm t th) ts
+export
+thinBinder : Thinnable (Binder . Term)
+thinBinder binder th = assert_total $ map (\ t => thinTerm t th) binder
 
-  export
-  thinTaggedTerms : Thinnable (List . (RigCount,) . Term)
-  thinTaggedTerms ts th = assert_total $ map @{Compose} (\ t => thinTerm t th) ts
+export
+thinTerms : Thinnable (List . Term)
+thinTerms ts th = assert_total $ map (\ t => thinTerm t th) ts
 
-  thinTerm : Thinnable Term
-  thinTerm (Local fc x idx y) th
-      = let MkVar y' = thinIsVar y th in Local fc x _ y'
-  thinTerm (Ref fc x name) th = Ref fc x name
-  thinTerm (Meta fc x y xs) th
-      = Meta fc x y (thinTaggedTerms xs th)
-  thinTerm (Bind fc x b scope) th
-      = Bind fc x (thinBinder b th) (thinTerm scope (Keep th))
-  thinTerm (App fc fn c arg) th
-      = App fc (thinTerm fn th) c (thinTerm arg th)
-  thinTerm (As fc s nm pat) th
-      = As fc s (thinTerm nm th) (thinTerm pat th)
-  thinTerm (TDelayed fc x y) th = TDelayed fc x (thinTerm y th)
-  thinTerm (TDelay fc x t y) th
-      = TDelay fc x (thinTerm t th) (thinTerm y th)
-  thinTerm (TForce fc r x) th = TForce fc r (thinTerm x th)
-  thinTerm (PrimVal fc c) th = PrimVal fc c
-  thinTerm (Erased fc Impossible) th = Erased fc Impossible
-  thinTerm (Erased fc Placeholder) th = Erased fc Placeholder
-  thinTerm (Erased fc (Dotted t)) th = Erased fc (Dotted (thinTerm t th))
-  thinTerm (Unmatched fc s) th = Unmatched fc s
-  thinTerm (TType fc u) th = TType fc u
+export
+thinTaggedTerms : Thinnable (List . (RigCount,) . Term)
+thinTaggedTerms ts th = assert_total $ map @{Compose} (\ t => thinTerm t th) ts
+
+thinScope : Thinnable CaseScope
+thinScope (RHS tm) th = RHS (thinTerm tm th)
+thinScope (Arg c x sc) th = Arg c x (thinScope sc (Keep th))
+
+thinAlt : Thinnable CaseAlt
+thinAlt (ConCase n t sc) th = ConCase n t (thinScope sc th)
+thinAlt (DelayCase t a tm) th = DelayCase t a (thinTerm tm (Keep (Keep th)))
+thinAlt (ConstCase c tm) th = ConstCase c (thinTerm tm th)
+thinAlt (DefaultCase tm) th = DefaultCase (thinTerm tm th)
+
+thinAlts : Thinnable (List . CaseAlt)
+thinAlts alts th = assert_total $ map (\ t => thinAlt t th) alts
+
+thinTerm (Local fc x idx y) th
+    = let MkVar y' = thinIsVar y th in Local fc x _ y'
+thinTerm (Ref fc x name) th = Ref fc x name
+thinTerm (Meta fc x y xs) th
+    = Meta fc x y (thinTaggedTerms xs th)
+thinTerm (Bind fc x b scope) th
+    = Bind fc x (thinBinder b th) (thinTerm scope (Keep th))
+thinTerm (App fc fn c arg) th
+    = App fc (thinTerm fn th) c (thinTerm arg th)
+thinTerm (As fc s nm pat) th
+    = As fc s (thinTerm nm th) (thinTerm pat th)
+thinTerm (TDelayed fc x y) th = TDelayed fc x (thinTerm y th)
+thinTerm (TDelay fc x t y) th
+    = TDelay fc x (thinTerm t th) (thinTerm y th)
+thinTerm (Case fc t r sc scTy alts) th
+   = Case fc t r (thinTerm sc th) (thinTerm scTy th) (thinAlts alts th)
+thinTerm (TForce fc r x) th = TForce fc r (thinTerm x th)
+thinTerm (PrimVal fc c) th = PrimVal fc c
+thinTerm (Erased fc Impossible) th = Erased fc Impossible
+thinTerm (Erased fc Placeholder) th = Erased fc Placeholder
+thinTerm (Erased fc (Dotted t)) th = Erased fc (Dotted (thinTerm t th))
+thinTerm (Unmatched fc s) th = Unmatched fc s
+thinTerm (TType fc u) th = TType fc u
 
 export
 GenWeaken Term where
@@ -469,6 +558,7 @@ getLoc (Meta fc _ _ _) = fc
 getLoc (Bind fc _ _ _) = fc
 getLoc (App fc _ _ _) = fc
 getLoc (As fc _ _ _) = fc
+getLoc (Case fc _ _ _ _ _) = fc
 getLoc (TDelayed fc _ _) = fc
 getLoc (TDelay fc _ _ _) = fc
 getLoc (TForce fc _ _) = fc
@@ -522,6 +612,21 @@ eqTerm (Bind _ _ b sc) (Bind _ _ b' sc')
     = assert_total (eqBinderBy eqTerm b b') && eqTerm sc sc'
 eqTerm (App _ f _ a) (App _ f' _ a') = eqTerm f f' && eqTerm a a'
 eqTerm (As _ _ a p) (As _ _ a' p') = eqTerm a a' && eqTerm p p'
+eqTerm (Case _ _ _ sc ty alts) (Case _ _ _ sc' ty' alts')
+    = eqTerm sc sc' && eqTerm ty ty' &&
+          assert_total (all (uncurry eqAlt) (zip alts alts'))
+  where
+    eqScope : forall vs, vs' . CaseScope vs -> CaseScope vs' -> Bool
+    eqScope (RHS tm) (RHS tm') = eqTerm tm tm'
+    eqScope (Arg _ _ sc) (Arg _ _ sc') = eqScope sc sc'
+    eqScope _ _ = False
+
+    eqAlt : CaseAlt vs -> CaseAlt vs' -> Bool
+    eqAlt (ConCase n tag sc) (ConCase n' tag' sc') = tag == tag' && eqScope sc sc'
+    eqAlt (DelayCase ty arg tm) (DelayCase ty' arg' tm') = eqTerm tm tm'
+    eqAlt (ConstCase c tm) (ConstCase c' tm') = c == c' && eqTerm tm tm'
+    eqAlt (DefaultCase tm) (DefaultCase tm') = eqTerm tm tm'
+    eqAlt _ _ = False
 eqTerm (TDelayed _ _ t) (TDelayed _ _ t') = eqTerm t t'
 eqTerm (TDelay _ _ t x) (TDelay _ _ t' x') = eqTerm t t' && eqTerm x x'
 eqTerm (TForce _ _ t) (TForce _ _ t') = eqTerm t t'
@@ -538,36 +643,50 @@ Eq (Term vars) where
 ------------------------------------------------------------------------
 -- Scope checking
 
-mutual
+-- Replace any Ref Bound in a type with appropriate local
+export
+resolveNames : (vars : Scope) -> Term vars -> Term vars
 
-  resolveNamesBinder : (vars : Scope) -> Binder (Term vars) -> Binder (Term vars)
-  resolveNamesBinder vars b = assert_total $ map (resolveNames vars) b
+resolveNamesBinder : (vars : Scope) -> Binder (Term vars) -> Binder (Term vars)
+resolveNamesBinder vars b = assert_total $ map (resolveNames vars) b
 
-  resolveNamesTerms : (vars : Scope) -> List (RigCount, Term vars) -> List (RigCount, Term vars)
-  resolveNamesTerms vars ts = assert_total $ map @{Compose} (resolveNames vars) ts
+resolveNamesTerms : (vars : Scope) -> List (RigCount, Term vars) -> List (RigCount, Term vars)
+resolveNamesTerms vars ts = assert_total $ map @{Compose} (resolveNames vars) ts
 
-  -- Replace any Ref Bound in a type with appropriate local
-  export
-  resolveNames : (vars : Scope) -> Term vars -> Term vars
-  resolveNames vars (Ref fc Bound name)
-      = case isNVar name vars of
-             Just (MkNVar prf) => Local fc (Just False) _ prf
-             _ => Ref fc Bound name
-  resolveNames vars (Meta fc n i xs)
-      = Meta fc n i (resolveNamesTerms vars xs)
-  resolveNames vars (Bind fc x b scope)
-      = Bind fc x (resolveNamesBinder vars b) (resolveNames (vars :< x) scope)
-  resolveNames vars (App fc fn c arg)
-      = App fc (resolveNames vars fn) c (resolveNames vars arg)
-  resolveNames vars (As fc s as pat)
-      = As fc s (resolveNames vars as) (resolveNames vars pat)
-  resolveNames vars (TDelayed fc x y)
-      = TDelayed fc x (resolveNames vars y)
-  resolveNames vars (TDelay fc x t y)
-      = TDelay fc x (resolveNames vars t) (resolveNames vars y)
-  resolveNames vars (TForce fc r x)
-      = TForce fc r (resolveNames vars x)
-  resolveNames vars tm = tm
+resolveScope : (vars : SnocList Name) -> CaseScope vars -> CaseScope vars
+resolveScope vars (RHS tm) = RHS (resolveNames vars tm)
+resolveScope vars (Arg c x sc) = Arg c x (resolveScope (vars :< x) sc)
+
+resolveAlt : (vars : SnocList Name) -> CaseAlt vars -> CaseAlt vars
+resolveAlt vars (ConCase x tag sc)
+    = ConCase x tag (resolveScope vars sc)
+resolveAlt vars (DelayCase ty arg tm)
+    = DelayCase ty arg (resolveNames (vars :< ty :< arg) tm)
+resolveAlt vars (ConstCase x tm) = ConstCase x (resolveNames vars tm)
+resolveAlt vars (DefaultCase tm) = DefaultCase (resolveNames vars tm)
+
+resolveNames vars (Ref fc Bound name)
+    = case isNVar name vars of
+            Just (MkNVar prf) => Local fc (Just False) _ prf
+            _ => Ref fc Bound name
+resolveNames vars (Meta fc n i xs)
+    = Meta fc n i (resolveNamesTerms vars xs)
+resolveNames vars (Bind fc x b scope)
+    = Bind fc x (resolveNamesBinder vars b) (resolveNames (vars :< x) scope)
+resolveNames vars (App fc fn c arg)
+    = App fc (resolveNames vars fn) c (resolveNames vars arg)
+resolveNames vars (As fc s as pat)
+    = As fc s (resolveNames vars as) (resolveNames vars pat)
+resolveNames vars (Case fc t c sc scty alts)
+    = Case fc t c (resolveNames vars sc) (resolveNames vars scty)
+                  (map (assert_total $ resolveAlt vars) alts)
+resolveNames vars (TDelayed fc x y)
+    = TDelayed fc x (resolveNames vars y)
+resolveNames vars (TDelay fc x t y)
+    = TDelay fc x (resolveNames vars t) (resolveNames vars y)
+resolveNames vars (TForce fc r x)
+    = TForce fc r (resolveNames vars x)
+resolveNames vars tm = tm
 
 ------------------------------------------------------------------------
 -- Showing
@@ -578,6 +697,23 @@ withPiInfo Explicit tm = "(" ++ tm ++ ")"
 withPiInfo Implicit tm = "{" ++ tm ++ "}"
 withPiInfo AutoImplicit tm = "{auto " ++ tm ++ "}"
 withPiInfo (DefImplicit t) tm = "{default " ++ show t ++ " " ++ tm ++ "}"
+
+export
+{vars : _} -> Show (Term vars)
+
+export
+covering
+{vars : _} -> Show (CaseScope vars) where
+    show (RHS rhs) = " => " ++ show rhs
+    show (Arg r nm sc) = " " ++ show nm ++ show sc
+
+export
+covering
+{vars : _} -> Show (CaseAlt vars) where
+   show (ConCase n t sc) = show n ++ show sc
+   show (DelayCase ty arg sc) = "Delay " ++ show arg ++ " => " ++ show sc
+   show (ConstCase c sc) = show c ++ " => " ++ show sc
+   show (DefaultCase sc) = "_ => " ++ show sc
 
 export
 covering
@@ -611,6 +747,8 @@ covering
             " => " ++ show sc
       showApp (App _ _ _ _) [] = "[can't happen]"
       showApp (As _ _ n tm) [] = show n ++ "@" ++ show tm
+      showApp (Case _ t r sc scty alts) []
+            = "case " ++ show r ++ " " ++ show sc ++ " : " ++ show scty ++ " of " ++ show alts
       showApp (TDelayed _ _ tm) [] = "%Delayed " ++ show tm
       showApp (TDelay _ _ _ tm) [] = "%Delay " ++ show tm
       showApp (TForce _ _ tm) [] = "%Force " ++ show tm

@@ -402,11 +402,22 @@ HasNames a => HasNames (List a) where
           full_aux c res [] = pure (reverse res)
           full_aux c res (n :: ns) = full_aux c (!(full c n):: res) ns
 
-
   resolved c ns = resolved_aux c [] ns
     where resolved_aux : Context -> List a -> List a -> Core (List a)
           resolved_aux c res [] = pure (reverse res)
           resolved_aux c res (n :: ns) = resolved_aux c (!(resolved c n) :: res) ns
+
+export
+HasNames a => HasNames (SnocList a) where
+  full c ns = full_aux c [<] ns
+    where full_aux : Context -> SnocList a -> SnocList a -> Core (SnocList a)
+          full_aux c res [<] = pure (reverse res)
+          full_aux c res (ns :< n) = full_aux c (res :< !(full c n)) ns
+
+  resolved c ns = resolved_aux c [<] ns
+    where resolved_aux : Context -> SnocList a -> SnocList a -> Core (SnocList a)
+          resolved_aux c res [<] = pure (reverse res)
+          resolved_aux c res (ns :< n) = resolved_aux c (res :< !(resolved c n)) ns
 
 export
 HasNames a => HasNames (Maybe a) where
@@ -454,6 +465,45 @@ HasNames a => HasNames (RigCount, a) where
   resolved gam (c, t) = pure $ (c, !(resolved gam t))
 
 export
+HasNames CaseType where
+  full gam PatMatch = pure PatMatch
+  full gam (CaseBlock n) = pure $ CaseBlock !(full gam n)
+
+  resolved gam PatMatch = pure PatMatch
+  resolved gam (CaseBlock n) = pure $ CaseBlock !(resolved gam n)
+
+export
+HasNames (Term vars)
+
+export
+HasNames (CaseScope vars) where
+  full gam (RHS x) = pure (RHS !(full gam x))
+  full gam (Arg c x sc) = pure (Arg c x !(full gam sc))
+
+  resolved gam (RHS x) = pure (RHS !(resolved gam x))
+  resolved gam (Arg c x sc) = pure (Arg c x !(resolved gam sc))
+
+export
+HasNames (CaseAlt vars) where
+  full gam (ConCase x tag y)
+      = pure (ConCase !(full gam x) tag !(full gam y))
+  full gam (DelayCase ty arg x)
+      = pure (DelayCase ty arg !(full gam x))
+  full gam (ConstCase c x)
+      = pure (ConstCase c !(full gam x))
+  full gam (DefaultCase x)
+      = pure (DefaultCase !(full gam x))
+
+  resolved gam (ConCase x tag y)
+      = pure (ConCase !(resolved gam x) tag !(resolved gam y))
+  resolved gam (DelayCase ty arg x)
+      = pure (DelayCase ty arg !(resolved gam x))
+  resolved gam (ConstCase c x)
+      = pure (ConstCase c !(resolved gam x))
+  resolved gam (DefaultCase x)
+      = pure (DefaultCase !(resolved gam x))
+
+export
 HasNames (Term vars) where
   full gam (Ref fc x (Resolved i))
       = do Just gdef <- lookupCtxtExact (Resolved i) gam
@@ -470,6 +520,8 @@ HasNames (Term vars) where
       = pure (App fc !(full gam fn) c !(full gam arg))
   full gam (As fc s p tm)
       = pure (As fc s !(full gam p) !(full gam tm))
+  full gam (Case fc t c sc scTy alts)
+      = pure (Case fc !(full gam t) c !(full gam sc) !(full gam scTy) !(full gam alts))
   full gam (TDelayed fc x y)
       = pure (TDelayed fc x !(full gam y))
   full gam (TDelay fc x t y)
@@ -497,6 +549,8 @@ HasNames (Term vars) where
       = pure (App fc !(resolved gam fn) c !(resolved gam arg))
   resolved gam (As fc s p tm)
       = pure (As fc s !(resolved gam p) !(resolved gam tm))
+  resolved gam (Case fc t c sc scTy alts)
+      = pure (Case fc !(resolved gam t) c !(resolved gam sc) !(resolved gam scTy) !(resolved gam alts))
   resolved gam (TDelayed fc x y)
       = pure (TDelayed fc x !(resolved gam y))
   resolved gam (TDelay fc x t y)
@@ -538,49 +592,6 @@ HasNames Pat where
      = [| PDelay (pure fc) (pure laz) (resolved gam p) (resolved gam q) |]
   resolved gam (PLoc fc n) = PLoc fc <$> resolved gam n
   resolved gam (PUnmatchable fc t) = PUnmatchable fc <$> resolved gam t
-
-mutual
-  export
-  HasNames (CaseTree vars) where
-    full gam (Case i v ty alts)
-        = pure $ Case i v !(full gam ty) !(traverse (full gam) alts)
-    full gam (STerm i tm)
-        = pure $ STerm i !(full gam tm)
-    full gam t = pure t
-
-    resolved gam (Case i v ty alts)
-        = pure $ Case i v !(resolved gam ty) !(traverse (resolved gam) alts)
-    resolved gam (STerm i tm)
-        = pure $ STerm i !(resolved gam tm)
-    resolved gam t = pure t
-
-  export
-  HasNames (CaseScope vars) where
-    full gam (RHS x) = pure (RHS !(full gam x))
-    full gam (Arg c x sc) = pure (Arg c x !(full gam sc))
-
-    resolved gam (RHS x) = pure (RHS !(resolved gam x))
-    resolved gam (Arg c x sc) = pure (Arg c x !(resolved gam sc))
-
-  export
-  HasNames (CaseAlt vars) where
-    full gam (ConCase x tag y)
-        = pure (ConCase !(full gam x) tag !(full gam y))
-    full gam (DelayCase ty arg sc)
-        = pure $ DelayCase ty arg !(full gam sc)
-    full gam (ConstCase c sc)
-        = pure $ ConstCase c !(full gam sc)
-    full gam (DefaultCase sc)
-        = pure $ DefaultCase !(full gam sc)
-
-    resolved gam (ConCase x tag y)
-        = pure (ConCase !(resolved gam x) tag !(resolved gam y))
-    resolved gam (DelayCase ty arg sc)
-        = pure $ DelayCase ty arg !(resolved gam sc)
-    resolved gam (ConstCase c sc)
-        = pure $ ConstCase c !(resolved gam sc)
-    resolved gam (DefaultCase sc)
-        = pure $ DefaultCase !(resolved gam sc)
 
 export
 HasNames (Env Term vars) where

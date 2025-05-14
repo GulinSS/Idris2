@@ -1,6 +1,5 @@
 module Core.Unify
 
-import Core.Case.CaseTree
 import Core.Context
 import Core.Context.Log
 import Core.Core
@@ -540,6 +539,29 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
 
     updateIVars : {vs, newvars : _} ->
                   IVars vs newvars -> Term newvars -> Maybe (Term vs)
+
+    updateIScope : {vs, newvars : _} ->
+                   IVars vs newvars -> CaseScope newvars -> Maybe (CaseScope vs)
+    updateIScope ivs (RHS tm)
+        = Just (RHS !(updateIVars ivs tm))
+    updateIScope ivs (Arg c x sc)
+        = Just (Arg c x !(updateIScope (ICons (Just (MkVar First))
+                                            (weaken ivs)) sc))
+
+    updateIAlts : {vs, newvars : _} ->
+                  IVars vs newvars -> CaseAlt newvars -> Maybe (CaseAlt vs)
+    updateIAlts ivs (ConCase n t sc)
+        = Just (ConCase n t !(updateIScope ivs sc))
+    updateIAlts ivs (DelayCase ty arg rhs)
+        = let ivs' = ICons (Just (MkVar First)) $
+                     ICons (Just (MkVar (Later First))) $
+                     weaken (weaken ivs) in
+              Just (DelayCase ty arg !(updateIVars ivs' rhs))
+    updateIAlts ivs (ConstCase c rhs)
+        = Just (ConstCase c !(updateIVars ivs rhs))
+    updateIAlts ivs (DefaultCase rhs)
+        = Just (DefaultCase !(updateIVars ivs rhs))
+
     updateIVars ivs (Local fc r idx p)
         = do MkVar p' <- updateIVar ivs (MkVar p)
              Just (Local fc r _ p')
@@ -580,6 +602,9 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
         = Just (App fc !(updateIVars ivs f) c !(updateIVars ivs a))
     updateIVars ivs (As fc u a p)
         = Just (As fc u !(updateIVars ivs a) !(updateIVars ivs p))
+    updateIVars ivs (Case fc t c sc scty alts)
+        = Just (Case fc t c !(updateIVars ivs sc) !(updateIVars ivs scty)
+                      !(traverse (updateIAlts ivs) alts))
     updateIVars ivs (TDelayed fc r arg)
         = Just (TDelayed fc r !(updateIVars ivs arg))
     updateIVars ivs (TDelay fc r ty arg)

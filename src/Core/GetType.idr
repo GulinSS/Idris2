@@ -46,6 +46,7 @@ mutual
                 _ => do fty' <- getTerm fty
                         throw (NotFunctionType fc env fty')
   chk env (As fc s n p) = chk env p
+  chk env (Case fc t rc sc scTy alts) = ?chkCase
   chk env (TDelayed fc r tm) = pure (gType fc (MN "top" 0))
   chk env (TDelay fc r dty tm)
       = do gtm <- chk env tm

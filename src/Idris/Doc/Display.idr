@@ -1,7 +1,6 @@
 module Idris.Doc.Display
 
 import Core.Case.CaseTree
-import Core.Case.CaseTree.Pretty
 import Core.Context
 import Core.Env
 

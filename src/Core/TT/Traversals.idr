@@ -18,6 +18,9 @@ onPRefs f = go neutral where
 
   go  : m -> Term vars' -> m
   gos : m -> List (Term vars') -> m
+  goScope : m -> CaseScope vars' -> m
+  goAlt : m -> CaseAlt vars' -> m
+  goAlts : m -> List (CaseAlt vars') -> m
 
   go acc (Local fc isLet idx p) = acc
   go acc (Ref fc x name) = acc <+> f name
@@ -25,6 +28,7 @@ onPRefs f = go neutral where
   go acc (Bind fc x b scope) = go (acc <+> concatMap (onPRefs f) b) scope
   go acc (App fc fn _ arg) = go (go acc fn) arg
   go acc (As fc x as pat) = go (go acc as) pat
+  go acc (Case fc t c sc scty alts) = goAlts (go (go acc sc) scty) alts
   go acc (TDelayed fc x y) = go acc y
   go acc (TDelay fc x ty arg) = go (go acc ty) arg
   go acc (TForce fc x y) = go acc y
@@ -33,8 +37,19 @@ onPRefs f = go neutral where
   go acc (TType fc u) = acc
   go acc (Unmatched fc _) = acc
 
+  goScope acc (RHS tm) = go acc tm
+  goScope acc (Arg c x sc) = goScope acc sc
+
+  goAlt acc (ConCase n t sc) = goScope acc sc
+  goAlt acc (DelayCase ty arg tm) = go acc tm
+  goAlt acc (ConstCase c tm) = go acc tm
+  goAlt acc (DefaultCase tm) = go acc tm
+
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
+
+  goAlts acc [] = acc
+  goAlts acc (x :: xs) = goAlts (goAlt acc x) xs
 
 export
 allGlobals : Term vars -> NameMap ()
@@ -48,6 +63,9 @@ onConstants f = go neutral where
 
   go  : m -> Term vars' -> m
   gos : m -> List (Term vars') -> m
+  goScope : m -> CaseScope vars' -> m
+  goAlt : m -> CaseAlt vars' -> m
+  goAlts : m -> List (CaseAlt vars') -> m
 
   go acc (Local fc isLet idx p) = acc
   go acc (Ref fc x name) = acc
@@ -55,6 +73,7 @@ onConstants f = go neutral where
   go acc (Bind fc x b scope) = go (acc <+> concatMap (onConstants f) b) scope
   go acc (App fc fn _ arg) = go (go acc fn) arg
   go acc (As fc x as pat) = go (go acc as) pat
+  go acc (Case fc ty c sc scty alts) = goAlts (go (go acc sc) scty) alts
   go acc (TDelayed fc x y) = go acc y
   go acc (TDelay fc x ty arg) = go (go acc ty) arg
   go acc (TForce fc x y) = go acc y
@@ -65,6 +84,17 @@ onConstants f = go neutral where
 
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
+
+  goScope acc (RHS tm) = go acc tm
+  goScope acc (Arg c x sc) = goScope acc sc
+
+  goAlt acc (ConCase n t sc) = goScope acc sc
+  goAlt acc (DelayCase ty arg tm) = go acc tm
+  goAlt acc (ConstCase c tm) = go acc tm
+  goAlt acc (DefaultCase tm) = go acc tm
+
+  goAlts acc [] = acc
+  goAlts acc (x :: xs) = goAlts (goAlt acc x) xs
 
 export
 allConstants : Term vars -> SortedSet Constant
@@ -78,6 +108,8 @@ mapTermM f t = act t where
 
   act : {vars : _} -> Term vars -> m (Term vars)
   go  : {vars : _} -> Term vars -> m (Term vars)
+  goScope  : {vars : _} -> CaseScope vars -> m (CaseScope vars)
+  goAlt  : {vars : _} -> CaseAlt vars -> m (CaseAlt vars)
 
   act t = f =<< go t
 
@@ -87,6 +119,8 @@ mapTermM f t = act t where
   go t@(Bind fc x b scope) = Bind fc x <$> traverse act b <*> act scope
   go t@(App fc fn c arg) = App fc <$> act fn <*> pure c <*> act arg
   go t@(As fc x as pat) = As fc x <$> act as <*> act pat
+  go t@(Case fc ty c sc scty alts)
+    = Case fc ty c <$> act sc <*> act scty <*> traverse goAlt alts
   go t@(TDelayed fc x y) = TDelayed fc x <$> act y
   go t@(TDelay fc x ty arg) = TDelay fc x <$> act ty <*> act arg
   go t@(TForce fc x y) = pure t
@@ -95,6 +129,14 @@ mapTermM f t = act t where
   go t@(TType fc u) = pure t
   go t@(Unmatched fc _) = pure t
 
+  goScope (RHS tm) = RHS <$> act tm
+  goScope (Arg c x sc) = Arg c x <$> goScope sc
+
+  goAlt (ConCase n t sc) = ConCase n t <$> goScope sc
+  goAlt (DelayCase t a tm) = DelayCase t a <$> act tm
+  goAlt (ConstCase c tm) = ConstCase c <$> act tm
+  goAlt (DefaultCase tm) = DefaultCase <$> act tm
+
 export
 mapTerm : ({vars : _} -> Term vars -> Term vars) ->
           ({vars : _} -> Term vars -> Term vars)
@@ -102,6 +144,8 @@ mapTerm f t = act t where
 
   act : {vars : _} -> Term vars -> Term vars
   go  : {vars : _} -> Term vars -> Term vars
+  goScope  : {vars : _} -> CaseScope vars -> CaseScope vars
+  goAlt  : {vars : _} -> CaseAlt vars -> CaseAlt vars
 
   act t = f (go t)
 
@@ -111,6 +155,7 @@ mapTerm f t = act t where
   go t@(Bind fc x b scope) = Bind fc x (map act b) (act scope)
   go t@(App fc fn c arg) = App fc (act fn) c (act arg)
   go t@(As fc x as pat) = As fc x (act as) (act pat)
+  go t@(Case fc ty c sc scty alts) = Case fc ty c (act sc) (act scty) (map goAlt alts)
   go t@(TDelayed fc x y) = TDelayed fc x (act y)
   go t@(TDelay fc x ty arg) = TDelay fc x (act ty) (act arg)
   go t@(TForce fc x y) = t
@@ -118,3 +163,11 @@ mapTerm f t = act t where
   go t@(Erased fc imp) = t
   go t@(TType fc u) = t
   go t@(Unmatched fc u) = t
+
+  goScope (RHS tm) = RHS (act tm)
+  goScope (Arg c x sc) = Arg c x (goScope sc)
+
+  goAlt (ConCase n t sc) = ConCase n t (goScope sc)
+  goAlt (DelayCase t a tm) = DelayCase t a (act tm)
+  goAlt (ConstCase c tm) = ConstCase c (act tm)
+  goAlt (DefaultCase tm) = DefaultCase (act tm)
