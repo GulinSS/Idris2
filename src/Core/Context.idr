@@ -485,23 +485,23 @@ HasNames (CaseScope vars) where
 
 export
 HasNames (CaseAlt vars) where
-  full gam (ConCase x tag y)
-      = pure (ConCase !(full gam x) tag !(full gam y))
-  full gam (DelayCase ty arg x)
-      = pure (DelayCase ty arg !(full gam x))
-  full gam (ConstCase c x)
-      = pure (ConstCase c !(full gam x))
-  full gam (DefaultCase x)
-      = pure (DefaultCase !(full gam x))
+  full gam (ConCase fc x tag y)
+      = pure (ConCase fc !(full gam x) tag !(full gam y))
+  full gam (DelayCase fc ty arg x)
+      = pure (DelayCase fc ty arg !(full gam x))
+  full gam (ConstCase fc c x)
+      = pure (ConstCase fc c !(full gam x))
+  full gam (DefaultCase fc x)
+      = pure (DefaultCase fc !(full gam x))
 
-  resolved gam (ConCase x tag y)
-      = pure (ConCase !(resolved gam x) tag !(resolved gam y))
-  resolved gam (DelayCase ty arg x)
-      = pure (DelayCase ty arg !(resolved gam x))
-  resolved gam (ConstCase c x)
-      = pure (ConstCase c !(resolved gam x))
-  resolved gam (DefaultCase x)
-      = pure (DefaultCase !(resolved gam x))
+  resolved gam (ConCase fc x tag y)
+      = pure (ConCase fc !(resolved gam x) tag !(resolved gam y))
+  resolved gam (DelayCase fc ty arg x)
+      = pure (DelayCase fc ty arg !(resolved gam x))
+  resolved gam (ConstCase fc c x)
+      = pure (ConstCase fc c !(resolved gam x))
+  resolved gam (DefaultCase fc x)
+      = pure (DefaultCase fc !(resolved gam x))
 
 export
 HasNames (Term vars) where

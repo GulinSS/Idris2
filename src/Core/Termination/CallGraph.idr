@@ -1,6 +1,5 @@
 module Core.Termination.CallGraph
 
-import Core.Case.CaseTree
 import Core.Context
 import Core.Context.Log
 import Core.Env

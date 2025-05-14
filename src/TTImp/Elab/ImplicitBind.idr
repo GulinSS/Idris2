@@ -212,11 +212,11 @@ swapVars (Case fc ct c sc scty alts)
     swapAlt : {vs : _} -> forall ys, x, y .
               CaseAlt (ys :< y :< x ++ vs) ->
               CaseAlt (ys :< x :< y ++ vs)
-    swapAlt (ConCase n t sc) = ConCase n t (swapScope sc)
-    swapAlt {vs} (DelayCase t a tm)
-        = DelayCase t a (swapVars {vs = vs :< t :< a} tm)
-    swapAlt (ConstCase c tm) = ConstCase c (swapVars tm)
-    swapAlt (DefaultCase tm) = DefaultCase (swapVars tm)
+    swapAlt (ConCase fc n t sc) = ConCase fc n t (swapScope sc)
+    swapAlt {vs} (DelayCase fc t a tm)
+        = DelayCase fc t a (swapVars {vs = vs :< t :< a} tm)
+    swapAlt (ConstCase fc c tm) = ConstCase fc c (swapVars tm)
+    swapAlt (DefaultCase fc tm) = DefaultCase fc (swapVars tm)
 
 swapVars (TDelayed fc x tm) = TDelayed fc x (swapVars tm)
 swapVars (TDelay fc x ty tm) = TDelay fc x (swapVars ty) (swapVars tm)

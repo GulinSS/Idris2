@@ -1018,15 +1018,15 @@ mutual
            case mix of
              Nothing =>
                do log "compile.casetree.intermediate" 25 "match: No clauses"
-                  pure (TUnmatched "No clauses")
+                  pure (TUnmatched fc "No clauses")
              Just m =>
                do log "compile.casetree.intermediate" 25 $ "match: new case tree " ++ show m
                   Core.pure m
   match {todo = []} fc fn phase [] err
-       = maybe (pure (TUnmatched "No patterns"))
+       = maybe (pure (TUnmatched fc "No patterns"))
                pure err
   match {todo = []} fc fn phase ((MkPatClause pvars [] pid (Erased _ Impossible)) :: _) err
-       = pure TImpossible
+       = pure (TImpossible fc)
   match {todo = []} fc fn phase ((MkPatClause pvars [] pid rhs) :: _) err
        = pure $ STerm pid rhs
 
@@ -1039,7 +1039,7 @@ mutual
                Core (CaseTree vars)
   caseGroups {vars} fc fn phase c el ty gs errorCase
       = do g <- altGroups gs
-           pure (TCase c _ el (resolveNames vars ty) g)
+           pure (TCase fc c _ el (resolveNames vars ty) g)
     where
       mkScope : forall vars . (vs : SnocList Name) ->
                               (ms : SnocList RigCount) ->
@@ -1051,20 +1051,20 @@ mutual
 
       altGroups : List (Group todo vars) -> Core (List (TCaseAlt vars))
       altGroups [] = maybe (pure [])
-                           (\e => pure [TDefaultCase e])
+                           (\e => pure [TDefaultCase fc e])
                            errorCase
       altGroups (ConGroup {newargs} cn tag rigs rest :: cs)
           = do crest <- match fc fn phase rest (map (weakensN (mkSizeOf newargs)) errorCase)
                cs' <- altGroups cs
-               pure (TConCase cn tag (mkScope (cast newargs) (cast rigs) (rewrite sym $ fishAsSnocAppend vars newargs in TRHS crest)) :: cs')
+               pure (TConCase fc cn tag (mkScope (cast newargs) (cast rigs) (rewrite sym $ fishAsSnocAppend vars newargs in TRHS crest)) :: cs')
       altGroups (DelayGroup {tyarg} {valarg} rest :: cs)
           = do crest <- match fc fn phase rest (map (weakenNs (mkSizeOf [<tyarg, valarg])) errorCase)
                cs' <- altGroups cs
-               pure (TDelayCase tyarg valarg crest :: cs')
+               pure (TDelayCase fc tyarg valarg crest :: cs')
       altGroups (ConstGroup c rest :: cs)
           = do crest <- match fc fn phase rest errorCase
                cs' <- altGroups cs
-               pure (TConstCase c crest :: cs')
+               pure (TConstCase fc c crest :: cs')
 
   conRule : {a, vars, todo : _} ->
             {auto i : Ref PName Int} ->
@@ -1073,7 +1073,7 @@ mutual
             List (PatClause (a :: todo) vars) ->
             Maybe (CaseTree vars) ->
             Core (CaseTree vars)
-  conRule fc fn phase [] err = maybe (pure (TUnmatched "No constructor clauses")) pure err
+  conRule fc fn phase [] err = maybe (pure (TUnmatched fc "No constructor clauses")) pure err
   -- ASSUMPTION, not expressed in the type, that the patterns all have
   -- the same variable (pprf) for the first argument. If not, the result
   -- will be a broken case tree... so we should find a way to express this
@@ -1221,7 +1221,7 @@ patCompile : {auto c : Ref Ctxt Defs} ->
              Maybe (CaseTree ScopeEmpty) ->
              Core (args ** CaseTree args)
 patCompile fc fn phase ty [] def
-    = maybe (pure (ScopeEmpty ** TUnmatched "No definition"))
+    = maybe (pure (ScopeEmpty ** TUnmatched fc "No definition"))
             (\e => pure (ScopeEmpty ** e))
             def
 patCompile fc fn phase ty (p :: ps) def
@@ -1285,17 +1285,17 @@ simpleCase fc phase fn ty def clauses
 
 mutual
   findReachedAlts : TCaseAlt ns' -> List Int
-  findReachedAlts (TConCase _ _ t) = findReachedCaseScope t
-  findReachedAlts (TDelayCase _ _ t) = findReached t
-  findReachedAlts (TConstCase _ t) = findReached t
-  findReachedAlts (TDefaultCase t) = findReached t
+  findReachedAlts (TConCase _ _ _ t) = findReachedCaseScope t
+  findReachedAlts (TDelayCase _ _ _ t) = findReached t
+  findReachedAlts (TConstCase _ _ t) = findReached t
+  findReachedAlts (TDefaultCase _ t) = findReached t
 
   findReachedCaseScope : TCaseScope a -> List Int
   findReachedCaseScope (TRHS tm) = findReached tm
   findReachedCaseScope (TArg _ _ cs) = findReachedCaseScope cs
 
   findReached : CaseTree ns -> List Int
-  findReached (TCase _ _ _ _ alts) = concatMap findReachedAlts alts
+  findReached (TCase _ _ _ _ _ alts) = concatMap findReachedAlts alts
   findReached (STerm i _) = [i]
   findReached _ = []
 
@@ -1327,14 +1327,14 @@ identifyUnreachableDefaults fc defs nfty cs
          pure extraClauseIdxs'
   where
     rep : TCaseAlt vars -> Core (List (TCaseAlt vars))
-    rep (TDefaultCase sc)
+    rep (TDefaultCase _ sc)
         = do allCons <- getCons defs nfty
              pure (map (mkAlt fc sc) allCons)
     rep c = pure [c]
 
     dropRep : List (TCaseAlt vars) -> SortedSet Int -> (List (TCaseAlt vars), SortedSet Int)
     dropRep [] extra = ([], extra)
-    dropRep (c@(TConCase n t sc) :: rest) extra
+    dropRep (c@(TConCase _ n t sc) :: rest) extra
           -- assumption is that there's no defaultcase in 'rest' because
           -- we've just removed it
         = let (filteredClauses, extraCases) = partition (not . tagIs t) rest
@@ -1354,9 +1354,9 @@ identifyUnreachableDefaults fc defs nfty cs
 ||| superfluous (it will never be reached).
 findExtraDefaults : {auto c : Ref Ctxt Defs} ->
                     {vars : _} ->
-                    FC -> Defs -> CaseTree vars ->
+                    Defs -> CaseTree vars ->
                     Core (List Int)
-findExtraDefaults fc defs ctree@(TCase _ idx el ty altsIn)
+findExtraDefaults defs ctree@(TCase fc _ idx el ty altsIn)
   = do let fenv = mkEnv fc _
        nfty <- nf defs fenv ty
        extraCases <- identifyUnreachableDefaults fc defs nfty altsIn
@@ -1364,17 +1364,17 @@ findExtraDefaults fc defs ctree@(TCase _ idx el ty altsIn)
        pure (Prelude.toList extraCases ++ extraCases')
   where
     findExtraAltsScope : {vars : _} -> TCaseScope vars -> Core (List Int)
-    findExtraAltsScope (TRHS tm) = findExtraDefaults fc defs tm
+    findExtraAltsScope (TRHS tm) = findExtraDefaults defs tm
     findExtraAltsScope (TArg c x sc) = findExtraAltsScope sc
 
     findExtraAlts : TCaseAlt vars -> Core (List Int)
-    findExtraAlts (TConCase x tag ctree') = findExtraAltsScope ctree'
-    findExtraAlts (TDelayCase x arg ctree') = findExtraDefaults fc defs ctree'
-    findExtraAlts (TConstCase x ctree') = findExtraDefaults fc defs ctree'
+    findExtraAlts (TConCase _ x tag ctree') = findExtraAltsScope ctree'
+    findExtraAlts (TDelayCase _ x arg ctree') = findExtraDefaults defs ctree'
+    findExtraAlts (TConstCase _ x ctree') = findExtraDefaults defs ctree'
     -- already handled defaults by elaborating them to all possible cons
-    findExtraAlts (TDefaultCase ctree') = pure []
+    findExtraAlts (TDefaultCase _ ctree') = pure []
 
-findExtraDefaults fc defs ctree = pure []
+findExtraDefaults defs ctree = pure []
 
 -- Returns the case tree under the yet-to-be-bound lambdas,
 -- and a list of the clauses that aren't reachable
@@ -1406,7 +1406,7 @@ makePMDef fc ct phase fn ty clauses
          log "compile.casetree.clauses" 25 $
            "All RHSes: " ++ (show allRHS)
          defs <- get Ctxt
-         extraDefaults <- findExtraDefaults fc defs t
+         extraDefaults <- findExtraDefaults defs t
          log "compile.casetree.clauses" 25 $
            "Extra defaults: " ++ (show extraDefaults)
          let unreachable = getUnreachable 0 (allRHS \\ extraDefaults) clauses

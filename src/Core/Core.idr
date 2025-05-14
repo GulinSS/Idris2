@@ -893,10 +893,10 @@ mapTermM f = goTerm where
         goScope (Arg c x sc) = pure $ Arg c x !(goScope sc)
 
         goAlt : {vars : _} -> CaseAlt vars -> Core (CaseAlt vars)
-        goAlt (ConCase n t sc) = pure $ ConCase n t !(goScope sc)
-        goAlt (DelayCase t a sc) = pure $ DelayCase t a !(goTerm sc)
-        goAlt (ConstCase c tm) = pure $ ConstCase c !(goTerm tm)
-        goAlt (DefaultCase tm) = pure $ DefaultCase !(goTerm tm)
+        goAlt (ConCase fc n t sc) = pure $ ConCase fc n t !(goScope sc)
+        goAlt (DelayCase fc t a sc) = pure $ DelayCase fc t a !(goTerm sc)
+        goAlt (ConstCase fc c tm) = pure $ ConstCase fc c !(goTerm tm)
+        goAlt (DefaultCase fc tm) = pure $ DefaultCase fc !(goTerm tm)
     goTerm (TDelayed fc la d) = f =<< TDelayed fc la <$> goTerm d
     goTerm (TDelay fc la ty arg) = f =<< TDelay fc la <$> goTerm ty <*> goTerm arg
     goTerm (TForce fc la t) = f =<< TForce fc la <$> goTerm t

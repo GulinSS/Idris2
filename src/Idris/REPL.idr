@@ -3,7 +3,6 @@ module Idris.REPL
 import Compiler.Common
 import Compiler.Inline
 
-import Core.Case.CaseTree
 import Core.CompileExpr
 import Core.CompileExpr.Pretty
 import Core.Context

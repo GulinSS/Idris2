@@ -434,26 +434,26 @@ mutual
 
   export
   {vars : _} -> TTC (CaseAlt vars) where
-    toBuf b (ConCase x t y)
+    toBuf b (ConCase _ x t y)
         = do tag 0; toBuf b x; toBuf b t; toBuf b y
-    toBuf b (DelayCase ty arg y)
+    toBuf b (DelayCase _ ty arg y)
         = do tag 1; toBuf b ty; toBuf b arg; toBuf b y
-    toBuf b (ConstCase x y)
+    toBuf b (ConstCase _ x y)
         = do tag 2; toBuf b x; toBuf b y
-    toBuf b (DefaultCase x)
+    toBuf b (DefaultCase _ x)
         = do tag 3; toBuf b x
 
     fromBuf b
         = case !getTag of
                0 => do x <- fromBuf b; t <- fromBuf b
                        y <- fromBuf b
-                       pure (ConCase x t y)
+                       pure (ConCase emptyFC x t y)
                1 => do ty <- fromBuf b; arg <- fromBuf b; y <- fromBuf b
-                       pure (DelayCase ty arg y)
+                       pure (DelayCase emptyFC ty arg y)
                2 => do x <- fromBuf b; y <- fromBuf b
-                       pure (ConstCase x y)
+                       pure (ConstCase emptyFC x y)
                3 => do x <- fromBuf b
-                       pure (DefaultCase x)
+                       pure (DefaultCase emptyFC x)
                _ => corrupt "CaseAlt"
 
 export

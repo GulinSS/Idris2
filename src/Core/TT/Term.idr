@@ -161,18 +161,18 @@ data CaseScope : Scope -> Type where
 public export
 data CaseAlt : Scoped where
      ||| Constructor for a data type; bind the arguments and subterms.
-     ConCase : Name -> (tag : Int) -> CaseScope vars -> CaseAlt vars
+     ConCase : FC -> Name -> (tag : Int) -> CaseScope vars -> CaseAlt vars
      ||| Lazy match for the Delay type use for codata types
-     DelayCase : (ty : Name) -> (arg : Name) ->
+     DelayCase : FC -> (ty : Name) -> (arg : Name) ->
                  Term (vars :< ty :< arg) -> CaseAlt vars
      ||| Match against a literal
-     ConstCase : Constant -> Term vars -> CaseAlt vars
+     ConstCase : FC -> Constant -> Term vars -> CaseAlt vars
      ||| Catch-all case
-     DefaultCase : Term vars -> CaseAlt vars
+     DefaultCase : FC -> Term vars -> CaseAlt vars
 
 export
 isDefault : CaseAlt vars -> Bool
-isDefault (DefaultCase _) = True
+isDefault (DefaultCase _ _) = True
 isDefault _ = False
 
 ------------------------------------------------------------------------
@@ -217,14 +217,14 @@ insertNamesScope : forall outer . SizeOf outer -> SizeOf ns ->
 insertNamesScope out ns (RHS tm) = RHS (insertNames out ns tm)
 insertNamesScope out ns (Arg r x sc) = Arg r x (insertNamesScope (suc out) ns sc)
 
-insertNamesAlt out sns (ConCase n t scope)
-    = ConCase n t (insertNamesScope out sns scope)
-insertNamesAlt out ns (DelayCase ty arg scope)
-    = DelayCase ty arg (insertNames (suc (suc out)) ns scope)
-insertNamesAlt out ns (ConstCase c scope)
-    = ConstCase c (insertNames out ns scope)
-insertNamesAlt out ns (DefaultCase scope)
-    = DefaultCase (insertNames out ns scope)
+insertNamesAlt out sns (ConCase fc n t scope)
+    = ConCase fc n t (insertNamesScope out sns scope)
+insertNamesAlt out ns (DelayCase fc ty arg scope)
+    = DelayCase fc ty arg (insertNames (suc (suc out)) ns scope)
+insertNamesAlt out ns (ConstCase fc c scope)
+    = ConstCase fc c (insertNames out ns scope)
+insertNamesAlt out ns (DefaultCase fc scope)
+    = DefaultCase fc (insertNames out ns scope)
 
 export
 compatTerm : CompatibleVars xs ys -> Term xs -> Term ys
@@ -283,12 +283,12 @@ shrinkScope (RHS tm) prf = RHS <$> shrinkTerm tm prf
 shrinkScope (Arg r x sc) prf = Arg r x <$> shrinkScope sc (Keep prf)
 
 shrinkAlt : Shrinkable CaseAlt
-shrinkAlt (ConCase x tag sc) prf
-  = ConCase x tag <$> shrinkScope sc prf
-shrinkAlt (DelayCase ty arg sc) prf
-  = DelayCase ty arg <$> shrinkTerm sc (Keep (Keep prf))
-shrinkAlt (ConstCase c sc) prf = ConstCase c <$> shrinkTerm sc prf
-shrinkAlt (DefaultCase sc) prf = DefaultCase <$> shrinkTerm sc prf
+shrinkAlt (ConCase fc x tag sc) prf
+  = ConCase fc x tag <$> shrinkScope sc prf
+shrinkAlt (DelayCase fc ty arg sc) prf
+  = DelayCase fc ty arg <$> shrinkTerm sc (Keep (Keep prf))
+shrinkAlt (ConstCase fc c sc) prf = ConstCase fc c <$> shrinkTerm sc prf
+shrinkAlt (DefaultCase fc sc) prf = DefaultCase fc <$> shrinkTerm sc prf
 
 shrinkTerm (Local fc r idx loc) prf
   = do MkVar loc' <- shrinkIsVar loc prf
@@ -342,10 +342,10 @@ thinScope (RHS tm) th = RHS (thinTerm tm th)
 thinScope (Arg c x sc) th = Arg c x (thinScope sc (Keep th))
 
 thinAlt : Thinnable CaseAlt
-thinAlt (ConCase n t sc) th = ConCase n t (thinScope sc th)
-thinAlt (DelayCase t a tm) th = DelayCase t a (thinTerm tm (Keep (Keep th)))
-thinAlt (ConstCase c tm) th = ConstCase c (thinTerm tm th)
-thinAlt (DefaultCase tm) th = DefaultCase (thinTerm tm th)
+thinAlt (ConCase fc n t sc) th = ConCase fc n t (thinScope sc th)
+thinAlt (DelayCase fc t a tm) th = DelayCase fc t a (thinTerm tm (Keep (Keep th)))
+thinAlt (ConstCase fc c tm) th = ConstCase fc c (thinTerm tm th)
+thinAlt (DefaultCase fc tm) th = DefaultCase fc (thinTerm tm th)
 
 thinAlts : Thinnable (List . CaseAlt)
 thinAlts alts th = assert_total $ map (\ t => thinAlt t th) alts
@@ -622,10 +622,10 @@ eqTerm (Case _ _ _ sc ty alts) (Case _ _ _ sc' ty' alts')
     eqScope _ _ = False
 
     eqAlt : CaseAlt vs -> CaseAlt vs' -> Bool
-    eqAlt (ConCase n tag sc) (ConCase n' tag' sc') = tag == tag' && eqScope sc sc'
-    eqAlt (DelayCase ty arg tm) (DelayCase ty' arg' tm') = eqTerm tm tm'
-    eqAlt (ConstCase c tm) (ConstCase c' tm') = c == c' && eqTerm tm tm'
-    eqAlt (DefaultCase tm) (DefaultCase tm') = eqTerm tm tm'
+    eqAlt (ConCase _ n tag sc) (ConCase _ n' tag' sc') = tag == tag' && eqScope sc sc'
+    eqAlt (DelayCase _ ty arg tm) (DelayCase _ ty' arg' tm') = eqTerm tm tm'
+    eqAlt (ConstCase _ c tm) (ConstCase _ c' tm') = c == c' && eqTerm tm tm'
+    eqAlt (DefaultCase _ tm) (DefaultCase _ tm') = eqTerm tm tm'
     eqAlt _ _ = False
 eqTerm (TDelayed _ _ t) (TDelayed _ _ t') = eqTerm t t'
 eqTerm (TDelay _ _ t x) (TDelay _ _ t' x') = eqTerm t t' && eqTerm x x'
@@ -658,12 +658,12 @@ resolveScope vars (RHS tm) = RHS (resolveNames vars tm)
 resolveScope vars (Arg c x sc) = Arg c x (resolveScope (vars :< x) sc)
 
 resolveAlt : (vars : SnocList Name) -> CaseAlt vars -> CaseAlt vars
-resolveAlt vars (ConCase x tag sc)
-    = ConCase x tag (resolveScope vars sc)
-resolveAlt vars (DelayCase ty arg tm)
-    = DelayCase ty arg (resolveNames (vars :< ty :< arg) tm)
-resolveAlt vars (ConstCase x tm) = ConstCase x (resolveNames vars tm)
-resolveAlt vars (DefaultCase tm) = DefaultCase (resolveNames vars tm)
+resolveAlt vars (ConCase fc x tag sc)
+    = ConCase fc x tag (resolveScope vars sc)
+resolveAlt vars (DelayCase fc ty arg tm)
+    = DelayCase fc ty arg (resolveNames (vars :< ty :< arg) tm)
+resolveAlt vars (ConstCase fc x tm) = ConstCase fc x (resolveNames vars tm)
+resolveAlt vars (DefaultCase fc tm) = DefaultCase fc (resolveNames vars tm)
 
 resolveNames vars (Ref fc Bound name)
     = case isNVar name vars of
@@ -710,10 +710,10 @@ covering
 export
 covering
 {vars : _} -> Show (CaseAlt vars) where
-   show (ConCase n t sc) = show n ++ show sc
-   show (DelayCase ty arg sc) = "Delay " ++ show arg ++ " => " ++ show sc
-   show (ConstCase c sc) = show c ++ " => " ++ show sc
-   show (DefaultCase sc) = "_ => " ++ show sc
+   show (ConCase _ n t sc) = show n ++ show sc
+   show (DelayCase _ ty arg sc) = "Delay " ++ show arg ++ " => " ++ show sc
+   show (ConstCase _ c sc) = show c ++ " => " ++ show sc
+   show (DefaultCase _ sc) = "_ => " ++ show sc
 
 export
 covering

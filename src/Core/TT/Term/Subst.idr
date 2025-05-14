@@ -70,10 +70,10 @@ substTaggedTerms outer dropped env b
 substCaseScope outer dropped env (RHS tm) = RHS (substTerm outer dropped env tm)
 substCaseScope outer dropped env (Arg c x sc) = Arg c x (substCaseScope (suc outer) dropped env sc)
 
-substAlt outer dropped env (ConCase n t sc) = ConCase n t (substCaseScope outer dropped env sc)
-substAlt outer dropped env (DelayCase ty arg sc) = DelayCase ty arg (substTerm (suc (suc outer)) dropped env sc)
-substAlt outer dropped env (ConstCase c sc) = ConstCase c (substTerm outer dropped env sc)
-substAlt outer dropped env (DefaultCase sc) = DefaultCase (substTerm outer dropped env sc)
+substAlt outer dropped env (ConCase fc n t sc) = ConCase fc n t (substCaseScope outer dropped env sc)
+substAlt outer dropped env (DelayCase fc ty arg sc) = DelayCase fc ty arg (substTerm (suc (suc outer)) dropped env sc)
+substAlt outer dropped env (ConstCase fc c sc) = ConstCase fc c (substTerm outer dropped env sc)
+substAlt outer dropped env (DefaultCase fc sc) = DefaultCase fc (substTerm outer dropped env sc)
 
 export
 substs : SizeOf dropped -> SubstEnv dropped vars -> Term (vars ++ dropped) -> Term vars

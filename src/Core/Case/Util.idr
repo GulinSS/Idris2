@@ -41,25 +41,25 @@ getCons defs (NTCon _ tn _ _)
 getCons defs _ = pure []
 
 emptyRHS : FC -> CaseTree vars -> CaseTree vars
-emptyRHS fc (TCase c idx el sc alts) = TCase c idx el sc (map emptyRHSalt alts)
+emptyRHS _ (TCase cfc c idx el sc alts) = TCase cfc c idx el sc (map emptyRHSalt alts)
   where
     emptyRHSscope : forall vars . FC -> TCaseScope vars -> TCaseScope vars
     emptyRHSscope fc (TRHS tm) = TRHS (emptyRHS fc tm)
     emptyRHSscope fc (TArg c x sc) = TArg c x (emptyRHSscope fc sc)
 
     emptyRHSalt : TCaseAlt vars -> TCaseAlt vars
-    emptyRHSalt (TConCase n t sc) = TConCase n t (emptyRHSscope fc sc)
-    emptyRHSalt (TDelayCase c arg sc) = TDelayCase c arg (emptyRHS fc sc)
-    emptyRHSalt (TConstCase c sc) = TConstCase c (emptyRHS fc sc)
-    emptyRHSalt (TDefaultCase sc) = TDefaultCase (emptyRHS fc sc)
+    emptyRHSalt (TConCase fc n t sc) = TConCase fc n t (emptyRHSscope fc sc)
+    emptyRHSalt (TDelayCase fc c arg sc) = TDelayCase fc c arg (emptyRHS fc sc)
+    emptyRHSalt (TConstCase fc c sc) = TConstCase fc c (emptyRHS fc sc)
+    emptyRHSalt (TDefaultCase fc sc) = TDefaultCase fc (emptyRHS fc sc)
 emptyRHS fc (STerm i s) = STerm i (Erased fc Placeholder)
-emptyRHS fc sc = sc
+emptyRHS _ sc = sc
 
 export
 mkAlt : {vars : _} ->
         FC -> CaseTree vars -> DataCon -> TCaseAlt vars
 mkAlt fc sc (MkDataCon cn t ar qs)
-    = TConCase cn t (mkScope qs (map (MN "m") (take ar [0..])))
+    = TConCase fc cn t (mkScope qs (map (MN "m") (take ar [0..])))
   where
     mkScope : List RigCount -> SnocList Name -> TCaseScope vars
     mkScope _ [<] = TRHS (emptyRHS fc sc)
@@ -75,10 +75,10 @@ emptyRHSTm fc (Case cfc ct c sc scTy alts)
     emptyRHSscope fc (Arg c x sc) = Arg c x (emptyRHSscope fc sc)
 
     emptyRHSalt : forall vars . CaseAlt vars -> CaseAlt vars
-    emptyRHSalt (ConCase n t sc) = ConCase n t (emptyRHSscope fc sc)
-    emptyRHSalt (DelayCase c arg sc) = DelayCase c arg (emptyRHSTm fc sc)
-    emptyRHSalt (ConstCase c sc) = ConstCase c (emptyRHSTm fc sc)
-    emptyRHSalt (DefaultCase sc) = DefaultCase (emptyRHSTm fc sc)
+    emptyRHSalt (ConCase fc n t sc) = ConCase fc n t (emptyRHSscope fc sc)
+    emptyRHSalt (DelayCase fc c arg sc) = DelayCase fc c arg (emptyRHSTm fc sc)
+    emptyRHSalt (ConstCase fc c sc) = ConstCase fc c (emptyRHSTm fc sc)
+    emptyRHSalt (DefaultCase fc sc) = DefaultCase fc (emptyRHSTm fc sc)
 emptyRHSTm fc tm@(Unmatched _ _) = tm
 emptyRHSTm fc _ = Erased fc Placeholder
 
@@ -86,7 +86,7 @@ export
 mkAltTm : {vars : _} ->
         FC -> Term vars -> DataCon -> CaseAlt vars
 mkAltTm fc sc (MkDataCon cn t ar qs)
-    = ConCase cn t (mkScope zero qs (map (MN "m") (take ar [0..])))
+    = ConCase fc cn t (mkScope zero qs (map (MN "m") (take ar [0..])))
   where
     mkScope : SizeOf more -> List RigCount -> SnocList Name ->
               CaseScope (vars ++ more)
@@ -96,14 +96,14 @@ mkAltTm fc sc (MkDataCon cn t ar qs)
 
 export
 tagIs : Int -> TCaseAlt vars -> Bool
-tagIs t (TConCase _ t' _) = t == t'
-tagIs t (TConstCase _ _) = False
-tagIs t (TDelayCase _ _ _) = False
-tagIs t (TDefaultCase _) = True
+tagIs t (TConCase _ _ t' _) = t == t'
+tagIs t (TConstCase _ _ _) = False
+tagIs t (TDelayCase _ _ _ _) = False
+tagIs t (TDefaultCase _ _) = True
 
 export
 tagIsTm : Int -> CaseAlt vars -> Bool
-tagIsTm t (ConCase _ t' _) = t == t'
-tagIsTm t (ConstCase _ _) = False
-tagIsTm t (DelayCase _ _ _) = False
-tagIsTm t (DefaultCase _) = True
+tagIsTm t (ConCase _ _ t' _) = t == t'
+tagIsTm t (ConstCase _ _ _) = False
+tagIsTm t (DelayCase _ _ _ _) = False
+tagIsTm t (DefaultCase _ _) = True

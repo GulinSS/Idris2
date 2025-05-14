@@ -151,10 +151,10 @@ isEmpty defs env (NTCon fc n a args)
 isEmpty defs env _ = pure False
 
 altMatch : CaseAlt vars -> CaseAlt vars -> Bool
-altMatch _ (DefaultCase _) = True
-altMatch (DelayCase _ _ t) (DelayCase _ _ t') = True
-altMatch (ConCase n t _) (ConCase n' t' _) = t == t'
-altMatch (ConstCase c _) (ConstCase c' _) = c == c'
+altMatch _ (DefaultCase _ _) = True
+altMatch (DelayCase _ _ _ t) (DelayCase _ _ _ t') = True
+altMatch (ConCase _ n t _) (ConCase _ n' t' _) = t == t'
+altMatch (ConstCase _ c _) (ConstCase _ c' _) = c == c'
 altMatch _ _ = False
 
 -- Given a type and a list of case alternatives, return the
@@ -167,21 +167,21 @@ getMissingAlts : {auto c : Ref Ctxt Defs} ->
 -- check, so require a catch all
 getMissingAlts fc defs (NPrimVal _ $ PrT WorldType) alts
     = if isNil alts
-         then pure [DefaultCase (Unmatched fc "Coverage check")]
+         then pure [DefaultCase fc (Unmatched fc "Coverage check")]
          else pure []
 getMissingAlts fc defs (NPrimVal _ c) alts
   = do log "coverage.missing" 50 $ "Looking for missing alts at type " ++ show c
        if any isDefault alts
          then do log "coverage.missing" 20 "Found default"
                  pure []
-         else pure [DefaultCase (Unmatched fc "Coverage check")]
+         else pure [DefaultCase fc (Unmatched fc "Coverage check")]
 -- Similarly for types
 getMissingAlts fc defs (NType _ _) alts
     = do log "coverage.missing" 50 "Looking for missing alts at type Type"
          if any isDefault alts
            then do log "coverage.missing" 20 "Found default"
                    pure []
-           else pure [DefaultCase (Unmatched fc "Coverage check")]
+           else pure [DefaultCase fc (Unmatched fc "Coverage check")]
 getMissingAlts fc defs nfty alts
     = do log "coverage.missing" 50 $ "Getting constructors for: " ++ show nfty
          logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
@@ -242,10 +242,10 @@ addNot v t ((v', ts) :: xs)
          else ((v', ts) :: addNot v t xs)
 
 tagIsNot : List Int -> CaseAlt vars -> Bool
-tagIsNot ts (ConCase _ t' _) = not (t' `elem` ts)
-tagIsNot ts (ConstCase _ _) = True
-tagIsNot ts (DelayCase _ _ _) = True
-tagIsNot ts (DefaultCase _) = False
+tagIsNot ts (ConCase _ _ t' _) = not (t' `elem` ts)
+tagIsNot ts (ConstCase _ _ _) = True
+tagIsNot ts (DelayCase _ _ _ _) = True
+tagIsNot ts (DefaultCase _ _) = False
 
 -- Replace a default case with explicit branches for the constructors.
 -- This is easier than checking whether a default is needed when traversing
@@ -263,14 +263,14 @@ replaceDefaults fc defs nfty cs
          pure (dropRep (concat cs'))
   where
     rep : CaseAlt vars -> Core (List (CaseAlt vars))
-    rep (DefaultCase sc)
+    rep (DefaultCase _ sc)
         = do allCons <- getCons defs nfty
              pure (map (mkAltTm fc sc) allCons)
     rep c = pure [c]
 
     dropRep : List (CaseAlt vars) -> List (CaseAlt vars)
     dropRep [] = []
-    dropRep (c@(ConCase n t sc) :: rest)
+    dropRep (c@(ConCase _ n t sc) :: rest)
           -- assumption is that there's no defaultcase in 'rest' because
           -- we've just removed it
         = c :: dropRep (filter (not . tagIsTm t) rest)
@@ -309,40 +309,40 @@ buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsI
   where
     buildArgSc : {vars, more : _} ->
                  SizeOf more ->
-                 Name ->
+                 FC -> Name ->
                  KnownVars vars Int -> KnownVars vars (List Int) ->
                  Name -> Int -> SnocList (RigCount, Name) ->
                  CaseScope (vars ++ more) -> Core (List (SnocList (RigCount, ClosedTerm)))
-    buildArgSc s var known not' n t args (RHS tm)
+    buildArgSc s fc var known not' n t args (RHS tm)
         = do let con = Ref fc (DataCon t (length args)) n
              let app = applySpine fc con
                              (map @{Compose} (Ref fc Bound) args)
              let ps' = map @{Compose} (substName zero var app) ps
              buildArgs defs (weakenNs s known) (weakenNs s not') ps' tm
-    buildArgSc s var known not' n t args (Arg c x sc)
-        = buildArgSc (suc s) var known not' n t (args :< (c, x)) sc
+    buildArgSc s fc var known not' n t args (Arg c x sc)
+        = buildArgSc (suc s) fc var known not' n t (args :< (c, x)) sc
 
     buildArgAlt : Name -> KnownVars vars (List Int) ->
                   CaseAlt vars -> Core (List (SnocList (RigCount, ClosedTerm)))
-    buildArgAlt var not' (ConCase n t sc)
-        = buildArgSc zero var ((MkVar el, t) :: known) not' n t [<] sc
-    buildArgAlt var not' (DelayCase t a sc)
+    buildArgAlt var not' (ConCase cfc n t sc)
+        = buildArgSc zero cfc var ((MkVar el, t) :: known) not' n t [<] sc
+    buildArgAlt var not' (DelayCase _ t a sc)
         = let l = mkSizeOf [< t, a]
               ps' = map @{Compose} (substName zero var
                                               (TDelay fc LUnknown
                                                       (Ref fc Bound t)
                                                       (Ref fc Bound a))) ps in
               buildArgs defs (weakenNs l known) (weakenNs l not') ps' sc
-    buildArgAlt var not' (ConstCase i sc)
+    buildArgAlt var not' (ConstCase _ i sc)
         = do let ps' = map @{Compose} (substName zero var (PrimVal fc i)) ps
              buildArgs defs known not' ps' sc
-    buildArgAlt var not' (DefaultCase sc)
+    buildArgAlt var not' (DefaultCase _ sc)
         = buildArgs defs known not' ps sc
 
     buildArgsAlt : Name -> KnownVars vars (List Int) -> List (CaseAlt vars) ->
                    Core (List (SnocList (RigCount, ClosedTerm)))
     buildArgsAlt var not' [] = pure []
-    buildArgsAlt var not' (c@(ConCase _ t _) :: cs)
+    buildArgsAlt var not' (c@(ConCase _ _ t _) :: cs)
         = pure $ !(buildArgAlt var not' c) ++
                  !(buildArgsAlt var (addNot el t not') cs)
     buildArgsAlt var not' (c :: cs)

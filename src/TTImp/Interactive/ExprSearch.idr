@@ -11,7 +11,6 @@ module TTImp.Interactive.ExprSearch
 -- depth.
 
 import Core.AutoSearch
-import Core.Case.CaseTree
 import Core.Context
 import Core.Context.Log
 import Core.Env

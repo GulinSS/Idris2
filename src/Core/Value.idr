@@ -120,16 +120,16 @@ mutual
   public export
   data NCaseAlt : SnocList Name -> Type where
        ||| Constructor for a data type; bind the arguments and subterms.
-       NConCase : Name -> (tag : Int) ->
+       NConCase : FC -> Name -> (tag : Int) ->
                   (args : SnocList (RigCount, Name)) ->
                   NCaseScope args vars -> NCaseAlt vars
        ||| Lazy match for the Delay type use for codata types
-       NDelayCase : (ty : Name) -> (arg : Name) ->
+       NDelayCase : FC -> (ty : Name) -> (arg : Name) ->
                     NCaseScope [<(Preorder.top, arg), (Semiring.erased, ty)] vars -> NCaseAlt vars
        ||| Match against a literal
-       NConstCase : Constant -> Closure vars -> NCaseAlt vars
+       NConstCase : FC -> Constant -> Closure vars -> NCaseAlt vars
        ||| Catch-all case
-       NDefaultCase : Closure vars -> NCaseAlt vars
+       NDefaultCase : FC -> Closure vars -> NCaseAlt vars
 
 %name LocalEnv lenv
 %name Closure cl
@@ -235,15 +235,15 @@ HasNames (NF free) where
 
 export
 HasNames (NCaseAlt free) where
-  full defs (NConCase n tag args cl) = pure $ NConCase !(full defs n) tag args cl
-  full defs (NDelayCase n arg cl) = pure $ NDelayCase !(full defs n) arg cl
-  full defs (NConstCase c cl) = pure $ NConstCase c cl
-  full defs (NDefaultCase cl) = pure $ NDefaultCase cl
+  full defs (NConCase fc n tag args cl) = pure $ NConCase fc !(full defs n) tag args cl
+  full defs (NDelayCase fc n arg cl) = pure $ NDelayCase fc !(full defs n) arg cl
+  full defs (NConstCase fc c cl) = pure $ NConstCase fc c cl
+  full defs (NDefaultCase fc cl) = pure $ NDefaultCase fc cl
 
-  resolved defs (NConCase n tag args cl) = pure $ NConCase !(resolved defs n) tag args cl
-  resolved defs (NDelayCase n arg cl) = pure $ NDelayCase !(resolved defs n) arg cl
-  resolved defs (NConstCase c cl) = pure $ NConstCase c cl
-  resolved defs (NDefaultCase cl) = pure $ NDefaultCase cl
+  resolved defs (NConCase fc n tag args cl) = pure $ NConCase fc !(resolved defs n) tag args cl
+  resolved defs (NDelayCase fc n arg cl) = pure $ NDelayCase fc !(resolved defs n) arg cl
+  resolved defs (NConstCase fc c cl) = pure $ NConstCase fc c cl
+  resolved defs (NDefaultCase fc cl) = pure $ NDefaultCase fc cl
 
 export
 covering

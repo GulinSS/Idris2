@@ -320,15 +320,15 @@ mutual
 
   export
   Hashable (CaseAlt vars) where
-    hashWithSalt h (ConCase n t sc)
+    hashWithSalt h (ConCase _ n t sc)
         = hashWithSalt h 0 `hashWithSalt` n `hashWithSalt` t
                            `hashWithSalt` sc
-    hashWithSalt h (DelayCase ty arg tm)
+    hashWithSalt h (DelayCase _ ty arg tm)
         = hashWithSalt h 1 `hashWithSalt` ty `hashWithSalt` arg
                            `hashWithSalt` tm
-    hashWithSalt h (ConstCase c tm)
+    hashWithSalt h (ConstCase _ c tm)
         = hashWithSalt h 2 `hashWithSalt` c `hashWithSalt` tm
-    hashWithSalt h (DefaultCase tm)
+    hashWithSalt h (DefaultCase _ tm)
         = hashWithSalt h 3 `hashWithSalt` tm
 
 export

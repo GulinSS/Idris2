@@ -467,12 +467,12 @@ mkLocalsCaseScope outer bs (RHS tm) = RHS (mkLocals outer bs tm)
 mkLocalsCaseScope outer bs (Arg r x scope)
     = Arg r x (mkLocalsCaseScope (suc outer) bs scope)
 
-mkLocalsAlt outer bs (ConCase n t scope)
-    = ConCase n t (mkLocalsCaseScope outer bs scope)
-mkLocalsAlt outer bs (DelayCase ty arg rhs)
-    = DelayCase ty arg (mkLocals (suc (suc outer)) bs rhs)
-mkLocalsAlt outer bs (ConstCase c rhs) = ConstCase c (mkLocals outer bs rhs)
-mkLocalsAlt outer bs (DefaultCase rhs) = DefaultCase (mkLocals outer bs rhs)
+mkLocalsAlt outer bs (ConCase fc n t scope)
+    = ConCase fc n t (mkLocalsCaseScope outer bs scope)
+mkLocalsAlt outer bs (DelayCase fc ty arg rhs)
+    = DelayCase fc ty arg (mkLocals (suc (suc outer)) bs rhs)
+mkLocalsAlt outer bs (ConstCase fc c rhs) = ConstCase fc c (mkLocals outer bs rhs)
+mkLocalsAlt outer bs (DefaultCase fc rhs) = DefaultCase fc (mkLocals outer bs rhs)
 
 export
 refsToLocals : Bounds bound -> Term vars -> Term (vars ++ bound)
@@ -534,10 +534,10 @@ addMetas res ns (Case fc t c sc scty alts)
     addMetaScope ns (Arg c x sc) = addMetaScope ns sc
 
     addMetaAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
-    addMetaAlt ns (ConCase n t sc) = addMetaScope ns sc
-    addMetaAlt ns (DelayCase ty arg tm) = addMetas res ns tm
-    addMetaAlt ns (ConstCase c tm) = addMetas res ns tm
-    addMetaAlt ns (DefaultCase tm) = addMetas res ns tm
+    addMetaAlt ns (ConCase _ n t sc) = addMetaScope ns sc
+    addMetaAlt ns (DelayCase _ ty arg tm) = addMetas res ns tm
+    addMetaAlt ns (ConstCase _ c tm) = addMetas res ns tm
+    addMetaAlt ns (DefaultCase _ tm) = addMetas res ns tm
 
     addMetaAlts : NameMap Bool -> List (CaseAlt vars) -> NameMap Bool
     addMetaAlts ns [] = ns
@@ -591,10 +591,10 @@ addRefs ua at ns (Case fc t c sc scty alts)
     addRefScope ns (Arg c x sc) = addRefScope ns sc
 
     addRefAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
-    addRefAlt ns (ConCase n t sc) = addRefScope ns sc
-    addRefAlt ns (DelayCase ty arg tm) = addRefs ua at ns tm
-    addRefAlt ns (ConstCase c tm) = addRefs ua at ns tm
-    addRefAlt ns (DefaultCase tm) = addRefs ua at ns tm
+    addRefAlt ns (ConCase _ n t sc) = addRefScope ns sc
+    addRefAlt ns (DelayCase _ ty arg tm) = addRefs ua at ns tm
+    addRefAlt ns (ConstCase _ c tm) = addRefs ua at ns tm
+    addRefAlt ns (DefaultCase _ tm) = addRefs ua at ns tm
 
     addRefAlts : NameMap Bool -> List (CaseAlt vars) -> NameMap Bool
     addRefAlts ns [] = ns

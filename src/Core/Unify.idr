@@ -550,17 +550,17 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
 
     updateIAlts : {vs, newvars : _} ->
                   IVars vs newvars -> CaseAlt newvars -> Maybe (CaseAlt vs)
-    updateIAlts ivs (ConCase n t sc)
-        = Just (ConCase n t !(updateIScope ivs sc))
-    updateIAlts ivs (DelayCase ty arg rhs)
+    updateIAlts ivs (ConCase fc n t sc)
+        = Just (ConCase fc n t !(updateIScope ivs sc))
+    updateIAlts ivs (DelayCase fc ty arg rhs)
         = let ivs' = ICons (Just (MkVar First)) $
                      ICons (Just (MkVar (Later First))) $
                      weaken (weaken ivs) in
-              Just (DelayCase ty arg !(updateIVars ivs' rhs))
-    updateIAlts ivs (ConstCase c rhs)
-        = Just (ConstCase c !(updateIVars ivs rhs))
-    updateIAlts ivs (DefaultCase rhs)
-        = Just (DefaultCase !(updateIVars ivs rhs))
+              Just (DelayCase fc ty arg !(updateIVars ivs' rhs))
+    updateIAlts ivs (ConstCase fc c rhs)
+        = Just (ConstCase fc c !(updateIVars ivs rhs))
+    updateIAlts ivs (DefaultCase fc rhs)
+        = Just (DefaultCase fc !(updateIVars ivs rhs))
 
     updateIVars ivs (Local fc r idx p)
         = do MkVar p' <- updateIVar ivs (MkVar p)

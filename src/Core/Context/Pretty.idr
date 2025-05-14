@@ -10,7 +10,6 @@ import Idris.Syntax
 import Idris.Pretty
 import Idris.Resugar
 
-import Core.Case.CaseTree
 import Core.Context.Context
 
 import Libraries.Data.String.Extra
@@ -52,19 +51,19 @@ namespace Raw
   prettyScope (RHS tm) = fatArrow <++> byShow tm
   prettyScope (Arg c x sc) = annotate Bound (pretty0 x) <++> prettyScope sc
 
-  prettyAlt (ConCase n tag sc)
+  prettyAlt (ConCase _ n tag sc)
       = annotate (DCon (Just n)) (pretty0 n) <++> prettyScope sc
-  prettyAlt (DelayCase _ arg sc) =
+  prettyAlt (DelayCase _ _ arg sc) =
         keyword "Delay" <++> pretty0 arg
         <++> fatArrow
         <+> let sc = prettyTree sc in
             Union (spaces 1 <+> sc) (nest 2 (hardline <+> sc))
-  prettyAlt (ConstCase c sc) =
+  prettyAlt (ConstCase _ c sc) =
         pretty c
         <++> fatArrow
         <+> let sc = prettyTree sc in
             Union (spaces 1 <+> sc) (nest 2 (hardline <+> sc))
-  prettyAlt (DefaultCase sc) =
+  prettyAlt (DefaultCase _ sc) =
         keyword "_"
         <++> fatArrow
         <+> let sc = prettyTree sc in
@@ -136,21 +135,21 @@ namespace Resugared
       sc <- prettyScope (env :< PVar emptyFC top Explicit (Erased emptyFC Placeholder)) sc
       pure $ annotate Bound (pretty0 x) <++> sc
 
-  prettyAlt env (ConCase n tag sc) = do
+  prettyAlt env (ConCase _ n tag sc) = do
       sc <- prettyScope env sc
       pure $ annotate (DCon (Just n)) (pretty0 n) <++> sc
-  prettyAlt env (DelayCase _ arg tm) = do
+  prettyAlt env (DelayCase _ _ arg tm) = do
       tm <- prettyTree (env :<
               PVar emptyFC top Explicit (Erased emptyFC Placeholder) :<
               PVar emptyFC top Explicit (Erased emptyFC Placeholder)) tm
       pure $ keyword "Delay" <++> pretty0 arg
         <++> fatArrow
         <+> Union (spaces 1 <+> tm) (nest 2 (hardline <+> tm))
-  prettyAlt env (ConstCase c tm) = do
+  prettyAlt env (ConstCase _ c tm) = do
       tm <- prettyTree env tm
       pure $ pretty c <++> fatArrow <+>
             Union (spaces 1 <+> tm) (nest 2 (hardline <+> tm))
-  prettyAlt env (DefaultCase tm) = do
+  prettyAlt env (DefaultCase _ tm) = do
       tm <- prettyTree env tm
       pure $ keyword "_" <++> fatArrow <+>
             Union (spaces 1 <+> tm) (nest 2 (hardline <+> tm))

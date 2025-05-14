@@ -40,10 +40,10 @@ onPRefs f = go neutral where
   goScope acc (RHS tm) = go acc tm
   goScope acc (Arg c x sc) = goScope acc sc
 
-  goAlt acc (ConCase n t sc) = goScope acc sc
-  goAlt acc (DelayCase ty arg tm) = go acc tm
-  goAlt acc (ConstCase c tm) = go acc tm
-  goAlt acc (DefaultCase tm) = go acc tm
+  goAlt acc (ConCase _ n t sc) = goScope acc sc
+  goAlt acc (DelayCase _ ty arg tm) = go acc tm
+  goAlt acc (ConstCase _ c tm) = go acc tm
+  goAlt acc (DefaultCase _ tm) = go acc tm
 
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
@@ -88,10 +88,10 @@ onConstants f = go neutral where
   goScope acc (RHS tm) = go acc tm
   goScope acc (Arg c x sc) = goScope acc sc
 
-  goAlt acc (ConCase n t sc) = goScope acc sc
-  goAlt acc (DelayCase ty arg tm) = go acc tm
-  goAlt acc (ConstCase c tm) = go acc tm
-  goAlt acc (DefaultCase tm) = go acc tm
+  goAlt acc (ConCase _ n t sc) = goScope acc sc
+  goAlt acc (DelayCase _ ty arg tm) = go acc tm
+  goAlt acc (ConstCase _ c tm) = go acc tm
+  goAlt acc (DefaultCase _ tm) = go acc tm
 
   goAlts acc [] = acc
   goAlts acc (x :: xs) = goAlts (goAlt acc x) xs
@@ -132,10 +132,10 @@ mapTermM f t = act t where
   goScope (RHS tm) = RHS <$> act tm
   goScope (Arg c x sc) = Arg c x <$> goScope sc
 
-  goAlt (ConCase n t sc) = ConCase n t <$> goScope sc
-  goAlt (DelayCase t a tm) = DelayCase t a <$> act tm
-  goAlt (ConstCase c tm) = ConstCase c <$> act tm
-  goAlt (DefaultCase tm) = DefaultCase <$> act tm
+  goAlt (ConCase fc n t sc) = ConCase fc n t <$> goScope sc
+  goAlt (DelayCase fc t a tm) = DelayCase fc t a <$> act tm
+  goAlt (ConstCase fc c tm) = ConstCase fc c <$> act tm
+  goAlt (DefaultCase fc tm) = DefaultCase fc <$> act tm
 
 export
 mapTerm : ({vars : _} -> Term vars -> Term vars) ->
@@ -167,7 +167,7 @@ mapTerm f t = act t where
   goScope (RHS tm) = RHS (act tm)
   goScope (Arg c x sc) = Arg c x (goScope sc)
 
-  goAlt (ConCase n t sc) = ConCase n t (goScope sc)
-  goAlt (DelayCase t a tm) = DelayCase t a (act tm)
-  goAlt (ConstCase c tm) = ConstCase c (act tm)
-  goAlt (DefaultCase tm) = DefaultCase (act tm)
+  goAlt (ConCase fc n t sc) = ConCase fc n t (goScope sc)
+  goAlt (DelayCase fc t a tm) = DelayCase fc t a (act tm)
+  goAlt (ConstCase fc c tm) = ConstCase fc c (act tm)
+  goAlt (DefaultCase fc tm) = DefaultCase fc (act tm)

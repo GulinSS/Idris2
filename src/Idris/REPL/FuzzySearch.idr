@@ -143,10 +143,10 @@ fuzzySearch expr = do
   doFindScope ns (RHS tm) = doFind ns tm
   doFindScope ns (Arg c x tm) = doFindScope ns tm
 
-  doFindAlt ns (ConCase n t sc) = doFindScope ns sc
-  doFindAlt ns (DelayCase t a tm) = doFind ns tm
-  doFindAlt ns (ConstCase c tm) = doFind ns tm
-  doFindAlt ns (DefaultCase tm) = doFind ns tm
+  doFindAlt ns (ConCase _ n t sc) = doFindScope ns sc
+  doFindAlt ns (DelayCase _ t a tm) = doFind ns tm
+  doFindAlt ns (ConstCase _ c tm) = doFind ns tm
+  doFindAlt ns (DefaultCase _ tm) = doFind ns tm
 
   toFullNames' : NameOrConst -> Core NameOrConst
   toFullNames' (AName x) = AName <$> toFullNames x

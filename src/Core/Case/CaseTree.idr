@@ -25,7 +25,7 @@ public export
 data CaseTree : Scoped where
      ||| case x return scTy of { p1 => e1 ; ... }
      TCase : {name : _} ->
-             RigCount ->
+             FC -> RigCount ->
              (idx : Nat) ->
              (0 p : IsVar name idx vars) ->
              (scTy : Term vars) -> List (TCaseAlt vars) ->
@@ -35,9 +35,9 @@ data CaseTree : Scoped where
      ||| initial clauses are reached in the tree
      STerm : Int -> Term vars -> CaseTree vars
      ||| error from a partial match
-     TUnmatched : (msg : String) -> CaseTree vars
+     TUnmatched : FC -> (msg : String) -> CaseTree vars
      ||| Absurd context
-     TImpossible : CaseTree vars
+     TImpossible : FC -> CaseTree vars
 
 public export
 data TCaseScope : SnocList Name -> Type where
@@ -49,25 +49,25 @@ data TCaseScope : SnocList Name -> Type where
 public export
 data TCaseAlt : SnocList Name -> Type where
      ||| Constructor for a data type; bind the arguments and subterms.
-     TConCase : Name -> (tag : Int) -> TCaseScope vars -> TCaseAlt vars
+     TConCase : FC -> Name -> (tag : Int) -> TCaseScope vars -> TCaseAlt vars
      ||| Lazy match for the Delay type use for codata typesT
-     TDelayCase : (ty : Name) -> (arg : Name) ->
+     TDelayCase : FC -> (ty : Name) -> (arg : Name) ->
                   CaseTree (vars :< ty :< arg) -> TCaseAlt vars
      ||| Match against a literal
-     TConstCase : Constant -> CaseTree vars -> TCaseAlt vars
+     TConstCase : FC -> Constant -> CaseTree vars -> TCaseAlt vars
      ||| Catch-all case
-     TDefaultCase : CaseTree vars -> TCaseAlt vars
+     TDefaultCase : FC -> CaseTree vars -> TCaseAlt vars
 
 mutual
   export
   StripNamespace (CaseTree vars) where
-    trimNS ns (TCase c idx p scTy xs)
-        = TCase c idx p (trimNS ns scTy) (map (trimNS ns) xs)
+    trimNS ns (TCase fc c idx p scTy xs)
+        = TCase fc c idx p (trimNS ns scTy) (map (trimNS ns) xs)
     trimNS ns (STerm x t) = STerm x (trimNS ns t)
     trimNS ns c = c
 
-    restoreNS ns (TCase c idx p scTy xs)
-        = TCase c idx p (restoreNS ns scTy) (map (restoreNS ns) xs)
+    restoreNS ns (TCase fc c idx p scTy xs)
+        = TCase fc c idx p (restoreNS ns scTy) (map (restoreNS ns) xs)
     restoreNS ns (STerm x t) = STerm x (restoreNS ns t)
     restoreNS ns c = c
 
@@ -81,15 +81,15 @@ mutual
 
   export
   StripNamespace (TCaseAlt vars) where
-    trimNS ns (TConCase n t sc) = TConCase n t (trimNS ns sc)
-    trimNS ns (TDelayCase ty arg t) = TDelayCase ty arg (trimNS ns t)
-    trimNS ns (TConstCase x t) = TConstCase x (trimNS ns t)
-    trimNS ns (TDefaultCase t) = TDefaultCase (trimNS ns t)
+    trimNS ns (TConCase fc n t sc) = TConCase fc n t (trimNS ns sc)
+    trimNS ns (TDelayCase fc ty arg t) = TDelayCase fc ty arg (trimNS ns t)
+    trimNS ns (TConstCase fc x t) = TConstCase fc x (trimNS ns t)
+    trimNS ns (TDefaultCase fc t) = TDefaultCase fc (trimNS ns t)
 
-    restoreNS ns (TConCase n t sc) = TConCase n t (restoreNS ns sc)
-    restoreNS ns (TDelayCase ty arg t) = TDelayCase ty arg (restoreNS ns t)
-    restoreNS ns (TConstCase x t) = TConstCase x (restoreNS ns t)
-    restoreNS ns (TDefaultCase t) = TDefaultCase (restoreNS ns t)
+    restoreNS ns (TConCase fc n t sc) = TConCase fc n t (restoreNS ns sc)
+    restoreNS ns (TDelayCase fc ty arg t) = TDelayCase fc ty arg (restoreNS ns t)
+    restoreNS ns (TConstCase fc x t) = TConstCase fc x (restoreNS ns t)
+    restoreNS ns (TDefaultCase fc t) = TDefaultCase fc (restoreNS ns t)
 
 
 public export
@@ -115,45 +115,45 @@ mkCaseAlt : CaseType -> TCaseAlt vars -> CaseAlt vars
 
 export
 mkTerm : CaseType -> CaseTree vars -> Term vars
-mkTerm ct (TCase c idx p scTy xs)
-   = Case emptyFC ct c (Local emptyFC Nothing idx p) scTy (map (mkCaseAlt ct) xs)
+mkTerm ct (TCase fc c idx p scTy xs)
+   = Case fc ct c (Local fc  Nothing idx p) scTy (map (mkCaseAlt ct) xs)
 mkTerm _ (STerm i tm) = tm
-mkTerm _ (TUnmatched msg) = Unmatched emptyFC msg
-mkTerm _ TImpossible = Erased emptyFC Impossible
+mkTerm _ (TUnmatched fc msg) = Unmatched fc msg
+mkTerm _ (TImpossible fc) = Erased fc Impossible
 
 mkCaseScope : CaseType -> TCaseScope vars -> CaseScope vars
 mkCaseScope ct (TRHS tm) = RHS (mkTerm ct tm)
 mkCaseScope ct (TArg c x sc) = Arg c x (mkCaseScope ct sc)
 
-mkCaseAlt ct (TConCase x tag sc) = ConCase x tag (mkCaseScope ct sc)
-mkCaseAlt ct (TDelayCase ty arg tm) = DelayCase ty arg (mkTerm ct tm)
-mkCaseAlt ct (TConstCase c tm) = ConstCase c (mkTerm ct tm)
-mkCaseAlt ct (TDefaultCase tm) = DefaultCase (mkTerm ct tm)
+mkCaseAlt ct (TConCase fc x tag sc) = ConCase fc x tag (mkCaseScope ct sc)
+mkCaseAlt ct (TDelayCase fc ty arg tm) = DelayCase fc ty arg (mkTerm ct tm)
+mkCaseAlt ct (TConstCase fc c tm) = ConstCase fc c (mkTerm ct tm)
+mkCaseAlt ct (TDefaultCase fc tm) = DefaultCase fc (mkTerm ct tm)
 
 showCT : {vars : _} -> (indent : String) -> CaseTree vars -> String
 showCA : {vars : _} -> (indent : String) -> TCaseAlt vars  -> String
 
-showCT indent (TCase {name} _ idx prf ty alts)
+showCT indent (TCase {name} _ _ idx prf ty alts)
   = "case " ++ show name ++ "[" ++ show idx ++ "] : " ++ show ty ++ " of"
   ++ "\n" ++ indent ++ " { "
   ++ showSep ("\n" ++ indent ++ " | ")
              (assert_total (map (showCA ("  " ++ indent)) alts))
   ++ "\n" ++ indent ++ " }"
 showCT indent (STerm i tm) = "[" ++ show i ++ "] " ++ show tm
-showCT indent (TUnmatched msg) = "Error: " ++ show msg
-showCT indent TImpossible = "Impossible"
+showCT indent (TUnmatched _ msg) = "Error: " ++ show msg
+showCT indent (TImpossible _) = "Impossible"
 
-showCA indent (TConCase n tag sc)
+showCA indent (TConCase _ n tag sc)
         = show n ++ " " ++ showScope sc
   where
     showScope : {vars : _} -> TCaseScope vars -> String
     showScope (TRHS tm) = " => " ++ showCT indent tm
     showScope (TArg c x sc) = show x ++ " " ++ showScope sc
-showCA indent (TDelayCase _ arg sc)
+showCA indent (TDelayCase _ _ arg sc)
         = "Delay " ++ show arg ++ " => " ++ showCT indent sc
-showCA indent (TConstCase c sc)
+showCA indent (TConstCase _ c sc)
         = "Constant " ++ show c ++ " => " ++ showCT indent sc
-showCA indent (TDefaultCase sc)
+showCA indent (TDefaultCase _ sc)
         = "_ => " ++ showCT indent sc
 
 export
@@ -174,13 +174,13 @@ covering
 mutual
   export
   eqTree : CaseTree vs -> CaseTree vs' -> Bool
-  eqTree (TCase _ i _ _ alts) (TCase _ i' _ _ alts')
+  eqTree (TCase _ _ i _ _ alts) (TCase _ _ i' _ _ alts')
       = i == i'
        && length alts == length alts'
        && all (uncurry eqAlt) (zip alts alts')
   eqTree (STerm _ t) (STerm _ t') = eqTerm t t'
-  eqTree (TUnmatched _) (TUnmatched _) = True
-  eqTree TImpossible TImpossible = True
+  eqTree (TUnmatched _ _) (TUnmatched _ _) = True
+  eqTree (TImpossible _) (TImpossible _) = True
   eqTree _ _ = False
 
   eqScope : forall vs, vs' . TCaseScope vs -> TCaseScope vs' -> Bool
@@ -189,13 +189,13 @@ mutual
   eqScope _ _ = False
 
   eqAlt : TCaseAlt vs -> TCaseAlt vs' -> Bool
-  eqAlt (TConCase n t sc) (TConCase n' t' sc')
+  eqAlt (TConCase _ n t sc) (TConCase _ n' t' sc')
       = n == n' && eqScope sc sc' -- assume arities match, since name does
-  eqAlt (TDelayCase _ _ tree) (TDelayCase _ _ tree')
+  eqAlt (TDelayCase _ _ _ tree) (TDelayCase _ _ _ tree')
       = eqTree tree tree'
-  eqAlt (TConstCase c tree) (TConstCase c' tree')
+  eqAlt (TConstCase _ c tree) (TConstCase _ c' tree')
       = c == c' && eqTree tree tree'
-  eqAlt (TDefaultCase tree) (TDefaultCase tree')
+  eqAlt (TDefaultCase _ tree) (TDefaultCase _ tree')
       = eqTree tree tree'
   eqAlt _ _ = False
 
@@ -230,13 +230,13 @@ mutual
                     SizeOf ns ->
                     CaseTree (inner ++ outer) ->
                     CaseTree (inner ++ ns ++ outer)
-  insertCaseNames outer ns (TCase c idx prf scTy alts)
+  insertCaseNames outer ns (TCase fc c idx prf scTy alts)
       = let MkNVar prf' = insertNVarNames outer ns (MkNVar prf) in
-            TCase c _ prf' (insertNames outer ns scTy)
+            TCase fc c _ prf' (insertNames outer ns scTy)
                  (map (insertCaseAltNames outer ns) alts)
   insertCaseNames outer ns (STerm i x) = STerm i (insertNames outer ns x)
-  insertCaseNames _ _ (TUnmatched msg) = TUnmatched msg
-  insertCaseNames _ _ TImpossible = TImpossible
+  insertCaseNames _ _ (TUnmatched fc msg) = TUnmatched fc msg
+  insertCaseNames _ _ (TImpossible fc) = TImpossible fc
 
   insertCaseScopeNames : SizeOf outer ->
                         SizeOf ns ->
@@ -250,16 +250,16 @@ mutual
                        SizeOf ns ->
                        TCaseAlt (inner ++ outer) ->
                        TCaseAlt (inner ++ ns ++ outer)
-  insertCaseAltNames outer ns (TConCase n t sc)
-      = TConCase n t (insertCaseScopeNames outer ns sc)
+  insertCaseAltNames outer ns (TConCase fc n t sc)
+      = TConCase fc n t (insertCaseScopeNames outer ns sc)
 
-  insertCaseAltNames outer ns (TDelayCase tyn valn ct)
-      = TDelayCase tyn valn
+  insertCaseAltNames outer ns (TDelayCase fc tyn valn ct)
+      = TDelayCase fc tyn valn
                   (insertCaseNames (suc (suc outer)) ns ct)
-  insertCaseAltNames outer ns (TConstCase x ct)
-      = TConstCase x (insertCaseNames outer ns ct)
-  insertCaseAltNames outer ns (TDefaultCase ct)
-      = TDefaultCase (insertCaseNames outer ns ct)
+  insertCaseAltNames outer ns (TConstCase fc x ct)
+      = TConstCase fc x (insertCaseNames outer ns ct)
+  insertCaseAltNames outer ns (TDefaultCase fc ct)
+      = TDefaultCase fc (insertCaseNames outer ns ct)
 
 export
 Weaken CaseTree where
@@ -276,10 +276,10 @@ getNames add ns sc = getSet ns sc
   where
     mutual
       getAltSet : NameMap Bool -> TCaseAlt vs -> NameMap Bool
-      getAltSet ns (TConCase n t sc) = getScope ns sc
-      getAltSet ns (TDelayCase t a sc) = getSet ns sc
-      getAltSet ns (TConstCase i sc) = getSet ns sc
-      getAltSet ns (TDefaultCase sc) = getSet ns sc
+      getAltSet ns (TConCase _ n t sc) = getScope ns sc
+      getAltSet ns (TDelayCase _ t a sc) = getSet ns sc
+      getAltSet ns (TConstCase _ i sc) = getSet ns sc
+      getAltSet ns (TDefaultCase _ sc) = getSet ns sc
 
       getScope : NameMap Bool -> TCaseScope vs -> NameMap Bool
       getScope ns (TRHS tm) = getSet ns tm
@@ -290,11 +290,11 @@ getNames add ns sc = getSet ns sc
       getAltSets ns (a :: as) = getAltSets (getAltSet ns a) as
 
       getSet : NameMap Bool -> CaseTree vs -> NameMap Bool
-      getSet ns (TCase _ _ x ty []) = ns
-      getSet ns (TCase _ _ x ty (a :: as)) = getAltSets (getAltSet ns a) as
+      getSet ns (TCase _ _ _ x ty []) = ns
+      getSet ns (TCase _ _ _ x ty (a :: as)) = getAltSets (getAltSet ns a) as
       getSet ns (STerm i tm) = add ns tm
-      getSet ns (TUnmatched msg) = ns
-      getSet ns TImpossible = ns
+      getSet ns (TUnmatched _ msg) = ns
+      getSet ns (TImpossible _) = ns
 
 
 namespace Pattern

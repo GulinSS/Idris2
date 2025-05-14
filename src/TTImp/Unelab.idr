@@ -212,24 +212,24 @@ mutual
                unelabScope fc n (args :< (Nothing, x)) env' (NErased fc Placeholder) sc
 
       unelabAlt : CaseAlt vars -> Core IImpClause
-      unelabAlt (ConCase n t sc)
+      unelabAlt (ConCase fc n t sc)
           = do defs <- get Ctxt
                nty <- lookupTyExact n (gamma defs)
                let ty = case nty of
                              Nothing => Erased fc Placeholder
                              Just t => t
                unelabScope fc !(getFullName n) [<] env !(nf defs [<] ty) sc
-      unelabAlt (DelayCase t a tm)
+      unelabAlt (DelayCase fc t a tm)
           = do let env' = env :<
                        PVar fc top Explicit (Erased fc Placeholder) :<
                        PVar fc erased Implicit (Erased fc Placeholder)
                (tm', _) <- unelabTy' umode nest env' tm
                let a' = MkKindedName (Just Bound) a a
                pure (PatClause fc (IDelay fc (IVar fc a')) tm')
-      unelabAlt (ConstCase c tm)
+      unelabAlt (ConstCase fc c tm)
           = do (tm', _) <- unelabTy' umode nest env tm
                pure (PatClause fc (IPrimVal fc c) tm')
-      unelabAlt (DefaultCase tm)
+      unelabAlt (DefaultCase fc tm)
           = do (tm', _) <- unelabTy' umode nest env tm
                pure (PatClause fc (Implicit fc False) tm')
 
