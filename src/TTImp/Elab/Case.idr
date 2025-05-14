@@ -15,7 +15,6 @@ import Core.Evaluate
 import Idris.Syntax
 import Idris.REPL.Opts
 
-import TTImp.Elab.App
 import TTImp.Elab.Check
 import TTImp.Elab.Delayed
 import TTImp.Elab.ImplicitBind
@@ -31,29 +30,6 @@ import Libraries.Data.NameMap
 import Libraries.Data.WithDefault
 
 %default covering
-
-export
-changeVar : (old : Var vs) -> (new : Var vs) -> Term vs -> Term vs
-changeVar old (MkVar new) (Local fc r idx p)
-    = if old == MkVar p
-         then Local fc r _ new
-         else Local fc r _ p
-changeVar old new (Meta fc nm i args)
-    = Meta fc nm i (map @{Compose} (changeVar old new) args)
-changeVar (MkVar old) (MkVar new) (Bind fc x b sc)
-    = Bind fc x (assert_total (map (changeVar (MkVar old) (MkVar new)) b))
-           (changeVar (MkVar (Later old)) (MkVar (Later new)) sc)
-changeVar old new (App fc fn c arg)
-    = App fc (changeVar old new fn) c (changeVar old new arg)
-changeVar old new (As fc s nm p)
-    = As fc s (changeVar old new nm) (changeVar old new p)
-changeVar old new (TDelayed fc r p)
-    = TDelayed fc r (changeVar old new p)
-changeVar old new (TDelay fc r t p)
-    = TDelay fc r (changeVar old new t) (changeVar old new p)
-changeVar old new (TForce fc r p)
-    = TForce fc r (changeVar old new p)
-changeVar old new tm = tm
 
 findLater : (x : Name) -> (newer : Scope) -> Var (older :< x ++ newer)
 findLater x [<] = MkVar First
@@ -102,24 +78,6 @@ findImpsIn fc env ns (Bind _ n b sc)
 findImpsIn fc env ns ty
     = when (not (isNil ns)) $
            throw (TryWithImplicits fc env (reverse ns))
-
-merge : {vs : Scope} ->
-        Scopeable (Var vs) -> List (Var vs) -> List (Var vs)
-merge [<] xs = xs
-merge (vs :< v) xs
-    = merge vs (v :: filter (v /=) xs)
-
--- Extend the list of variables we need in the environment so far, removing
--- duplicates
-extendNeeded : {vs : _} ->
-               Binder (Term vs) ->
-               Env Term vs -> List (Var vs) -> List (Var vs)
-extendNeeded (Let _ _ ty val) env needed
-    = merge (findUsedLocs env ty) (merge (findUsedLocs env val) needed)
-extendNeeded (PLet _ _ ty val) env needed
-    = merge (findUsedLocs env ty) (merge (findUsedLocs env val) needed)
-extendNeeded b env needed
-    = merge (findUsedLocs env (binderType b)) needed
 
 findScrutinee : {vs : _} ->
                 Env Term vs -> RawImp -> Maybe (Var vs)
@@ -266,15 +224,12 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          put UST ({ delayedElab := [] } ust)
          processDecl [InCase] nest' ScopeEmpty (IDef fc casen alts')
 
-         -- If there's no duplication of the scrutinee in the block,
-         -- flag it as inlinable.
-         -- This will be the case either if the scrutinee is a variable, in
-         -- which case the duplication won't hurt, or if there's no variable
-         -- duplicated in the body (what ghc calls W-safe)
-         -- We'll check that second condition later, after generating the
-         -- runtime (erased) case trees
-         let inlineOK = maybe False (const True) splitOn
-         when inlineOK $ setFlag fc casen Inline
+         -- Set the case block to always reduce, so we get the core 'Case'
+         updateDef casen
+            (\d => case d of
+                        Function fi ct rt cs =>
+                          Just (Function ({ alwaysReduce := True } fi) ct rt cs)
+                        _ => Nothing)
 
          ust <- get UST
          put UST ({ delayedElab := olddelayed } ust)
@@ -372,7 +327,6 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
               args' = mkSplit splitOn lhs args
               lhs' = apply (IVar loc' casen) args' in
               ImpossibleClause loc' (applyNested nest lhs')
-
 
 export
 checkCase : {vars : _} ->
