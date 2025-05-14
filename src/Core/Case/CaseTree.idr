@@ -25,6 +25,7 @@ public export
 data CaseTree : Scoped where
      ||| case x return scTy of { p1 => e1 ; ... }
      TCase : {name : _} ->
+             RigCount ->
              (idx : Nat) ->
              (0 p : IsVar name idx vars) ->
              (scTy : Term vars) -> List (TCaseAlt vars) ->
@@ -60,13 +61,13 @@ data TCaseAlt : SnocList Name -> Type where
 mutual
   export
   StripNamespace (CaseTree vars) where
-    trimNS ns (TCase idx p scTy xs)
-        = TCase idx p (trimNS ns scTy) (map (trimNS ns) xs)
+    trimNS ns (TCase c idx p scTy xs)
+        = TCase c idx p (trimNS ns scTy) (map (trimNS ns) xs)
     trimNS ns (STerm x t) = STerm x (trimNS ns t)
     trimNS ns c = c
 
-    restoreNS ns (TCase idx p scTy xs)
-        = TCase idx p (restoreNS ns scTy) (map (restoreNS ns) xs)
+    restoreNS ns (TCase c idx p scTy xs)
+        = TCase c idx p (restoreNS ns scTy) (map (restoreNS ns) xs)
     restoreNS ns (STerm x t) = STerm x (restoreNS ns t)
     restoreNS ns c = c
 
@@ -109,10 +110,30 @@ isPConst : Pat -> Maybe Constant
 isPConst (PConst _ c) = Just c
 isPConst _ = Nothing
 
+export
+mkCaseAlt : CaseType -> TCaseAlt vars -> CaseAlt vars
+
+export
+mkTerm : CaseType -> CaseTree vars -> Term vars
+mkTerm ct (TCase c idx p scTy xs)
+   = Case emptyFC ct c (Local emptyFC Nothing idx p) scTy (map (mkCaseAlt ct) xs)
+mkTerm _ (STerm i tm) = tm
+mkTerm _ (TUnmatched msg) = Unmatched emptyFC msg
+mkTerm _ TImpossible = Erased emptyFC Impossible
+
+mkCaseScope : CaseType -> TCaseScope vars -> CaseScope vars
+mkCaseScope ct (TRHS tm) = RHS (mkTerm ct tm)
+mkCaseScope ct (TArg c x sc) = Arg c x (mkCaseScope ct sc)
+
+mkCaseAlt ct (TConCase x tag sc) = ConCase x tag (mkCaseScope ct sc)
+mkCaseAlt ct (TDelayCase ty arg tm) = DelayCase ty arg (mkTerm ct tm)
+mkCaseAlt ct (TConstCase c tm) = ConstCase c (mkTerm ct tm)
+mkCaseAlt ct (TDefaultCase tm) = DefaultCase (mkTerm ct tm)
+
 showCT : {vars : _} -> (indent : String) -> CaseTree vars -> String
 showCA : {vars : _} -> (indent : String) -> TCaseAlt vars  -> String
 
-showCT indent (TCase {name} idx prf ty alts)
+showCT indent (TCase {name} _ idx prf ty alts)
   = "case " ++ show name ++ "[" ++ show idx ++ "] : " ++ show ty ++ " of"
   ++ "\n" ++ indent ++ " { "
   ++ showSep ("\n" ++ indent ++ " | ")
@@ -153,7 +174,7 @@ covering
 mutual
   export
   eqTree : CaseTree vs -> CaseTree vs' -> Bool
-  eqTree (TCase i _ _ alts) (TCase i' _ _ alts')
+  eqTree (TCase _ i _ _ alts) (TCase _ i' _ _ alts')
       = i == i'
        && length alts == length alts'
        && all (uncurry eqAlt) (zip alts alts')
@@ -209,9 +230,9 @@ mutual
                     SizeOf ns ->
                     CaseTree (inner ++ outer) ->
                     CaseTree (inner ++ ns ++ outer)
-  insertCaseNames outer ns (TCase idx prf scTy alts)
+  insertCaseNames outer ns (TCase c idx prf scTy alts)
       = let MkNVar prf' = insertNVarNames outer ns (MkNVar prf) in
-            TCase _ prf' (insertNames outer ns scTy)
+            TCase c _ prf' (insertNames outer ns scTy)
                  (map (insertCaseAltNames outer ns) alts)
   insertCaseNames outer ns (STerm i x) = STerm i (insertNames outer ns x)
   insertCaseNames _ _ (TUnmatched msg) = TUnmatched msg
@@ -269,28 +290,30 @@ getNames add ns sc = getSet ns sc
       getAltSets ns (a :: as) = getAltSets (getAltSet ns a) as
 
       getSet : NameMap Bool -> CaseTree vs -> NameMap Bool
-      getSet ns (TCase _ x ty []) = ns
-      getSet ns (TCase _ x ty (a :: as)) = getAltSets (getAltSet ns a) as
+      getSet ns (TCase _ _ x ty []) = ns
+      getSet ns (TCase _ _ x ty (a :: as)) = getAltSets (getAltSet ns a) as
       getSet ns (STerm i tm) = add ns tm
       getSet ns (TUnmatched msg) = ns
       getSet ns TImpossible = ns
 
-export
-mkTerm : (vars : Scope) -> Pat -> Term vars
-mkTerm vars (PAs fc x y) = mkTerm vars y
-mkTerm vars (PCon fc x tag arity xs)
-    = applySpine fc (Ref fc (DataCon tag arity) x)
-                    (map @{Compose} (mkTerm vars) xs)
-mkTerm vars (PTyCon fc x arity xs)
-    = applySpine fc (Ref fc (TyCon arity) x)
-                    (map @{Compose} (mkTerm vars) xs)
-mkTerm vars (PConst fc c) = PrimVal fc c
-mkTerm vars (PArrow fc x s t)
-    = Bind fc x (Pi fc top Explicit (mkTerm vars s)) (mkTerm (vars :< x) t)
-mkTerm vars (PDelay fc r ty p)
-    = TDelay fc r (mkTerm vars ty) (mkTerm vars p)
-mkTerm vars (PLoc fc n)
-    = case isVar n vars of
-           Just (MkVar prf) => Local fc Nothing _ prf
-           _ => Ref fc Bound n
-mkTerm vars (PUnmatchable fc tm) = embed tm
+
+namespace Pattern
+  export
+  mkTerm : (vars : Scope) -> Pat -> Term vars
+  mkTerm vars (PAs fc x y) = mkTerm vars y
+  mkTerm vars (PCon fc x tag arity xs)
+      = applySpine fc (Ref fc (DataCon tag arity) x)
+                      (map @{Compose} (mkTerm vars) xs)
+  mkTerm vars (PTyCon fc x arity xs)
+      = applySpine fc (Ref fc (TyCon arity) x)
+                      (map @{Compose} (mkTerm vars) xs)
+  mkTerm vars (PConst fc c) = PrimVal fc c
+  mkTerm vars (PArrow fc x s t)
+      = Bind fc x (Pi fc top Explicit (mkTerm vars s)) (mkTerm (vars :< x) t)
+  mkTerm vars (PDelay fc r ty p)
+      = TDelay fc r (mkTerm vars ty) (mkTerm vars p)
+  mkTerm vars (PLoc fc n)
+      = case isVar n vars of
+            Just (MkVar prf) => Local fc Nothing _ prf
+            _ => Ref fc Bound n
+  mkTerm vars (PUnmatchable fc tm) = embed tm

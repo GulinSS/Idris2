@@ -1045,7 +1045,7 @@ record Defs where
   cgdirectives : List (CG, String)
      -- ^ Code generator directives, which are free form text and thus to
      -- be interpreted however the specific code generator requires
-  toCompileCase : List Name
+  toCompileCase : List (CaseType, Name)
      -- ^ Names which need to be compiled to run time case trees
   incData : List (CG, String, List String)
      -- ^ What we've compiled incrementally for this module: codegen,

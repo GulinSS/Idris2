@@ -41,7 +41,7 @@ getCons defs (NTCon _ tn _ _)
 getCons defs _ = pure []
 
 emptyRHS : FC -> CaseTree vars -> CaseTree vars
-emptyRHS fc (TCase idx el sc alts) = TCase idx el sc (map emptyRHSalt alts)
+emptyRHS fc (TCase c idx el sc alts) = TCase c idx el sc (map emptyRHSalt alts)
   where
     emptyRHSscope : forall vars . FC -> TCaseScope vars -> TCaseScope vars
     emptyRHSscope fc (TRHS tm) = TRHS (emptyRHS fc tm)

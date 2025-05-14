@@ -1033,13 +1033,13 @@ mutual
   caseGroups : {pvar, vars, todo : _} ->
                {auto i : Ref PName Int} ->
                {auto c : Ref Ctxt Defs} ->
-               FC -> Name -> Phase ->
+               FC -> Name -> Phase -> RigCount ->
                {idx : Nat} -> (0 p : IsVar pvar idx vars) -> Term vars ->
                List (Group todo vars) -> Maybe (CaseTree vars) ->
                Core (CaseTree vars)
-  caseGroups {vars} fc fn phase el ty gs errorCase
+  caseGroups {vars} fc fn phase c el ty gs errorCase
       = do g <- altGroups gs
-           pure (TCase _ el (resolveNames vars ty) g)
+           pure (TCase c _ el (resolveNames vars ty) g)
     where
       mkScope : forall vars . (vs : SnocList Name) ->
                               (ms : SnocList RigCount) ->
@@ -1078,13 +1078,13 @@ mutual
   -- the same variable (pprf) for the first argument. If not, the result
   -- will be a broken case tree... so we should find a way to express this
   -- in the type if we can.
-  conRule {a} fc fn phase cs@(MkPatClause pvars (MkInfo _ pat pprf fty :: pats) pid rhs :: rest) err
+  conRule {a} fc fn phase cs@(MkPatClause pvars (MkInfo c pat pprf fty :: pats) pid rhs :: rest) err
       = do refinedcs <- traverse (substInClause fc) cs
            groups <- groupCons fc fn pvars refinedcs
            ty <- case fty of
                       Known _ t => pure t
                       _ => throw (CaseCompile fc fn UnknownType)
-           caseGroups fc fn phase pprf ty groups err
+           caseGroups fc fn phase c pprf ty groups err
 
   varRule : {a, vars, todo : _} ->
             {auto i : Ref PName Int} ->
@@ -1295,7 +1295,7 @@ mutual
   findReachedCaseScope (TArg _ _ cs) = findReachedCaseScope cs
 
   findReached : CaseTree ns -> List Int
-  findReached (TCase _ _ _ alts) = concatMap findReachedAlts alts
+  findReached (TCase _ _ _ _ alts) = concatMap findReachedAlts alts
   findReached (STerm i _) = [i]
   findReached _ = []
 
@@ -1353,10 +1353,10 @@ identifyUnreachableDefaults fc defs nfty cs
 ||| to the number of ways to reach a RHS for that clause then the clause is totally
 ||| superfluous (it will never be reached).
 findExtraDefaults : {auto c : Ref Ctxt Defs} ->
-                   {vars : _} ->
-                   FC -> Defs -> CaseTree vars ->
-                   Core (List Int)
-findExtraDefaults fc defs ctree@(TCase {name = var} idx el ty altsIn)
+                    {vars : _} ->
+                    FC -> Defs -> CaseTree vars ->
+                    Core (List Int)
+findExtraDefaults fc defs ctree@(TCase _ idx el ty altsIn)
   = do let fenv = mkEnv fc _
        nfty <- nf defs fenv ty
        extraCases <- identifyUnreachableDefaults fc defs nfty altsIn
@@ -1376,49 +1376,97 @@ findExtraDefaults fc defs ctree@(TCase {name = var} idx el ty altsIn)
 
 findExtraDefaults fc defs ctree = pure []
 
+-- Returns the case tree under the yet-to-be-bound lambdas,
+-- and a list of the clauses that aren't reachable
+makePMDef : {auto c : Ref Ctxt Defs} ->
+            FC -> CaseType -> Phase -> Name -> ClosedTerm -> List Clause ->
+            Core (args ** (Term args, List Clause))
+-- If there's no clauses, make a definition with the right number of arguments
+-- for the type, which we can use in coverage checking to ensure that one of
+-- the arguments has an empty type
+makePMDef fc ct phase fn ty []
+    = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
+         defs <- get Ctxt
+         pure (!(getArgs 0 !(nf defs [<] ty)) ** (Unmatched fc "No clauses", []))
+  where
+    getArgs : Int -> NF [<] -> Core (SnocList Name)
+    getArgs i (NBind fc x (Pi _ _ _ _) sc)
+        = do defs <- get Ctxt
+             sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+             pure (!(getArgs i sc') :< MN "arg" i)
+    getArgs i _ = pure [<]
+makePMDef fc ct phase fn ty clauses
+    = do let cs = map toClosed (labelPat 0 clauses)
+         (args' ** t) <- simpleCase fc phase fn ty Nothing cs
+         let treeTm = mkTerm ct t
+         logC "compile.casetree.getpmdef" 20 $
+           do t <- toFullNames treeTm
+              pure $ "Compiled to: " ++ show t ++ "\nWith " ++ show args'
+         let allRHS = findReached t
+         log "compile.casetree.clauses" 25 $
+           "All RHSes: " ++ (show allRHS)
+         defs <- get Ctxt
+         extraDefaults <- findExtraDefaults fc defs t
+         log "compile.casetree.clauses" 25 $
+           "Extra defaults: " ++ (show extraDefaults)
+         let unreachable = getUnreachable 0 (allRHS \\ extraDefaults) clauses
+         pure (_ ** (treeTm, unreachable))
+  where
+    getUnreachable : Int -> List Int -> List Clause -> List Clause
+    getUnreachable i is [] = []
+    getUnreachable i is (c :: cs)
+        = if i `elem` is
+             then getUnreachable (i + 1) is cs
+             else c :: getUnreachable (i + 1) is cs
+
+    labelPat : Int -> List a -> List (String, a)
+    labelPat i [] = []
+    labelPat i (x :: xs) = ("PV" ++ show i ++ ":", x) :: labelPat (i + 1) xs
+
+    mkSubstEnv : Int -> String -> Env Term vars -> SubstEnv vars [<]
+    mkSubstEnv i pname [<] = Lin
+    mkSubstEnv i pname (vs :< v)
+        = mkSubstEnv (i + 1) pname vs :< Ref fc Bound (MN pname i)
+
+    close : {vars : _} ->
+            Env Term vars -> String -> Term vars -> ClosedTerm
+    close {vars} env pname tm
+        = substs (mkSizeOf vars) (mkSubstEnv 0 pname env)
+                                 (rewrite appendLinLeftNeutral vars in tm)
+
+    toClosed :  (String, Clause) -> (ClosedTerm, ClosedTerm)
+    toClosed  (pname, MkClause env lhs rhs)
+        = (close env pname lhs, close env pname rhs)
+
 -- Returns the case tree, and a list of the clauses that aren't reachable
 export
 getPMDef : {auto c : Ref Ctxt Defs} ->
-           FC -> Phase -> Name -> ClosedTerm -> List Clause ->
+           FC -> CaseType -> Phase -> Name -> ClosedTerm -> List Clause ->
            Core (ClosedTerm, List Clause)
--- -- If there's no clauses, make a definition with the right number of arguments
--- -- for the type, which we can use in coverage checking to ensure that one of
--- -- the arguments has an empty type
--- getPMDef fc phase fn ty []
---     = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
---          defs <- get Ctxt
---          pure (cast !(getArgs 0 !(nf defs ScopeEmpty ty)) ** (TUnmatched "No clauses", []))
---   where
---     getArgs : Int -> ClosedNF -> Core (List Name)
---     getArgs i (NBind fc x (Pi _ _ _ _) sc)
---         = do defs <- get Ctxt
---              sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
---              pure (MN "arg" i :: !(getArgs i sc'))
---     getArgs i _ = pure []
--- getPMDef fc phase fn ty clauses
---     = do defs <- get Ctxt
---          let cs = map (toClosed defs) (labelPat 0 clauses)
---          (_ ** t) <- simpleCase fc phase fn ty Nothing cs
---          logC "compile.casetree.getpmdef" 20 $
---            pure $ "Compiled to: " ++ show !(toFullNames t)
---          let reached = findReached t
---          log "compile.casetree.clauses" 25 $
---            "Reached clauses: " ++ (show reached)
---          extraDefaults <- findExtraDefaults fc defs t
---          let unreachable = getUnreachable 0 (reached \\ extraDefaults) clauses
---          pure (_ ** (t, unreachable))
---   where
---     getUnreachable : Int -> List Int -> List Clause -> List Clause
---     getUnreachable i is [] = []
---     getUnreachable i is (c :: cs)
---         = if i `elem` is
---              then getUnreachable (i + 1) is cs
---              else c :: getUnreachable (i + 1) is cs
+getPMDef fc ct p n ty cs
+    = do (args ** (tree, missing)) <- makePMDef fc ct p n ty cs
+         -- We need to bind lambdas, and we can only do that if we know
+         -- the types of the function arguments, so normalise the type just
+         -- enough to get that
+--       Commented in Yaffle for performance:
+--       https://github.com/edwinb/Yaffle/commit/f660b94a66da385ae6f3568998473a12a4cd769d
+--          nty <- normaliseBinders [<] ty
+--          let (tyargs ** env) = mkEnv [<] nty
+--          let Just lenOK = areVarsCompatible args tyargs
+         let tm = bindLams _ tree
+--              | Nothing => throw (CaseCompile fc n CantResolveType)
+         pure (tm, missing)
+   where
+     mkEnv : {vars : _} -> Env Term vars -> Term vars ->
+             (args ** Env Term args)
+     mkEnv env (Bind _ x b@(Pi pfc c p ty) sc) = mkEnv (env :< b) sc
+     mkEnv env tm = (_ ** env)
 
---     labelPat : Int -> List a -> List (String, a)
---     labelPat i [] = []
---     labelPat i (x :: xs) = ("pat" ++ show i ++ ":", x) :: labelPat (i + 1) xs
-
---     toClosed : Defs -> (String, Clause) -> (ClosedTerm, ClosedTerm)
---     toClosed defs (pname, MkClause env lhs rhs)
---           = (close fc pname env lhs, close fc pname env rhs)
+     bindLams : (args' : _) ->
+                Term args' -> Term [<]
+     bindLams [<] tree = tree
+     bindLams (as :< a) tree
+         = bindLams as (Bind fc _
+                           (Lam fc top
+                                Explicit
+                                (Erased fc Placeholder)) tree)
