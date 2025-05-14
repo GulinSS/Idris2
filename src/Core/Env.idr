@@ -261,6 +261,29 @@ shrinkEnv (env :< b) (Keep p)
          b' <- assert_total (shrinkBinder b p)
          pure (env' :< b')
 
+rigRestrictW : RigCount -> RigCount
+rigRestrictW p = if p == top then top else erased
+
+restrictWEnv : Env Term vars -> Env Term vars
+restrictWEnv [<] = [<]
+restrictWEnv (env :< b) = restrictWEnv env :< setMultiplicity b (rigRestrictW $ multiplicity b)
+
+-- Restriction makes p-annotated variables that do not support at least q
+-- copies unavailable at runtime
+--
+-- We use restriction to push the ambient quantity p onto the context:
+--
+--    X |- e :p A
+-- =================
+-- X \ p |- e :|p| A
+--
+-- where |p| is `presence p`
+--
+-- Note: when p is Rig0, all context quantities are ignored.
+export
+restrictEnv : Env Term vars -> RigCount -> Env Term vars
+restrictEnv env p = if p == top then restrictWEnv env else env
+
 export
 mkEnvOnto : FC -> (xs : List Name) -> Env Term ys -> Env Term (ys <>< xs)
 mkEnvOnto fc [] vs = vs

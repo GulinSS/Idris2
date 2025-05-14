@@ -7,6 +7,7 @@ import Core.Context.Pretty
 import Core.Core
 import Core.Coverage
 import Core.Env
+import Core.Erase
 import Core.Hash
 import Core.LinearCheck
 import Core.Metadata
@@ -866,11 +867,11 @@ mkRunTime fc (ct, n)
                Clause ->
                Core Clause
     toErased fc spec (MkClause env lhs rhs)
-        = do lhs_erased <- linearCheck fc linear True env lhs
+        = do lhs_erased <- erase linear env lhs
              -- Partially evaluate RHS here, where appropriate
              rhs' <- applyTransforms env rhs
              rhs' <- applySpecialise env spec rhs'
-             rhs_erased <- linearCheck fc linear True env rhs'
+             rhs_erased <- erase linear env rhs'
              pure (MkClause env lhs_erased rhs_erased)
 
 compileRunTime : {auto c : Ref Ctxt Defs} ->

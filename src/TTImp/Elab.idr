@@ -171,12 +171,13 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
               -- elsewhere, all unification problems must be
               -- solved, though we defer that if it's a case block since we
               -- might learn a bit more later.
-              _ => if (not incase)
-                      then do checkUserHolesAfter constart (inTrans || inPE)
-                              linearCheck (getFC tm) rigc False env chktm
-                          -- Linearity checking looks in case blocks, so no
-                          -- need to check here.
-                      else pure chktm
+              _ => do if (not incase)
+                         then do checkUserHolesAfter constart (inTrans || inPE)
+                                 linearCheck (getFC tm) rigc env chktm
+                             -- Linearity checking looks in case blocks, so no
+                             -- need to check here.
+                         else pure ()
+                      pure chktm
          normaliseHoleTypes
          -- Put the current hole state back to what it was (minus anything
          -- which has been solved in the meantime)
