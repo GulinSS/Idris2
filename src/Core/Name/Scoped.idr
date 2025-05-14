@@ -34,26 +34,26 @@ namespace Scope
   empty : Scopeable a
   empty = []
 
-{-
-public export
-ScopeExt : Scopeable a -> List a -> Scopeable a
-ScopeExt vars ns = ns ++ vars
---- TODO replace by `vars <>< ns`
--}
+  {-
+  public export
+  ext : Scopeable a -> List a -> Scopeable a
+  ext vars ns = ns ++ vars
+  --- TODO replace by `vars <>< ns`
+  -}
 
-public export
-AddInner : Scopeable a -> Scopeable a -> Scopeable a
-AddInner vars inner = inner ++ vars
---- TODO replace by `vars ++ inner`
+  public export
+  addInner : Scopeable a -> Scopeable a -> Scopeable a
+  addInner vars inner = inner ++ vars
+  --- TODO replace by `vars ++ inner`
 
-public export
-ScopeBind : Scopeable a -> a -> Scopeable a
-ScopeBind vars n = n :: vars
---- TODO replace with `<:`
+  public export
+  bind : Scopeable a -> a -> Scopeable a
+  bind vars n = n :: vars
+  --- TODO replace with `<:`
 
-public export
-ScopeSingle : a -> Scopeable a
-ScopeSingle n = [n]
+  public export
+  single : a -> Scopeable a
+  single n = [n]
 
 ||| A scoped definition is one indexed by a scope
 public export
