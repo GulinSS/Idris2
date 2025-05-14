@@ -174,6 +174,12 @@ abstractFullEnvType fc (b :: env) tm
       in abstractFullEnvType fc env (Bind fc _ bnd tm)
 
 export
+mkExplicit : Env Term vs -> Env Term vs
+mkExplicit [] = Env.empty
+mkExplicit (Pi fc c _ ty :: env) = Pi fc c Explicit ty :: mkExplicit env
+mkExplicit (b :: env) = b :: mkExplicit env
+
+export
 letToLam : Env Term vars -> Env Term vars
 letToLam [] = []
 letToLam (Let fc c val ty :: env) = Lam fc c Explicit ty :: letToLam env

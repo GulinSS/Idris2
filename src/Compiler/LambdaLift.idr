@@ -229,7 +229,7 @@ data LiftedDef : Type where
      -- arranged for the variables, and it could be expensive to reshuffle them!
      -- See Compiler.ANF for an example of how they get resolved to names)
      MkLFun : (args : Scope) -> (scope : Scope) ->
-              (body : Lifted (AddInner args scope)) -> LiftedDef
+              (body : Lifted (Scope.addInner args scope)) -> LiftedDef
 
      ||| Constructs a definition of a constructor for a compound data type.
      |||
@@ -423,7 +423,7 @@ usedVars used (LUnderApp fc n miss args) =
 usedVars used (LApp fc lazy c arg) =
   usedVars (usedVars used arg) c
 usedVars used (LLet fc x val sc) =
-  let innerUsed = contractUsed $ usedVars (weakenUsed {outer=ScopeSingle x} used) sc in
+  let innerUsed = contractUsed $ usedVars (weakenUsed {outer=Scope.single x} used) sc in
       usedVars innerUsed val
 usedVars used (LCon fc n ci tag args) =
   foldl (usedVars {vars}) used args
@@ -560,7 +560,7 @@ mutual
             CExp vars -> Core (Lifted vars)
   liftExp (CLocal fc prf) = pure $ LLocal fc prf
   liftExp (CRef fc n) = pure $ LAppName fc lazy n [] -- probably shouldn't happen!
-  liftExp (CLam fc x sc) = makeLam {doLazyAnnots} {lazy} fc (ScopeSingle x) sc
+  liftExp (CLam fc x sc) = makeLam {doLazyAnnots} {lazy} fc (Scope.single x) sc
   liftExp (CLet fc x _ val sc) = pure $ LLet fc x !(liftExp {doLazyAnnots} val) !(liftExp {doLazyAnnots} sc)
   liftExp (CApp fc (CRef _ n) args) -- names are applied exactly in compileExp
       = pure $ LAppName fc lazy n !(traverse (liftExp {doLazyAnnots}) args)

@@ -14,6 +14,8 @@ import TTImp.TTImp
 import Data.List.Quantifiers
 import Data.SnocList
 
+import Libraries.Data.List.Quantifiers.Extra as Lib
+
 %default covering
 
 detagSafe : {auto c : Ref Ctxt Defs} ->
@@ -22,7 +24,7 @@ detagSafe defs (NTCon _ n _ _ args)
     = do Just (TCon _ _ _ _ _ _ _ (Just detags)) <- lookupDefExact n (gamma defs)
               | _ => pure False
          args' <- traverse (evalClosure defs . snd) args
-         pure $ notErased 0 detags (toList args')
+         pure $ notErased 0 detags args'
   where
     -- if any argument positions are in the detaggable set, and unerased, then
     -- detagging is safe
@@ -133,8 +135,7 @@ Usage : Scoped
 Usage = All (\_ => ArgUsed)
 
 initUsed : (xs : Scope) -> Usage xs
-initUsed [] = []
-initUsed (x :: xs) = Used0 :: initUsed xs
+initUsed = Lib.tabulate (\_ => Used0)
 
 initUsedCase : (xs : Scope) -> Usage xs
 initUsedCase [] = []

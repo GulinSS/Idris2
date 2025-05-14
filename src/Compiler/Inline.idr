@@ -33,7 +33,7 @@ EEnv : Scope -> Scope -> Type
 EEnv free = All (\_ => CExp free)
 
 extend : EEnv free vars -> (args : List (CExp free)) -> (args' : List Name) ->
-         LengthMatch args args' -> EEnv free (AddInner vars args')
+         LengthMatch args args' -> EEnv free (Scope.addInner vars args')
 extend env [] [] NilMatch = env
 extend env (a :: xs) (n :: ns) (ConsMatch w)
     = a :: extend env xs ns w
@@ -55,7 +55,7 @@ getArity (MkForeign _ args _) = length args
 getArity (MkError _) = 0
 
 takeFromStack : EEnv free vars -> Stack free -> (args : Scope) ->
-                Maybe (EEnv free (AddInner vars args), Stack free)
+                Maybe (EEnv free (Scope.addInner vars args), Stack free)
 takeFromStack env (e :: es) (a :: as)
   = do (env', stk') <- takeFromStack env es as
        pure (e :: env', stk')

@@ -215,10 +215,10 @@ getUsableEnv {vars = v :: vs} {done} fc rigc p (b :: env)
          if (multiplicity b == top || isErased rigc)
             then let 0 var = mkIsVar (hasLength p) in
                      (Local (binderLoc b) Nothing _ var,
-                       rewrite appendAssociative done (ScopeSingle v) vs in
+                       rewrite appendAssociative done (Scope.single v) vs in
                           weakenNs (sucR p) (binderType b)) ::
-                               rewrite appendAssociative done (ScopeSingle v) vs in rest
-            else rewrite appendAssociative done (ScopeSingle v) vs in rest
+                               rewrite appendAssociative done (Scope.single v) vs in rest
+            else rewrite appendAssociative done (Scope.single v) vs in rest
 
 -- A local is usable if it contains no holes in a determining argument position
 usableLocal : {vars : _} ->

@@ -8,6 +8,8 @@ import Core.SchemeEval.Compile
 import Core.SchemeEval.ToScheme
 import Core.TT
 
+import Data.List.Quantifiers
+
 import Libraries.Data.NameMap
 import Libraries.Utils.Scheme
 

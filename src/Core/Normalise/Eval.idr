@@ -92,7 +92,7 @@ record TermWithEnv (free : Scope) where
     constructor MkTermEnv
     { varsEnv : Scope }
     locEnv : LocalEnv free varsEnv
-    term : Term $ AddInner free varsEnv
+    term : Term $ Scope.addInner free varsEnv
 
 parameters (defs : Defs) (topopts : EvalOpts)
   mutual
@@ -110,7 +110,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
         -- Yes, it's just a map, but specialising it by hand since we
         -- use this a *lot* and it saves the run time overhead of making
         -- a closure and calling APPLY.
-        closeArgs : List (Term (AddInner free vars)) -> List (Closure free)
+        closeArgs : List (Term (Scope.addInner free vars)) -> List (Closure free)
         closeArgs [] = []
         closeArgs (t :: ts) = MkClosure topopts locs env t :: closeArgs ts
     eval env locs (Bind fc x (Lam _ r _ ty) scope) (thunk :: stk)
@@ -322,7 +322,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
     getCaseBound : List (Closure free) ->
                    (args : Scope) ->
                    LocalEnv free more ->
-                   Maybe (LocalEnv free (AddInner more args))
+                   Maybe (LocalEnv free (Scope.addInner more args))
     getCaseBound []            []        loc = Just loc
     getCaseBound []            (_ :: _)  loc = Nothing -- mismatched arg length
     getCaseBound (arg :: args) []        loc = Nothing -- mismatched arg length
@@ -336,7 +336,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
                  Stack free ->
                  (args : List Name) ->
                  List (Closure free) ->
-                 CaseTree (AddInner more args) ->
+                 CaseTree (Scope.addInner more args) ->
                  Core (CaseResult (TermWithEnv free))
     evalConAlt env loc opts fc stk args args' sc
          = do let Just bound = getCaseBound args' args loc

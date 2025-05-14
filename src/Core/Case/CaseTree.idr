@@ -42,15 +42,18 @@ mutual
   data CaseAlt : Scoped where
        ||| Constructor for a data type; bind the arguments and subterms.
        ConCase : Name -> (tag : Int) -> (args : List Name) ->
-                 CaseTree (AddInner vars args) -> CaseAlt vars
+                 CaseTree (Scope.addInner vars args) -> CaseAlt vars
        ||| Lazy match for the Delay type use for codata types
        DelayCase : (ty : Name) -> (arg : Name) ->
-                   CaseTree (AddInner vars [ty, arg]) -> CaseAlt vars
+                   CaseTree (Scope.addInner vars [ty, arg]) -> CaseAlt vars
                    -- TODO `arg` and `ty` should be swapped, as in Yaffle
        ||| Match against a literal
        ConstCase : Constant -> CaseTree vars -> CaseAlt vars
        ||| Catch-all case
        DefaultCase : CaseTree vars -> CaseAlt vars
+
+export
+FreelyEmbeddable CaseTree where
 
 mutual
   public export

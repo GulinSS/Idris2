@@ -170,7 +170,7 @@ Eq (Var xs) where
 
 ||| Removing var 0, strengthening all the other ones
 export
-dropFirst : List (Var (ScopeBind vs n)) -> List (Var vs)
+dropFirst : List (Var (Scope.bind vs n)) -> List (Var vs)
 dropFirst = List.mapMaybe isLater
 
 ||| Manufacturing a thinning from a list of variables to keep
