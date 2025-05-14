@@ -6,9 +6,10 @@ import Core.Core
 import Core.Env
 import Core.LinearCheck
 import Core.Metadata
-import Core.Normalise
 import Core.UnifyState
 import Core.Unify
+import Core.Evaluate.Value
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -54,31 +55,6 @@ getRigNeeded InType = erased -- unrestricted usage in types
 getRigNeeded (InLHS r) = if isErased r then erased
                                      else linear
 getRigNeeded _ = linear
-
--- Make sure the types of holes have the references to solved holes normalised
--- away (since solved holes don't get written to .tti)
-export
-normaliseHoleTypes : {auto c : Ref Ctxt Defs} ->
-                     {auto u : Ref UST UState} ->
-                     Core ()
-normaliseHoleTypes
-    = do ust <- get UST
-         let hs = keys (holes ust)
-         defs <- get Ctxt
-         traverse_ (normaliseH defs) hs
-  where
-    updateType : Defs -> Int -> GlobalDef -> Core ()
-    updateType defs i def
-        = do ty' <- catch (tryNormaliseSizeLimit defs 10 ScopeEmpty (type def))
-                          (\err => normaliseHoles defs ScopeEmpty (type def))
-             ignore $ addDef (Resolved i) ({ type := ty' } def)
-
-    normaliseH : Defs -> Int -> Core ()
-    normaliseH defs i
-        = whenJust !(lookupCtxtExact (Resolved i) (gamma defs)) $ \ gdef =>
-            case definition gdef of
-              Hole _ _ => updateType defs i gdef
-              _ => pure ()
 
 export
 addHoleToSave : {auto c : Ref Ctxt Defs} ->
@@ -140,7 +116,9 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
                     do update UST { delayedElab := olddelayed }
                        throw err)
          update UST { delayedElab := olddelayed }
-         solveConstraintsAfter constart solvemode MatchArgs
+         case mode of
+              InLHS _ => pure ()
+              _ => solveConstraintsAfter constart solvemode MatchArgs
 
          -- As long as we're not in the RHS of a case block,
          -- finish off constraint solving
@@ -156,10 +134,10 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
 
          dumpConstraints "elab" 4 False
          defs <- get Ctxt
-         chktm <- if inPE -- Need to fully normalise holes in partial evaluation
-                          -- because the holes don't have types saved to ttc
-                     then normaliseHoles defs env chktm
-                     else normaliseArgHoles defs env chktm
+
+         logTerm "elab" 10 "Term before nfKeepLet" chktm
+         chktm <- quote env !(nfKeepLet env chktm)
+         logTerm "elab" 5 "Term after nfKeepLet" chktm
 
          -- Linearity and hole checking.
          -- on the LHS, all holes need to have been solved
@@ -178,7 +156,6 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
                              -- need to check here.
                          else pure ()
                       pure chktm
-         normaliseHoleTypes
          -- Put the current hole state back to what it was (minus anything
          -- which has been solved in the meantime)
          when (not incase) $
@@ -197,7 +174,7 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
               InLHS _ =>
                  do let vs = findPLetRenames chktm
                     let ret = doPLetRenames vs [] chktm
-                    pure (ret, gnf env (doPLetRenames vs [] !(getTerm chkty)))
+                    pure (ret, !(nf env (doPLetRenames vs [] !(quote env chkty))))
               _ => do dumpConstraints "elab" 2 False
                       pure (chktm, chkty)
   where

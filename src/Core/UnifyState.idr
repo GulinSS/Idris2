@@ -6,11 +6,12 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.FC
-import Core.Normalise
 import Core.Options
 import Core.TT
 import Core.TTC
-import Core.Value
+
+import Core.Evaluate.Value
+import Core.Evaluate
 
 import Data.List
 import Data.SnocList
@@ -30,8 +31,17 @@ data Constraint : Type where
                     FC ->
                     (withLazy : Bool) ->
                     (env : Env Term vars) ->
-                    (x : NF vars) -> (y : NF vars) ->
+                    (x : Term vars) -> (y : Term vars) ->
                     Constraint
+     -- An unsolved sequence of constraints, arising from arguments in an
+     -- application where solving later constraints relies on solving earlier
+     -- ones
+     MkSeqConstraint : {vars : _} ->
+                       FC ->
+                       (env : Env Term vars) ->
+                       (xs : List (Term vars)) ->
+                       (ys : List (Term vars)) ->
+                       Constraint
      -- A resolved constraint
      Resolved : Constraint
 
@@ -44,8 +54,8 @@ data PolyConstraint : Type where
      MkPolyConstraint : {vars : _} ->
                         FC -> Env Term vars ->
                         (arg : Term vars) ->
-                        (expty : NF vars) ->
-                        (argty : NF vars) -> PolyConstraint
+                        (expty : Glued vars) ->
+                        (argty : Term vars) -> PolyConstraint
 
 -- Explanation for why an elaborator has been delayed. It's helpful to know
 -- the reason for a delay (I wish airlines and train companies knew this)
@@ -303,16 +313,14 @@ addDot : {vars : _} ->
          Core ()
 addDot fc env dotarg x reason y
     = do defs <- get Ctxt
-         xnf <- nf defs env x
-         ynf <- nf defs env y
-         update UST { dotConstraints $= ((dotarg, reason, MkConstraint fc False env xnf ynf) ::) }
+         update UST { dotConstraints $= ((dotarg, reason, MkConstraint fc False env x y) ::) }
 
 export
 addPolyConstraint : {vars : _} ->
                     {auto u : Ref UST UState} ->
-                    FC -> Env Term vars -> Term vars -> NF vars -> NF vars ->
+                    FC -> Env Term vars -> Term vars -> Glued vars -> Term vars ->
                     Core ()
-addPolyConstraint fc env arg x@(NApp _ (NMeta _ _ _) _) y
+addPolyConstraint fc env arg x@(VMeta _ _ _ _ _ _) y
     = update UST { polyConstraints $= ((MkPolyConstraint fc env arg x y) ::) }
 addPolyConstraint fc env arg x y
     = pure ()
@@ -433,7 +441,7 @@ newSearch {vars} fc rig depth def env n ty
     = do let hty = abstractEnvType fc env ty
          let hole = newDef fc n rig ScopeEmpty hty (specified Public) (BySearch rig depth def)
          log "unify.search" 10 $ "Adding new search " ++ show fc ++ " " ++ show n
-         logTermNF "unify.search" 10 "New search type" ScopeEmpty hty
+         -- logTermNF "unify.search" 10 "New search type" ScopeEmpty hty
          idx <- addDef n hole
          addGuessName fc n idx
          pure (idx, Meta fc n idx envArgs)
@@ -539,11 +547,11 @@ checkValidHole base (idx, (fc, n))
                           | Nothing => pure ()
                      case c of
                           MkConstraint fc l env x y =>
-                             do put UST ({ guesses := empty } ust)
-                                empty <- clearDefs defs
-                                xnf <- quote empty env x
-                                ynf <- quote empty env y
-                                throw (CantSolveEq fc (gamma defs) env xnf ynf)
+                            do put UST ({ guesses := empty } ust)
+                               throw (CantSolveEq fc (gamma defs) env x y)
+                          MkSeqConstraint fc env (x :: _) (y :: _) =>
+                            do put UST ({ guesses := empty } ust)
+                               throw (CantSolveEq fc (gamma defs) env x y)
                           _ => pure ()
               _ => traverse_ checkRef !(traverse getFullName
                                         ((keys (getRefs (Resolved (-1)) (type gdef)))))
@@ -606,34 +614,34 @@ dumpHole s n hole
              (Guess tm envb constraints, ty) =>
                   do logString s.topic n $
                        "!" ++ show !(getFullName (Resolved hole)) ++ " : "
-                           ++ show !(toFullNames !(normaliseHoles defs ScopeEmpty ty))
+                           ++ show !(toFullNames !(normaliseHoles ScopeEmpty ty))
                        ++ "\n\t  = "
-                           ++ show !(normaliseHoles defs ScopeEmpty tm)
+                           ++ show !(normaliseHoles ScopeEmpty tm)
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
                   logString s.topic n $
                     "?" ++ show (fullname gdef) ++ " : "
-                        ++ show !(normaliseHoles defs ScopeEmpty ty)
+                        ++ show !(normaliseHoles ScopeEmpty ty)
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
                   logString s.topic n $
                      "Search " ++ show hole ++ " : " ++
-                     show !(toFullNames !(normaliseHoles defs ScopeEmpty ty))
+                     show !(toFullNames !(normaliseHoles ScopeEmpty ty))
              (Function _ t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
-                     show !(normalise defs ScopeEmpty ty) ++
-                     " = " ++ show !(normalise defs ScopeEmpty (Ref emptyFC Func (Resolved hole)))
+                     show !(normalise ScopeEmpty ty) ++
+                     " = " ++ show !(normalise ScopeEmpty (Ref emptyFC Func (Resolved hole)))
              (ImpBind, ty) =>
                   log s 4 $
                       "Bound: " ++ show hole ++ " : " ++
-                      show !(normalise defs ScopeEmpty ty)
+                      show !(normalise ScopeEmpty ty)
              (Delayed, ty) =>
                   log s 4 $
                      "Delayed elaborator : " ++
-                     show !(normalise defs ScopeEmpty ty)
+                     show !(normalise ScopeEmpty ty)
              _ => pure ()
   where
     dumpConstraint : Int -> Core ()
@@ -641,17 +649,14 @@ dumpHole s n hole
         = do ust <- get UST
              defs <- get Ctxt
              case lookup cid (constraints ust) of
-                  Nothing => pure ()
-                  Just Resolved => logString s.topic n "\tResolved"
-                  Just (MkConstraint _ lazy env x y) =>
-                    do logString s.topic n $
-                         "\t  " ++ show !(toFullNames !(quote defs env x))
-                                ++ " =?= " ++ show !(toFullNames !(quote defs env y))
-                       empty <- clearDefs defs
-                       log s 5 $
-                         "\t    from " ++ show !(toFullNames !(quote empty env x))
-                            ++ " =?= " ++ show !(toFullNames !(quote empty env y))
-                            ++ if lazy then "\n\t(lazy allowed)" else ""
+               Nothing => pure ()
+               Just Resolved => logString s.topic n "\tResolved"
+               Just (MkConstraint _ lazy env x y) =>
+                    logString s.topic n $
+                         "\t  " ++ show !(toFullNames x)
+                              ++ " =?= " ++ show !(toFullNames y)
+               Just (MkSeqConstraint _ _ xs ys) =>
+                    logString s.topic n $ "\t\t" ++ show xs ++ " =?= " ++ show ys
 
 export
 dumpConstraints : {auto u : Ref UST UState} ->

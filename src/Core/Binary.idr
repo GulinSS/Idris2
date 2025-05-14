@@ -269,12 +269,10 @@ getSaveDefs modns (n :: ns) acc defs
     = do Just gdef <- lookupCtxtExact n (gamma defs)
               | Nothing => getSaveDefs modns ns acc defs -- 'n' really should exist though!
          -- No need to save builtins
-         case definition gdef of
-              Builtin _ => getSaveDefs modns ns acc defs
-              _ => do bin <- initBinaryS 16384
-                      toBuf bin (trimNS modns !(full (gamma defs) gdef))
-                      b <- get Bin
-                      getSaveDefs modns ns ((trimName (fullname gdef), b) :: acc) defs
+         bin <- initBinaryS 16384
+         toBuf bin (trimNS modns !(full (gamma defs) gdef))
+         b <- get Bin
+         getSaveDefs modns ns ((trimName (fullname gdef), b) :: acc) defs
   where
     trimName : Name -> Name
     trimName n@(NS defns d) = if defns == modns then d else n

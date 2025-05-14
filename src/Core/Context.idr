@@ -476,11 +476,16 @@ export
 HasNames (Term vars)
 
 export
+HasNames (Var vars, Term vars) where
+  full gam (v, tm) = pure (v, !(full gam tm))
+  resolved gam (v, tm) = pure (v, !(resolved gam tm))
+
+export
 HasNames (CaseScope vars) where
-  full gam (RHS x) = pure (RHS !(full gam x))
+  full gam (RHS fs x) = pure (RHS !(full gam fs) !(full gam x))
   full gam (Arg c x sc) = pure (Arg c x !(full gam sc))
 
-  resolved gam (RHS x) = pure (RHS !(resolved gam x))
+  resolved gam (RHS fs x) = pure (RHS !(resolved gam fs) !(resolved gam x))
   resolved gam (Arg c x sc) = pure (Arg c x !(resolved gam sc))
 
 export
@@ -1005,6 +1010,7 @@ record Defs where
   constructor MkDefs
   gamma : Context
   mutData : List Name -- Currently declared but undefined data types
+  uconstraints : List UConstraint
   currentNS : Namespace -- namespace for current definitions
   nestedNS : List Namespace -- other nested namespaces we can look in
   options : Options
@@ -1096,6 +1102,7 @@ initDefs
          pure $ MkDefs
            { gamma = gam
            , mutData = []
+           , uconstraints = []
            , currentNS = mainNS
            , nestedNS = []
            , options = opts
@@ -1207,7 +1214,7 @@ showSimilarNames ns nm str kept
       | _ => pure (full ++ adj)
     Nothing
 
-
+export
 getVisibility : {auto c : Ref Ctxt Defs} ->
                 FC -> Name -> Core (WithDefault Visibility Private)
 getVisibility fc n
@@ -1354,39 +1361,6 @@ addContextAlias alias full
              | _ => pure () -- Don't add the alias if the name exists already
          gam' <- newAlias alias full (gamma defs)
          put Ctxt ({ gamma := gam' } defs)
-
-export
-addBuiltin : {arity : _} ->
-             {auto x : Ref Ctxt Defs} ->
-             Name -> ClosedTerm -> Totality ->
-             PrimFn arity -> Core ()
-addBuiltin n ty tot op
-   = do ignore $
-       addDef n $ MkGlobalDef
-         { location = emptyFC
-         , fullname = n
-         , type = ty
-         , eraseArgs = []
-         , safeErase = []
-         , specArgs = []
-         , inferrable = []
-         , multiplicity = top
-         , localVars = ScopeEmpty
-         , visibility = specified Public
-         , totality = tot
-         , isEscapeHatch = False
-         , flags = [Inline]
-         , refersToM = Nothing
-         , refersToRuntimeM = Nothing
-         , invertible = False
-         , noCycles = False
-         , linearChecked = True
-         , definition = Builtin op
-         , compexpr = Nothing
-         , namedcompexpr = Nothing
-         , sizeChange = []
-         , schemeExpr = Nothing
-         }
 
 export
 updateDef : {auto c : Ref Ctxt Defs} ->

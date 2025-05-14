@@ -5,10 +5,12 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate
 
 import Idris.Syntax
 import Idris.REPL.Opts
@@ -201,7 +203,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          let splitOn = findScrutinee env scr
 
          caseretty_in <- case expected of
-                           Just ty => getTerm ty
+                           Just ty => quote env ty
                            _ =>
                               do nmty <- genName "caseTy"
                                  u <- uniVar fc
@@ -215,14 +217,10 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
                             (maybe (Bind fc scrn (Pi fc caseRig Explicit scrty)
                                        (weaken caseretty))
                                    (const caseretty) splitOn)
-         -- If we can normalise the type without the result being excessively
-         -- big do it. It's the depth of stuck applications - 10 is already
-         -- pretty much unreadable!
-         casefnty <- normaliseSizeLimit defs 10 ScopeEmpty casefnty
          (erasedargs, _) <- findErased casefnty
 
-         logEnv "elab.case" 10 "Case env" env
-         logTermNF "elab.case" 2 ("Case function type: " ++ show casen) ScopeEmpty casefnty
+         -- logEnv "elab.case" 10 "Case env" env
+         -- logTermNF "elab.case" 2 ("Case function type: " ++ show casen) ScopeEmpty casefnty
          traverse_ addToSave (keys (getMetas casefnty))
 
          -- If we've had to add implicits to the case type (because there
@@ -255,7 +253,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          let alts' = map (updateClause casen splitOn nest env) alts
          log "elab.case" 2 $ "Nested: " ++ show (map getNestData (names nest))
          log "elab.case" 2 $ "Generated alts: " ++ show alts'
-         logTermNF "elab.case" 2 "Case application" env appTm
+         -- logTermNF "elab.case" 2 "Case application" env appTm
 
          -- Start with empty nested names, since we've extended the rhs with
          -- ICaseLocal so they'll get rebuilt with the right environment
@@ -281,7 +279,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          ust <- get UST
          put UST ({ delayedElab := olddelayed } ust)
 
-         pure (appTm, gnf env caseretty)
+         pure (appTm, !(nf env caseretty))
   where
     mkLocalEnv : Env Term vs -> Env Term vs
     mkLocalEnv [<] = ScopeEmpty
@@ -405,49 +403,49 @@ checkCase rig elabinfo nest env fc opts scr scrty_in alts exp
            log "elab.case" 5 $ "Checking " ++ show scr ++ " at " ++ show chrig
 
            (scrtm_in, gscrty, caseRig) <- handle
-              (do c <- runDelays (const True) $ check chrig elabinfo nest env scr (Just (gnf env scrtyv))
+              (do c <- runDelays (const True) $ check chrig elabinfo nest env scr (Just !(nf env scrtyv))
                   pure (fst c, snd c, chrig))
             $ \case
                 e@(LinearMisuse _ _ r _)
                   => branchOne
                      (do c <- runDelays (const True) $ check linear elabinfo nest env scr
-                              (Just (gnf env scrtyv))
+                              (Just !(nf env scrtyv))
                          pure (fst c, snd c, linear))
                      (throw e)
                      r
                 e => throw e
 
-           scrty <- getTerm gscrty
-           logTermNF "elab.case" 5 "Scrutinee type" env scrty
+           scrty <- quote env gscrty
+           -- logTermNF "elab.case" 5 "Scrutinee type" env scrty
            defs <- get Ctxt
-           checkConcrete !(nf defs env scrty)
+           checkConcrete !(expand !(nf env scrty))
            caseBlock rig elabinfo fc nest env opts scr scrtm_in scrty caseRig alts exp
   where
     -- For the moment, throw an error if we haven't been able to work out
     -- the type of the case scrutinee, because we'll need it to build the
     -- type of the case block. But (TODO) consider delaying on failure?
     checkConcrete : NF vs -> Core ()
-    checkConcrete (NApp _ (NMeta n i _) _)
+    checkConcrete (VMeta{})
         = throw (GenericMsg fc "Can't infer type for case scrutinee")
     checkConcrete _ = pure ()
 
     applyTo : Defs -> RawImp -> ClosedNF -> Core RawImp
-    applyTo defs ty (NBind fc _ (Pi _ _ Explicit _) sc)
+    applyTo defs ty (VBind fc _ (Pi _ _ Explicit _) sc)
         = applyTo defs (IApp fc ty (Implicit fc False))
-               !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
-    applyTo defs ty (NBind _ x (Pi _ _ _ _) sc)
+               !(expand !(sc (pure (VErased fc Placeholder))))
+    applyTo defs ty (VBind _ x (Pi _ _ _ _) sc)
         = applyTo defs (INamedApp fc ty x (Implicit fc False))
-               !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
+               !(expand !(sc (pure (VErased fc Placeholder))))
     applyTo defs ty _ = pure ty
 
     -- Get the name and type of the family the scrutinee is in
     getRetTy : Defs -> ClosedNF -> Core (Maybe (Name, ClosedNF))
-    getRetTy defs (NBind fc _ (Pi _ _ _ _) sc)
-        = getRetTy defs !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
-    getRetTy defs (NTCon _ n arity _)
+    getRetTy defs (VBind fc _ (Pi _ _ _ _) sc)
+        = getRetTy defs !(expand !(sc (pure (VErased fc Placeholder))))
+    getRetTy defs (VTCon _ n arity _)
         = do Just ty <- lookupTyExact n (gamma defs)
                   | Nothing => pure Nothing
-             pure (Just (n, !(nf defs ScopeEmpty ty)))
+             pure (Just (n, !(expand !(nf [<] ty))))
     getRetTy _ _ = pure Nothing
 
     -- Guess a scrutinee type by looking at the alternatives, so that we
@@ -460,7 +458,7 @@ checkCase rig elabinfo nest env fc opts scr scrty_in alts exp
                   do defs <- get Ctxt
                      [(_, (_, ty))] <- lookupTyName (mapNestedName nest n) (gamma defs)
                          | _ => guessScrType xs
-                     Just (tyn, tyty) <- getRetTy defs !(nf defs ScopeEmpty ty)
+                     Just (tyn, tyty) <- getRetTy defs !(expand !(nf [<] ty))
                          | _ => guessScrType xs
                      applyTo defs (IVar fc tyn) tyty
                _ => guessScrType xs

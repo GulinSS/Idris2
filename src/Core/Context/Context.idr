@@ -111,7 +111,6 @@ data Def : Type where
                  List String -> -- supported calling conventions,
                                 -- e.g "C:printf,libc,stdlib.h", "scheme:display", ...
                  Def
-    Builtin : {arity : Nat} -> PrimFn arity -> Def
     DCon : DataConInfo -> (tag : Tag) -> (arity : Nat) ->
            Def -- data constructor
     TCon : (arity : Nat) ->
@@ -149,7 +148,6 @@ defNameType None = Nothing
 defNameType (Function {}) = Just Func
 defNameType (ExternDef {}) = Just Func
 defNameType (ForeignDef {}) = Just Func
-defNameType (Builtin {}) = Just Func
 defNameType (DCon _ tag ar) = Just (DataCon tag ar)
 defNameType (TCon ar _ _ _ _ _ _) = Just (TyCon ar)
 defNameType (Hole {}) = Just Func
@@ -177,7 +175,6 @@ Show Def where
   show (ExternDef arity) = "<external def with arity " ++ show arity ++ ">"
   show (ForeignDef a cs) = "<foreign def with arity " ++ show a ++
                            " " ++ show cs ++">"
-  show (Builtin {arity} _) = "<builtin with arith " ++ show arity ++ ">"
   show (Hole _ p) = "Hole" ++ if implbind p then " [impl]" else ""
   show (BySearch c depth def) = "Search in " ++ show def
   show (Guess tm _ cs) = "Guess " ++ show tm ++ " when " ++ show cs
@@ -222,6 +219,10 @@ data DefFlag
          -- (otherwise they look potentially non terminating) so use with
          -- care!
     | SetTotal TotalReq
+    | BlockReduce -- Don't reduce when quoting/replacing. Used for interface
+                  -- dictionaries to prevent infinite reduction. This is a
+                  -- bit of a hack, to work around dictionaries not being
+                  -- strictly notal
     | BlockedHint -- a hint, but blocked for the moment (so don't use)
     | Macro
     | PartialEval (List (Name, Nat)) -- Partially evaluate on completing defintion.
@@ -249,6 +250,7 @@ Eq DefFlag where
     (==) Overloadable Overloadable = True
     (==) TCInline TCInline = True
     (==) (SetTotal x) (SetTotal y) = x == y
+    (==) BlockReduce BlockReduce = True
     (==) BlockedHint BlockedHint = True
     (==) Macro Macro = True
     (==) (PartialEval x) (PartialEval y) = x == y
@@ -266,6 +268,7 @@ Show DefFlag where
   show Overloadable = "overloadable"
   show TCInline = "tcinline"
   show (SetTotal x) = show x
+  show BlockReduce = "blockreduce"
   show BlockedHint = "blockedhint"
   show Macro = "macro"
   show (PartialEval _) = "partialeval"
@@ -277,7 +280,7 @@ public export
 record SCCall where
      constructor MkSCCall
      fnCall : Name -- Function called
-     fnArgs : Matrix SizeChange
+     fnArgs : List (Maybe (Nat, SizeChange))
         -- relationship to arguments of calling function; argument position
         -- (in the calling function), and how its size changed in the call.
         -- 'Nothing' if it's not related to any of the calling function's

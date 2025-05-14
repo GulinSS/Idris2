@@ -4,12 +4,14 @@ import Core.Context
 import Core.Context.Log
 import Core.Core
 import Core.Env
-import Core.GetType
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
+import Core.Evaluate.Quote
+import Core.Evaluate.Convert
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -39,14 +41,12 @@ findRewriteLemma loc rulety
 getRewriteTerms : {vars : _} ->
                   {auto c : Ref Ctxt Defs} ->
                   FC -> Defs -> NF vars -> Error ->
-                  Core (NF vars, NF vars, NF vars)
-getRewriteTerms loc defs (NTCon nfc eq a args) err
+                  Core (Glued vars, Glued vars, Glued vars)
+getRewriteTerms loc defs (VTCon nfc eq a args) err
     = if !(isEqualTy eq)
          then case map value args of
                    (_ :< lhsty :< rhsty :< lhs :< rhs) =>
-                        pure (!(evalClosure defs lhs),
-                              !(evalClosure defs rhs),
-                              !(evalClosure defs lhsty))
+                        pure (!lhs, !rhs, !lhsty)
                    _ => throw err
          else throw err
 getRewriteTerms loc defs ty err
@@ -81,31 +81,30 @@ elabRewrite : {vars : _} ->
 elabRewrite loc env expected rulety
     = do defs <- get Ctxt
          parg <- genVarName "rwarg"
-         tynf <- nf defs env rulety
+         tynf <- expand !(nf env rulety)
          (lt, rt, lty) <- getRewriteTerms loc defs tynf (NotRewriteRule loc env rulety)
          lemn <- findRewriteLemma loc rulety
 
          -- Need to normalise again, since we might have been delayed and
          -- the metavariables might have been updated
-         expnf <- nf defs env expected
+         expnf <- nf env expected
 
-         logNF "elab.rewrite" 5 "Rewriting" env lt
-         logNF "elab.rewrite" 5 "Rewriting in" env expnf
-         rwexp_sc <- replace defs env lt (Ref loc Bound parg) expnf
+         -- logNF "elab.rewrite" 5 "Rewriting" env lt
+         -- logNF "elab.rewrite" 5 "Rewriting in" env expnf
+         rwexp_sc <- replace env lt (Ref loc Bound parg) expnf
          logTerm "elab.rewrite" 5 "Rewritten to" rwexp_sc
 
          empty <- clearDefs defs
-         let pred = Bind loc parg (Lam loc top Explicit
-                          !(quote empty env lty))
+         ltyTm <- quote env lty
+         let pred = Bind loc parg (Lam loc top Explicit ltyTm)
                           (refsToLocals (Add parg parg None) rwexp_sc)
-         gpredty <- getType env pred
-         predty <- getTerm gpredty
-         exptm <- quote defs env expected
+         let predty = Bind loc parg (Pi loc top Explicit ltyTm)
+                          (TType loc (MN "top" 0))
 
          -- if the rewritten expected type converts with the original,
          -- then the rewrite did nothing, which is an error
-         when !(convert defs env rwexp_sc exptm) $
-             throw (RewriteNoChange loc env rulety exptm)
+         when !(convert env rwexp_sc expected) $
+             throw (RewriteNoChange loc env rulety expected)
          pure (MkLemma lemn pred predty)
 
 export
@@ -130,8 +129,8 @@ checkRewrite {vars} rigc elabinfo nest env ifc rule tm (Just expected)
            (rulev, grulet) <- check erased elabinfo nest env rule Nothing
            solveConstraintsAfter constart inTerm Normal
 
-           rulet <- getTerm grulet
-           expTy <- getTerm expected
+           rulet <- quote env grulet
+           expTy <- quote env expected
            when delayed $ log "elab.rewrite" 5 "Retrying rewrite"
            lemma <- elabRewrite vfc env expTy rulet
 
@@ -157,7 +156,7 @@ checkRewrite {vars} rigc elabinfo nest env ifc rule tm (Just expected)
                       [ IVar vfc pname
                       , IVar vfc rname
                       , tm ])
-                    (Just (gnf env' (weakenNs offset expTy)))
-           rwty <- getTerm grwty
+                    (Just !(nf env' (weakenNs offset expTy)))
+           rwty <- quote env' grwty
            let binding = Bind vfc pname pbind . Bind vfc rname rbind
-           pure (binding rwtm, gnf env (binding rwty))
+           pure (binding rwtm, !(nf env (binding rwty)))

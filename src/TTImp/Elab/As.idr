@@ -5,9 +5,11 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
+import Core.Evaluate.Quote
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -51,12 +53,12 @@ checkAs rig elabinfo nest env fc nameFC side n_in pat topexp
                     defs <- get Ctxt
                     update EST { boundNames $= ((n, AsBinding rigAs Explicit tm exp pattm) :: ),
                                  toBind $= ((n, AsBinding rigAs Explicit tm bty pattm) ::) }
-                    (ntm, nty) <- checkExp rig elabinfo env nameFC tm (gnf env exp)
+                    (ntm, nty) <- checkExp rig elabinfo env nameFC tm !(nf env exp)
                                            (Just patty)
 
                     -- Add the name type to the metadata
                     log "metadata.names" 7 $ "checkAs is adding ↓"
-                    addNameType nameFC n_in env !(getTerm nty)
+                    addNameType nameFC n_in env !(quote env nty)
 
                     pure (As fc side ntm pattm, patty)
               Just bty => throw (NonLinearPattern fc n_in)

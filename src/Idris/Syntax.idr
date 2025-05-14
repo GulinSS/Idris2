@@ -4,7 +4,6 @@ import public Core.Context
 import public Core.Context.Log
 import public Core.Core
 import public Core.FC
-import public Core.Normalise
 import public Core.Options
 import public Core.TT
 

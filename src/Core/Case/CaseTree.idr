@@ -122,7 +122,7 @@ mkTerm _ (TUnmatched fc msg) = Unmatched fc msg
 mkTerm _ (TImpossible fc) = Erased fc Impossible
 
 mkCaseScope : CaseType -> TCaseScope vars -> CaseScope vars
-mkCaseScope ct (TRHS tm) = RHS (mkTerm ct tm)
+mkCaseScope ct (TRHS tm) = RHS [] (mkTerm ct tm)
 mkCaseScope ct (TArg c x sc) = Arg c x (mkCaseScope ct sc)
 
 mkCaseAlt ct (TConCase fc x tag sc) = ConCase fc x tag (mkCaseScope ct sc)

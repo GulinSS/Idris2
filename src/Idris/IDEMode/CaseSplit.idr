@@ -5,7 +5,8 @@ import Core.Context.Log
 import Core.Env
 import Core.Metadata
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import Parser.Lexer.Source
 import Parser.Unlit
@@ -378,7 +379,7 @@ getClause l n
          Just (loc, nidx, envlen, ty) <- findTyDeclAt (\p, n => onLine (l-1) p)
              | Nothing => pure Nothing
          n <- getFullName nidx
-         argns <- getEnvArgNames defs envlen !(nf defs ScopeEmpty ty)
+         argns <- getEnvArgNames defs envlen !(expand !(nf [<] ty))
          Just srcLine <- getSourceLine l
            | Nothing => pure Nothing
          let (mark, src) = isLitLine srcLine

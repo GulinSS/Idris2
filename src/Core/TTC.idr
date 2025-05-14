@@ -288,6 +288,112 @@ TTC CaseType where
               1 => do n <- fromBuf b; pure (CaseBlock n)
               _ => corrupt "CaseType"
 
+export
+{n : _} -> TTC (PrimFn n) where
+  toBuf b (Add ty) = do tag 0; toBuf b ty
+  toBuf b (Sub ty) = do tag 1; toBuf b ty
+  toBuf b (Mul ty) = do tag 2; toBuf b ty
+  toBuf b (Div ty) = do tag 3; toBuf b ty
+  toBuf b (Mod ty) = do tag 4; toBuf b ty
+  toBuf b (Neg ty) = do tag 5; toBuf b ty
+  toBuf b (ShiftL ty) = do tag 35; toBuf b ty
+  toBuf b (ShiftR ty) = do tag 36; toBuf b ty
+  toBuf b (BAnd ty) = do tag 37; toBuf b ty
+  toBuf b (BOr ty) = do tag 38; toBuf b ty
+  toBuf b (BXOr ty) = do tag 39; toBuf b ty
+  toBuf b (LT ty) = do tag 6; toBuf b ty
+  toBuf b (LTE ty) = do tag 7; toBuf b ty
+  toBuf b (EQ ty) = do tag 8; toBuf b ty
+  toBuf b (GTE ty) = do tag 9; toBuf b ty
+  toBuf b (GT ty) = do tag 10; toBuf b ty
+  toBuf b StrLength = tag 11
+  toBuf b StrHead = tag 12
+  toBuf b StrTail = tag 13
+  toBuf b StrIndex = tag 14
+  toBuf b StrCons = tag 15
+  toBuf b StrAppend = tag 16
+  toBuf b StrReverse = tag 17
+  toBuf b StrSubstr = tag 18
+
+  toBuf b DoubleExp = tag 19
+  toBuf b DoubleLog = tag 20
+  toBuf b DoublePow = tag 21
+  toBuf b DoubleSin = tag 22
+  toBuf b DoubleCos = tag 23
+  toBuf b DoubleTan = tag 24
+  toBuf b DoubleASin = tag 25
+  toBuf b DoubleACos = tag 26
+  toBuf b DoubleATan = tag 27
+  toBuf b DoubleSqrt = tag 32
+  toBuf b DoubleFloor = tag 33
+  toBuf b DoubleCeiling = tag 34
+
+  toBuf b (Cast x y) = do tag 99; toBuf b x; toBuf b y
+  toBuf b BelieveMe = tag 100
+  toBuf b Crash = tag 101
+
+  fromBuf {n} b
+      = case n of
+             S Z => fromBuf1
+             S (S Z) => fromBuf2
+             S (S (S Z)) => fromBuf3
+             _ => corrupt "PrimFn"
+    where
+      fromBuf1 : Core (PrimFn 1)
+      fromBuf1
+          = case !getTag of
+                 5 => do ty <- fromBuf b; pure (Neg ty)
+                 11 => pure StrLength
+                 12 => pure StrHead
+                 13 => pure StrTail
+                 17 => pure StrReverse
+                 19 => pure DoubleExp
+                 20 => pure DoubleLog
+                 22 => pure DoubleSin
+                 23 => pure DoubleCos
+                 24 => pure DoubleTan
+                 25 => pure DoubleASin
+                 26 => pure DoubleACos
+                 27 => pure DoubleATan
+                 32 => pure DoubleSqrt
+                 33 => pure DoubleFloor
+                 34 => pure DoubleCeiling
+
+                 99 => do x <- fromBuf b; y <- fromBuf b; pure (Cast x y)
+                 _ => corrupt "PrimFn 1"
+
+      fromBuf2 : Core (PrimFn 2)
+      fromBuf2
+          = case !getTag of
+                 0 => do ty <- fromBuf b; pure (Add ty)
+                 1 => do ty <- fromBuf b; pure (Sub ty)
+                 2 => do ty <- fromBuf b; pure (Mul ty)
+                 3 => do ty <- fromBuf b; pure (Div ty)
+                 4 => do ty <- fromBuf b; pure (Mod ty)
+                 6 => do ty <- fromBuf b; pure (LT ty)
+                 7 => do ty <- fromBuf b; pure (LTE ty)
+                 8 => do ty <- fromBuf b; pure (EQ ty)
+                 9 => do ty <- fromBuf b; pure (GTE ty)
+                 10 => do ty <- fromBuf b; pure (GT ty)
+                 14 => pure StrIndex
+                 15 => pure StrCons
+                 16 => pure StrAppend
+                 21 => pure DoublePow
+                 35 => do ty <- fromBuf b; pure (ShiftL ty)
+                 36 => do ty <- fromBuf b; pure (ShiftR ty)
+                 37 => do ty <- fromBuf b; pure (BAnd ty)
+                 38 => do ty <- fromBuf b; pure (BOr ty)
+                 39 => do ty <- fromBuf b; pure (BXOr ty)
+                 101 => pure Crash
+                 _ => corrupt "PrimFn 2"
+
+      fromBuf3 : Core (PrimFn 3)
+      fromBuf3
+          = case !getTag of
+                 18 => pure StrSubstr
+                 100 => pure BelieveMe
+                 _ => corrupt "PrimFn 3"
+
 mutual
   export
   {vars : _} -> TTC (Binder (Term vars)) where
@@ -368,10 +474,15 @@ mutual
     toBuf b (PrimVal fc c)
         = do tag 10;
              toBuf b c
+    toBuf b (PrimOp {arity} fc fn args)
+        = do tag 11
+             toBuf b arity
+             toBuf b fn
+             toBuf b args
     toBuf b (Erased fc _)
-        = tag 11
+        = tag 12
     toBuf b (Unmatched fc u)
-        = do tag 12; toBuf b u
+        = do tag 13; toBuf b u
     toBuf b (TType fc u)
         = do tag 14; toBuf b u
 
@@ -408,9 +519,14 @@ mutual
                        pure (TForce emptyFC lr tm)
                10 => do c <- fromBuf b
                         pure (PrimVal emptyFC c)
-               11 => pure (Erased emptyFC Placeholder)
-               12 => do u <- fromBuf b; pure (TType emptyFC u)
-               13 => do fn <- fromBuf b
+               11 => do arity <- fromBuf b
+                        op <- fromBuf b
+                        args <- fromBuf b
+                        pure (PrimOp {arity} emptyFC op args)
+               12 => pure (Erased emptyFC Placeholder)
+               13 => do str <- fromBuf b
+                        pure (Unmatched emptyFC str)
+               14 => do fn <- fromBuf b
                         args <- fromBuf b
                         pure (apply emptyFC fn args)
                idxp => do c <- fromBuf b
@@ -421,13 +537,13 @@ mutual
 
   export
   {vars : _} -> TTC (CaseScope vars) where
-    toBuf b (RHS tm) = do tag 0; toBuf b tm
+    toBuf b (RHS _ tm) = do tag 0; toBuf b tm
     toBuf b (Arg c x sc) = do tag 1; toBuf b c; toBuf b x; toBuf b sc
 
     fromBuf b
         = case !getTag of
                0 => do tm <- fromBuf b
-                       pure (RHS tm)
+                       pure (RHS [] tm)
                1 => do c <- fromBuf b; x <- fromBuf b; sc <- fromBuf b
                        pure (Arg c x sc)
                _ => corrupt "CaseScope"
@@ -542,112 +658,6 @@ TTC Totality where
       = do term <- fromBuf b
            cov <- fromBuf b
            pure (MkTotality term cov)
-
-export
-{n : _} -> TTC (PrimFn n) where
-  toBuf b (Add ty) = do tag 0; toBuf b ty
-  toBuf b (Sub ty) = do tag 1; toBuf b ty
-  toBuf b (Mul ty) = do tag 2; toBuf b ty
-  toBuf b (Div ty) = do tag 3; toBuf b ty
-  toBuf b (Mod ty) = do tag 4; toBuf b ty
-  toBuf b (Neg ty) = do tag 5; toBuf b ty
-  toBuf b (ShiftL ty) = do tag 35; toBuf b ty
-  toBuf b (ShiftR ty) = do tag 36; toBuf b ty
-  toBuf b (BAnd ty) = do tag 37; toBuf b ty
-  toBuf b (BOr ty) = do tag 38; toBuf b ty
-  toBuf b (BXOr ty) = do tag 39; toBuf b ty
-  toBuf b (LT ty) = do tag 6; toBuf b ty
-  toBuf b (LTE ty) = do tag 7; toBuf b ty
-  toBuf b (EQ ty) = do tag 8; toBuf b ty
-  toBuf b (GTE ty) = do tag 9; toBuf b ty
-  toBuf b (GT ty) = do tag 10; toBuf b ty
-  toBuf b StrLength = tag 11
-  toBuf b StrHead = tag 12
-  toBuf b StrTail = tag 13
-  toBuf b StrIndex = tag 14
-  toBuf b StrCons = tag 15
-  toBuf b StrAppend = tag 16
-  toBuf b StrReverse = tag 17
-  toBuf b StrSubstr = tag 18
-
-  toBuf b DoubleExp = tag 19
-  toBuf b DoubleLog = tag 20
-  toBuf b DoublePow = tag 21
-  toBuf b DoubleSin = tag 22
-  toBuf b DoubleCos = tag 23
-  toBuf b DoubleTan = tag 24
-  toBuf b DoubleASin = tag 25
-  toBuf b DoubleACos = tag 26
-  toBuf b DoubleATan = tag 27
-  toBuf b DoubleSqrt = tag 32
-  toBuf b DoubleFloor = tag 33
-  toBuf b DoubleCeiling = tag 34
-
-  toBuf b (Cast x y) = do tag 99; toBuf b x; toBuf b y
-  toBuf b BelieveMe = tag 100
-  toBuf b Crash = tag 101
-
-  fromBuf {n} b
-      = case n of
-             S Z => fromBuf1
-             S (S Z) => fromBuf2
-             S (S (S Z)) => fromBuf3
-             _ => corrupt "PrimFn"
-    where
-      fromBuf1 : Core (PrimFn 1)
-      fromBuf1
-          = case !getTag of
-                 5 => do ty <- fromBuf b; pure (Neg ty)
-                 11 => pure StrLength
-                 12 => pure StrHead
-                 13 => pure StrTail
-                 17 => pure StrReverse
-                 19 => pure DoubleExp
-                 20 => pure DoubleLog
-                 22 => pure DoubleSin
-                 23 => pure DoubleCos
-                 24 => pure DoubleTan
-                 25 => pure DoubleASin
-                 26 => pure DoubleACos
-                 27 => pure DoubleATan
-                 32 => pure DoubleSqrt
-                 33 => pure DoubleFloor
-                 34 => pure DoubleCeiling
-
-                 99 => do x <- fromBuf b; y <- fromBuf b; pure (Cast x y)
-                 _ => corrupt "PrimFn 1"
-
-      fromBuf2 : Core (PrimFn 2)
-      fromBuf2
-          = case !getTag of
-                 0 => do ty <- fromBuf b; pure (Add ty)
-                 1 => do ty <- fromBuf b; pure (Sub ty)
-                 2 => do ty <- fromBuf b; pure (Mul ty)
-                 3 => do ty <- fromBuf b; pure (Div ty)
-                 4 => do ty <- fromBuf b; pure (Mod ty)
-                 6 => do ty <- fromBuf b; pure (LT ty)
-                 7 => do ty <- fromBuf b; pure (LTE ty)
-                 8 => do ty <- fromBuf b; pure (EQ ty)
-                 9 => do ty <- fromBuf b; pure (GTE ty)
-                 10 => do ty <- fromBuf b; pure (GT ty)
-                 14 => pure StrIndex
-                 15 => pure StrCons
-                 16 => pure StrAppend
-                 21 => pure DoublePow
-                 35 => do ty <- fromBuf b; pure (ShiftL ty)
-                 36 => do ty <- fromBuf b; pure (ShiftR ty)
-                 37 => do ty <- fromBuf b; pure (BAnd ty)
-                 38 => do ty <- fromBuf b; pure (BOr ty)
-                 39 => do ty <- fromBuf b; pure (BXOr ty)
-                 101 => pure Crash
-                 _ => corrupt "PrimFn 2"
-
-      fromBuf3 : Core (PrimFn 3)
-      fromBuf3
-          = case !getTag of
-                 18 => pure StrSubstr
-                 100 => pure BelieveMe
-                 _ => corrupt "PrimFn 3"
 
 export
 TTC ConInfo where
@@ -977,8 +987,6 @@ TTC Def where
       = do tag 2; toBuf b a
   toBuf b (ForeignDef a cs)
       = do tag 3; toBuf b a; toBuf b cs
-  toBuf b (Builtin a)
-      = throw (InternalError "Trying to serialise a Builtin")
   toBuf b (DCon t arity nt) = do tag 4; toBuf b t; toBuf b arity; toBuf b nt
   toBuf b (TCon arity parampos detpos u ms datacons dets)
       = do tag 5; toBuf b arity; toBuf b parampos
@@ -1043,18 +1051,19 @@ TTC TotalReq where
 
 TTC DefFlag where
   toBuf b Inline = tag 2
-  toBuf b NoInline = tag 13
+  toBuf b NoInline = tag 14
   toBuf b Deprecate = tag 15
   toBuf b Invertible = tag 3
   toBuf b Overloadable = tag 4
   toBuf b TCInline = tag 5
   toBuf b (SetTotal x) = do tag 6; toBuf b x
   toBuf b BlockedHint = tag 7
-  toBuf b Macro = tag 8
-  toBuf b (PartialEval x) = tag 9 -- names not useful any more
-  toBuf b AllGuarded = tag 10
-  toBuf b (ConType ci) = do tag 11; toBuf b ci
-  toBuf b (Identity x) = do tag 12; toBuf b x
+  toBuf b BlockReduce = tag 8
+  toBuf b Macro = tag 9
+  toBuf b (PartialEval x) = tag 10 -- names not useful any more
+  toBuf b AllGuarded = tag 11
+  toBuf b (ConType ci) = do tag 12; toBuf b ci
+  toBuf b (Identity x) = do tag 13; toBuf b x
 
   fromBuf b
       = case !getTag of
@@ -1064,12 +1073,13 @@ TTC DefFlag where
              5 => pure TCInline
              6 => do x <- fromBuf b; pure (SetTotal x)
              7 => pure BlockedHint
-             8 => pure Macro
-             9 => pure (PartialEval [])
-             10 => pure AllGuarded
-             11 => do ci <- fromBuf b; pure (ConType ci)
-             12 => do x <- fromBuf b; pure (Identity x)
-             13 => pure NoInline
+             8 => pure BlockReduce
+             9 => pure Macro
+             10 => pure (PartialEval [])
+             11 => pure AllGuarded
+             12 => do ci <- fromBuf b; pure (ConType ci)
+             13 => do x <- fromBuf b; pure (Identity x)
+             14 => pure NoInline
              15 => pure Deprecate
              _ => corrupt "DefFlag"
 

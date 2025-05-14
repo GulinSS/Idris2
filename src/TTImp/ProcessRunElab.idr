@@ -5,10 +5,10 @@ import Core.Core
 import Core.Env
 import Core.Metadata
 import Core.Options
-import Core.Normalise
 import Core.Reflect
 import Core.UnifyState
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -38,5 +38,5 @@ processRunElab eopts nest env fc tm
          unit <- getCon fc defs (builtin "Unit")
          exp <- appConTop fc defs n [unit]
 
-         stm <- checkTerm tidx InExpr eopts nest env tm (gnf env exp)
-         ignore $ elabScript top fc nest env !(nfOpts withAll defs env stm) Nothing
+         stm <- checkTerm tidx InExpr eopts nest env tm !(nf env exp)
+         ignore $ elabScript top fc nest env !(expand !(nf env stm)) Nothing

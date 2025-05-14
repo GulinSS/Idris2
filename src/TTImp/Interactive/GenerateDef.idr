@@ -6,10 +6,10 @@ import Core.Context
 import Core.Context.Log
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.TT
 import Core.Unify
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -77,7 +77,7 @@ expandClause loc opts n c
          rhs' <- exprSearchOpts opts loc (Resolved fn) []
          traverse (\rhs' =>
             do let rhsraw = dropLams locs rhs'
-               logTermNF "interaction.generate" 5 "Got clause" env lhs
+               -- logTermNF "interaction.generate" 5 "Got clause" env lhs
                log "interaction.generate" 5 $ "        = " ++ show rhsraw
                pure [updateRHS c rhsraw]) rhs'
   where
@@ -228,7 +228,7 @@ makeDefFromType loc opts n envlen ty
          (do defs <- branch
              meta <- get MD
              ust <- get UST
-             argns <- getEnvArgNames defs envlen !(nf defs ScopeEmpty ty)
+             argns <- getEnvArgNames defs envlen !(expand !(nf [<] ty))
              -- Need to add implicit patterns for the outer environment.
              -- We won't try splitting on these
              let pre_env = replicate envlen (Implicit loc True)

@@ -48,7 +48,7 @@ namespace Raw
          <+> vsep (assert_total (map prettyAlt alts)))
   prettyTree tm = byShow tm
 
-  prettyScope (RHS tm) = fatArrow <++> byShow tm
+  prettyScope (RHS _ tm) = fatArrow <++> byShow tm
   prettyScope (Arg c x sc) = annotate Bound (pretty0 x) <++> prettyScope sc
 
   prettyAlt (ConCase _ n tag sc)
@@ -95,9 +95,6 @@ namespace Raw
      vcat $ header "Foreign definition" :: map (indent 2)
           [ "arity:" <++> byShow arity
           , "bindings:" <++> byShow calls ]
-  prettyDef (Builtin {arity} _) =
-        vcat $ header "Builtin" :: map (indent 2)
-          [ "arity:" <++> byShow arity ]
   prettyDef (Hole numlocs hf) =
         vcat $ header "Hole" :: map (indent 2)
           ("Implicitly bound name" <$ guard (implbind hf))
@@ -128,7 +125,7 @@ namespace Resugared
     {auto s : Ref Syn SyntaxInfo} ->
     Env Term vars -> CaseScope vars -> Core (Doc IdrisSyntax)
 
-  prettyScope env (RHS tm) = do
+  prettyScope env (RHS _ tm) = do
       tm <- prettyTree env tm
       pure $ fatArrow <++> tm
   prettyScope env (Arg c x sc) = do
@@ -192,9 +189,6 @@ namespace Resugared
      vcat $ header "Foreign definition" :: map (indent 2)
           [ "arity:" <++> byShow arity
           , "bindings:" <++> byShow calls ]
-  prettyDef (Builtin {arity} _) = pure $
-        vcat $ header "Builtin" :: map (indent 2)
-          [ "arity:" <++> byShow arity ]
   prettyDef (Hole numlocs hf) = pure $
         vcat $ header "Hole" :: map (indent 2)
           ("Implicitly bound name" <$ guard (implbind hf))

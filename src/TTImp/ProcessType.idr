@@ -6,10 +6,11 @@ import Core.Core
 import Core.Env
 import Core.Hash
 import Core.Metadata
-import Core.Normalise
 import Core.TT
 import Core.UnifyState
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -39,11 +40,11 @@ getFnString (IPrimVal _ (Str st)) = pure st
 getFnString tm
     = do inidx <- resolveName (UN $ Basic "[foreign]")
          let fc = getFC tm
-         let gstr = gnf ScopeEmpty (PrimVal fc $ PrT StringType)
+         gstr <- nf ScopeEmpty (PrimVal fc $ PrT StringType)
          etm <- checkTerm inidx InExpr [] (MkNested []) ScopeEmpty tm gstr
          defs <- get Ctxt
-         case !(nf defs ScopeEmpty etm) of
-              NPrimVal fc (Str st) => pure st
+         case !(expand !(nf [<] etm)) of
+              VPrimVal fc (Str st) => pure st
               _ => throw (GenericMsg fc "%foreign calling convention must evaluate to a String")
 
 -- If it's declared as externally defined, set the definition to
@@ -62,11 +63,11 @@ initDef fc n env ty []
          pure None
 initDef fc n env ty (ExternFn :: opts)
     = do defs <- get Ctxt
-         a <- getArity defs env ty
+         a <- getArity env ty
          pure (ExternDef a)
 initDef fc n env ty (ForeignFn cs :: opts)
     = do defs <- get Ctxt
-         a <- getArity defs env ty
+         a <- getArity env ty
          cs' <- traverse getFnString cs
          pure (ForeignDef a cs')
 -- In this case, nothing to initialise to, but we do need to process the
@@ -98,29 +99,29 @@ findInferrable defs ty = fi 0 0 [] [] ty
       -- Add to the inferrable arguments from the given type. An argument is
       -- inferrable if it's guarded by a constructor, or on its own
       findInf : List Nat -> List (Name, Nat) ->
-                ClosedNF -> Core (List Nat)
-      findInf acc pos (NApp _ (NRef Bound n) [<])
+                NF [<] -> Core (List Nat)
+      findInf acc pos (VApp _ Bound n [<] _)
           = case lookup n pos of
                  Nothing => pure acc
                  Just p => if p `elem` acc then pure acc else pure (p :: acc)
-      findInf acc pos (NDCon _ _ _ _ args)
-          = do args' <- traverse (evalClosure defs . value) (toList args)
+      findInf acc pos (VDCon _ _ _ _ args)
+          = do args' <- traverseSnocList spineVal args
                findInfs acc pos args'
-      findInf acc pos (NTCon _ _ _ args)
-          = do args' <- traverse (evalClosure defs . value) (toList args)
+      findInf acc pos (VTCon _ _ _ args)
+          = do args' <- traverseSnocList spineVal args
                findInfs acc pos args'
-      findInf acc pos (NDelayed _ _ t) = findInf acc pos t
+      findInf acc pos (VDelayed _ _ t) = findInf acc pos !(expand t)
       findInf acc _ _ = pure acc
 
-      findInfs : List Nat -> List (Name, Nat) -> List ClosedNF -> Core (List Nat)
-      findInfs acc pos [] = pure acc
-      findInfs acc pos (n :: ns) = findInf !(findInfs acc pos ns) pos n
+      findInfs : List Nat -> List (Name, Nat) -> SnocList (NF [<]) -> Core (List Nat)
+      findInfs acc pos [<] = pure acc
+      findInfs acc pos (ns :< n) = findInf !(findInfs acc pos ns) pos n
 
     fi : Nat -> Int -> List (Name, Nat) -> List Nat -> ClosedNF -> Core (List Nat)
-    fi pos i args acc (NBind fc x (Pi _ _ _ aty) sc)
+    fi pos i args acc (VBind fc x (Pi _ _ _ aty) sc)
         = do let argn = MN "inf" i
-             sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Ref fc Bound argn))
-             acc' <- findInf acc args !(evalClosure defs aty)
+             sc' <- expand !(sc (pure (VApp fc Bound argn [<] (pure Nothing))))
+             acc' <- findInf acc args !(expand aty)
              rest <- fi (1 + pos) (1 + i) ((argn, pos) :: args) acc' sc'
              pure rest
     fi pos i args acc ret = findInf acc args ret
@@ -164,7 +165,7 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc n_in ty_raw)
                    checkTerm idx InType (HolesOkay :: eopts) nest env
                              (IBindHere fc (PI erased) ty_raw)
                              (gType fc u)
-         logTermNF "declare.type" 3 ("Type of " ++ show n) ScopeEmpty (abstractFullEnvType tfc env ty)
+         -- logTermNF "declare.type" 3 ("Type of " ++ show n) ScopeEmpty (abstractFullEnvType tfc env ty)
 
          def <- initDef fc n env ty opts
          let fullty = abstractFullEnvType tfc env ty
@@ -172,7 +173,7 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc n_in ty_raw)
          (erased, dterased) <- findErased fullty
          defs <- get Ctxt
          empty <- clearDefs defs
-         infargs <- findInferrable empty !(nf defs ScopeEmpty fullty)
+         infargs <- findInferrable defs !(expand !(nf [<] fullty))
 
          ignore $ addDef (Resolved idx)
                 ({ eraseArgs := erased,

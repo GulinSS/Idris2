@@ -4,9 +4,10 @@ import Core.Case.Util
 import Core.Context
 import Core.Context.Log
 import Core.Env
-import Core.Normalise
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
 
 import Data.List
 import Data.Maybe
@@ -82,18 +83,18 @@ conflict defs env nfty n
               | Nothing => pure False
          case (definition gdef, type gdef) of
               (DCon t arity _, dty)
-                  => do Nothing <- conflictNF 0 nfty !(nf defs ScopeEmpty dty)
+                  => do Nothing <- conflictNF 0 nfty !(expand !(nf [<] dty))
                             | Just ms => pure $ conflictMatch ms
                         pure True
               _ => pure False
   where
     mutual
-      conflictArgs : Int -> Scopeable (Closure vars) -> Scopeable ClosedClosure ->
+      conflictArgs : Int -> SnocList (Glued vars) -> SnocList (Glued [<]) ->
                      Core (Maybe (List (Name, Term vars)))
       conflictArgs _ [<] [<] = pure (Just [])
       conflictArgs i (cs :< c) (cs' :< c')
-          = do cnf <- evalClosure defs c
-               cnf' <- evalClosure defs c'
+          = do cnf <- expand c
+               cnf' <- expand c'
                Just ms <- conflictNF i cnf cnf'
                     | Nothing => pure Nothing
                Just ms' <- conflictArgs i cs cs'
@@ -109,24 +110,28 @@ conflict defs env nfty n
       -- conflictNF returns the list of matches, for checking
       conflictNF : Int -> NF vars -> ClosedNF ->
                    Core (Maybe (List (Name, Term vars)))
-      conflictNF i t (NBind fc x b sc)
+      conflictNF i t (VBind fc x b sc)
           -- invent a fresh name, in case a user has bound the same name
           -- twice somehow both references appear in the result  it's unlikely
           -- put possible
           = let x' = MN (show x) i in
                 conflictNF (i + 1) t
-                       !(sc defs (toClosure defaultOpts ScopeEmpty (Ref fc Bound x')))
-      conflictNF i nf (NApp _ (NRef Bound n) [<])
-          = pure (Just [(n, !(quote defs env nf))])
-      conflictNF i (NDCon _ n t a args) (NDCon _ n' t' a' args')
+                       !(expand !(sc (pure (vRef fc Bound x'))))
+      conflictNF i nf (VApp _ Bound n [<] _)
+          = pure (Just [(n, !(quote env nf))])
+      conflictNF i (VDCon _ n t a args) (VDCon _ n' t' a' args')
           = if t == t'
-               then conflictArgs i (map value args) (map value args')
+               then conflictArgs i
+                       !(traverseSnocList value args)
+                       !(traverseSnocList value args')
                else pure Nothing
-      conflictNF i (NTCon _ n a args) (NTCon _ n' a' args')
+      conflictNF i (VTCon _ n a args) (VTCon _ n' a' args')
           = if n == n'
-               then conflictArgs i (map value args) (map value args')
+               then conflictArgs i
+                      !(traverseSnocList value args)
+                      !(traverseSnocList value args')
                else pure Nothing
-      conflictNF i (NPrimVal _ c) (NPrimVal _ c')
+      conflictNF i (VPrimVal _ c) (VPrimVal _ c')
           = if c == c'
                then pure (Just [])
                else pure Nothing
@@ -138,14 +143,14 @@ export
 isEmpty : {vars : _} ->
           {auto c : Ref Ctxt Defs} ->
           Defs -> Env Term vars -> NF vars -> Core Bool
-isEmpty defs env (NTCon fc n a args)
+isEmpty defs env (VTCon fc n a args)
   = do Just nty <- lookupDefExact n (gamma defs)
          | _ => pure False
        case nty of
             TCon _ _ _ flags _ Nothing _ => pure False
             TCon _ _ _ flags _ (Just cons) _
                  => if not (external flags)
-                       then allM (conflict defs env (NTCon fc n a args)) cons
+                       then allM (conflict defs env (VTCon fc n a args)) cons
                        else pure False
             _ => pure False
 isEmpty defs env _ = pure False
@@ -165,26 +170,26 @@ getMissingAlts : {auto c : Ref Ctxt Defs} ->
                  Core (List (CaseAlt vars))
 -- If it's a primitive other than WorldVal, there's too many to reasonably
 -- check, so require a catch all
-getMissingAlts fc defs (NPrimVal _ $ PrT WorldType) alts
+getMissingAlts fc defs (VPrimVal _ $ PrT WorldType) alts
     = if isNil alts
          then pure [DefaultCase fc (Unmatched fc "Coverage check")]
          else pure []
-getMissingAlts fc defs (NPrimVal _ c) alts
+getMissingAlts fc defs (VPrimVal _ c) alts
   = do log "coverage.missing" 50 $ "Looking for missing alts at type " ++ show c
        if any isDefault alts
          then do log "coverage.missing" 20 "Found default"
                  pure []
          else pure [DefaultCase fc (Unmatched fc "Coverage check")]
 -- Similarly for types
-getMissingAlts fc defs (NType _ _) alts
+getMissingAlts fc defs (VType _ _) alts
     = do log "coverage.missing" 50 "Looking for missing alts at type Type"
          if any isDefault alts
            then do log "coverage.missing" 20 "Found default"
                    pure []
            else pure [DefaultCase fc (Unmatched fc "Coverage check")]
 getMissingAlts fc defs nfty alts
-    = do log "coverage.missing" 50 $ "Getting constructors for: " ++ show nfty
-         logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
+    = do -- log "coverage.missing" 50 $ "Getting constructors for: " ++ show nfty
+         -- logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
          allCons <- getCons defs nfty
          pure (filter (noneOf alts)
                  (map (mkAltTm fc (Unmatched fc "Coverage check")) allCons))
@@ -256,8 +261,8 @@ replaceDefaults : {auto c : Ref Ctxt Defs} ->
                   Core (List (CaseAlt vars))
 -- Leave it alone if it's a primitive type though, since we need the catch
 -- all case there
-replaceDefaults fc defs (NPrimVal _ _) cs = pure cs
-replaceDefaults fc defs (NType _ _) cs = pure cs
+replaceDefaults fc defs (VPrimVal _ _) cs = pure cs
+replaceDefaults fc defs (VType _ _) cs = pure cs
 replaceDefaults fc defs nfty cs
     = do cs' <- traverse rep cs
          pure (dropRep (concat cs'))
@@ -296,8 +301,7 @@ buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsI
   -- the ones it can't possibly be (the 'not') because a previous case
   -- has matched.
     = do let fenv = mkEnv fc _
-         defs <- get Ctxt
-         nfty <- nf defs fenv ty
+         nfty <- expand !(nf fenv ty)
          alts <- replaceDefaults fc defs nfty altsIn
          let alts' = alts ++ !(getMissingAlts fc defs nfty alts)
          let altsK = maybe alts' (\t => filter (tagIsTm t) alts')
@@ -313,7 +317,7 @@ buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsI
                  KnownVars vars Int -> KnownVars vars (List Int) ->
                  Name -> Int -> SnocList (RigCount, Name) ->
                  CaseScope (vars ++ more) -> Core (List (SnocList (RigCount, ClosedTerm)))
-    buildArgSc s fc var known not' n t args (RHS tm)
+    buildArgSc s fc var known not' n t args (RHS _ tm)
         = do let con = Ref fc (DataCon t (length args)) n
              let app = applySpine fc con
                              (map @{Compose} (Ref fc Bound) args)
@@ -483,11 +487,11 @@ checkMatched cs ulhs
   where
     tryClauses : List Clause -> ClosedTerm -> Core (Maybe ClosedTerm)
     tryClauses [] ulhs
-        = do logTermNF "coverage" 10 "Nothing matches" ScopeEmpty ulhs
+        = do -- logTermNF "coverage" 10 "Nothing matches" ScopeEmpty ulhs
              pure $ Just ulhs
     tryClauses (MkClause env lhs _ :: cs) ulhs
         = if !(clauseMatches env lhs ulhs)
-             then do logTermNF "coverage" 10 "Yes" env lhs
+             then do -- logTermNF "coverage" 10 "Yes" env lhs
                      pure Nothing -- something matches, discared it
-             else do logTermNF "coverage" 10 "No match" env lhs
+             else do -- logTermNF "coverage" 10 "No match" env lhs
                      tryClauses cs ulhs

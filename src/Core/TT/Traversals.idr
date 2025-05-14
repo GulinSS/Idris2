@@ -5,6 +5,7 @@ import Core.Ord
 
 import Data.DPair
 import Data.SnocList
+import Data.Vect
 import Libraries.Data.NameMap
 import Libraries.Data.SortedSet
 
@@ -33,11 +34,12 @@ onPRefs f = go neutral where
   go acc (TDelay fc x ty arg) = go (go acc ty) arg
   go acc (TForce fc x y) = go acc y
   go acc (PrimVal fc c) = acc
+  go acc (PrimOp fc fn args) = gos acc (toList args)
   go acc (Erased fc imp) = acc
   go acc (TType fc u) = acc
   go acc (Unmatched fc _) = acc
 
-  goScope acc (RHS tm) = go acc tm
+  goScope acc (RHS _ tm) = go acc tm
   goScope acc (Arg c x sc) = goScope acc sc
 
   goAlt acc (ConCase _ n t sc) = goScope acc sc
@@ -78,6 +80,7 @@ onConstants f = go neutral where
   go acc (TDelay fc x ty arg) = go (go acc ty) arg
   go acc (TForce fc x y) = go acc y
   go acc (PrimVal fc c) = acc <+> f c
+  go acc (PrimOp fc fn args) = gos acc (toList args)
   go acc (Erased fc imp) = acc
   go acc (TType fc u) = acc
   go acc (Unmatched fc _) = acc
@@ -85,7 +88,7 @@ onConstants f = go neutral where
   gos acc [] = acc
   gos acc (x :: xs) = gos (go acc x) xs
 
-  goScope acc (RHS tm) = go acc tm
+  goScope acc (RHS _ tm) = go acc tm
   goScope acc (Arg c x sc) = goScope acc sc
 
   goAlt acc (ConCase _ n t sc) = goScope acc sc
@@ -125,11 +128,13 @@ mapTermM f t = act t where
   go t@(TDelay fc x ty arg) = TDelay fc x <$> act ty <*> act arg
   go t@(TForce fc x y) = pure t
   go t@(PrimVal fc c) = pure t
+  go t@(PrimOp fc fn args) = PrimOp fc fn <$> traverse act args
   go t@(Erased fc imp) = pure t
   go t@(TType fc u) = pure t
   go t@(Unmatched fc _) = pure t
 
-  goScope (RHS tm) = RHS <$> act tm
+  goScope (RHS fs tm)
+      = RHS <$> traverse (\ (n, t) => pure (n, !(act t))) fs <*> act tm
   goScope (Arg c x sc) = Arg c x <$> goScope sc
 
   goAlt (ConCase fc n t sc) = ConCase fc n t <$> goScope sc
@@ -160,11 +165,12 @@ mapTerm f t = act t where
   go t@(TDelay fc x ty arg) = TDelay fc x (act ty) (act arg)
   go t@(TForce fc x y) = t
   go t@(PrimVal fc c) = t
+  go t@(PrimOp fc fn args) = PrimOp fc fn (map act args)
   go t@(Erased fc imp) = t
   go t@(TType fc u) = t
   go t@(Unmatched fc u) = t
 
-  goScope (RHS tm) = RHS (act tm)
+  goScope (RHS fs tm) = RHS (map (\ (n, t) => (n, act t)) fs) (act tm)
   goScope (Arg c x sc) = Arg c x (goScope sc)
 
   goAlt (ConCase fc n t sc) = ConCase fc n t (goScope sc)

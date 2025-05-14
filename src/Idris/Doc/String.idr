@@ -6,6 +6,7 @@ import Core.Core
 import Core.Env
 import Core.TT
 import Core.TT.Traversals
+import Core.Evaluate
 
 import Idris.Doc.Display
 import Idris.Pretty
@@ -87,8 +88,7 @@ prettyType : {auto c : Ref Ctxt Defs} ->
              {auto s : Ref Syn SyntaxInfo} ->
              (IdrisSyntax -> ann) -> ClosedTerm -> Core (Doc ann)
 prettyType syn ty = do
-  defs <- get Ctxt
-  ty <- normaliseHoles defs ScopeEmpty ty
+  ty <- normaliseHoles ScopeEmpty ty
   ty <- toFullNames ty
   ty <- resugar ScopeEmpty ty
   pure (prettyBy syn ty)
@@ -108,7 +108,7 @@ getImplDocs keep
               let Just Func = defNameType (definition def)
                 | _ => pure []
               -- Check that the type mentions the name of interest
-              ty <- toFullNames !(normaliseHoles defs ScopeEmpty (type def))
+              ty <- toFullNames !(normaliseHoles ScopeEmpty (type def))
               True <- keep ty
                 | False => pure []
               ty <- resugar ScopeEmpty ty
@@ -451,7 +451,7 @@ getDocsForName fc n config
                                (pure (Nothing, []))
 
              -- Then form the type declaration
-             ty <- resugar ScopeEmpty =<< normaliseHoles defs ScopeEmpty (type def)
+             ty <- resugar ScopeEmpty =<< normaliseHoles ScopeEmpty (type def)
              -- when printing e.g. interface methods there is no point in
              -- repeating the interface's name
              let ty = ifThenElse (not dropFirst) ty $ case ty of
@@ -504,7 +504,7 @@ getDocsForImplementation t = do
     -- get the return type of all the candidate hints
     Just (ix, def) <- lookupCtxtExactI hint (gamma defs)
       | Nothing => pure Nothing
-    ty <- resugar ScopeEmpty =<< normaliseHoles defs ScopeEmpty (type def)
+    ty <- resugar ScopeEmpty =<< normaliseHoles ScopeEmpty (type def)
     let (_, retTy) = underPis ty
     -- try to see whether it approximates what we are looking for
     -- we throw the head away because it'll be the interface name (I)
@@ -545,7 +545,7 @@ getDocsForImplementation t = do
     pure (Just (hint, ix, def))
   case impls of
     [] => pure $ Just $ "Could not find an implementation for" <++> pretty0 (show t) --hack
-    _ => do ds <- traverse (displayImpl defs) impls
+    _ => do ds <- traverse displayImpl impls
             pure $ Just $ vcat ds
 
 export

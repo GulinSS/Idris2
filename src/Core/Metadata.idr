@@ -6,9 +6,12 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.FC
-import Core.Normalise
 import Core.TT
 import Core.TTC
+
+import Core.Evaluate.Normalise
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
 
 import Data.List
 import System.File
@@ -357,7 +360,8 @@ normaliseTypes
     nfType : Defs -> (NonEmptyFC, (Name, Nat, ClosedTerm)) ->
              Core (NonEmptyFC, (Name, Nat, ClosedTerm))
     nfType defs (loc, (n, len, ty))
-       = pure (loc, (n, len, !(normaliseArgHoles defs ScopeEmpty ty)))
+      -- See nfKeepLet at elabTermSub of TTImp.Elab
+       = pure (loc, (n, len, !(quote ScopeEmpty !(nfKeepLet ScopeEmpty ty))))
 
 record TTMFile where
   constructor MkTTMFile

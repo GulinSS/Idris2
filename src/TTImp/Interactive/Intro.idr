@@ -7,6 +7,8 @@ import Core.Metadata
 import Core.TT
 import Core.TT.Views
 import Core.Unify
+import Core.Evaluate.Normalise
+import Core.Evaluate
 
 import Idris.Desugar
 import Idris.REPL.Opts
@@ -51,20 +53,18 @@ parameters
     -- for now we only handle types with a unique constructor
     let TCon _ _ _ _ _ cs _ = definition gdef
       | _ => pure []
-    let gty = gnf env ty
+    gty <- nf env ty
     ics <- for (fromMaybe [] cs) $ \ cons => do
       Just gdef <- lookupCtxtExact cons (gamma defs)
         | _ => pure Nothing
       let nargs = lengthExplicitPi $ fst $ snd $ underPis (-1) ScopeEmpty (type gdef)
       new_hole_names <- uniqueHoleNames defs nargs (nameRoot hole)
-      let new_holes = PHole replFC True <$> new_hole_names
-      let pcons = papply replFC (PRef replFC cons) new_holes
+      let new_holes = IHole replFC <$> new_hole_names
+      let icons = apply (IVar replFC cons) new_holes
       res <- catch
         (do -- We're desugaring it to the corresponding TTImp
-            icons <- desugar AnyExpr (toList lhsCtxt) pcons
             ccons <- checkTerm hidx {-is this correct?-} InExpr [] (MkNested []) env icons gty
-            newdefs <- get Ctxt
-            ncons <- normaliseHoles newdefs env ccons
+            ncons <- normaliseHoles env ccons
             icons <- unelab env ncons
             pure (Just icons))
         (\ _ => pure Nothing)

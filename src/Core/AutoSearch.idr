@@ -4,10 +4,13 @@ import Core.Context
 import Core.Context.Log
 import Core.Core
 import Core.Env
-import Core.Normalise
 import Core.TT
 import Core.Unify
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate.Convert
+import Core.Evaluate
 
 import Data.Either
 import Data.List
@@ -43,7 +46,7 @@ tryNoDefaultsFirst : {auto c : Ref Ctxt Defs} ->
 tryNoDefaultsFirst f = tryUnifyUnambig {preferLeftError=True} (f False) (f True)
 
 SearchEnv : Scoped
-SearchEnv vars = List (NF vars, Closure vars)
+SearchEnv vars = List (NF vars, Glued vars)
 
 searchType : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
@@ -60,7 +63,7 @@ record ArgInfo (vars : Scope) where
   constructor MkArgInfo
   holeID : Int
   argRig : RigCount
-  plicit : PiInfo (Closure vars)
+  plicit : PiInfo (Glued vars)
   metaApp : (RigCount, Term vars)
   argType : Term vars
 
@@ -71,17 +74,16 @@ mkArgs : {vars : _} ->
          FC -> RigCount ->
          Env Term vars -> NF vars ->
          Core (List (ArgInfo vars), NF vars)
-mkArgs fc rigc env (NBind nfc x (Pi fc' c p ty) sc)
+mkArgs fc rigc env (VBind nfc x (Pi fc' c p ty) sc)
     = do defs <- get Ctxt
-         empty <- clearDefs defs
          nm <- genName "sa"
-         argTy <- quote empty env ty
+         argTy <- quote env ty
          let argRig = rigMult rigc c
          (idx, arg) <- newMeta fc' argRig env nm argTy
                                (Hole (length env) (holeInit False)) False
+         argVal <- nf env arg
          setInvertible fc (Resolved idx)
-         (rest, restTy) <- mkArgs fc rigc env
-                              !(sc defs (toClosure defaultOpts env arg))
+         (rest, restTy) <- mkArgs fc rigc env !(expand !(sc (pure argVal)))
          pure (MkArgInfo idx argRig p (c, arg) argTy :: rest, restTy)
 mkArgs fc rigc env ty = pure ([], ty)
 
@@ -116,13 +118,13 @@ searchIfHole fc defaults trying ispair (S depth) def top env arg
          let Hole _ _ = definition gdef
               | _ => pure () -- already solved
          top' <- if ispair
-                    then normaliseScope defs ScopeEmpty (type gdef)
+                    then normaliseScope ScopeEmpty (type gdef)
                     else pure top
 
          argdef <- searchType fc rig defaults trying depth def False top' env
-                              !(normaliseScope defs env (argType arg))
-         logTermNF "auto" 5 "Solved arg" env argdef
-         logTermNF "auto" 5 "Arg meta" env (snd $ metaApp arg)
+                              !(normaliseScope env (argType arg))
+         -- logTermNF "auto" 5 "Solved arg" env argdef
+         -- logTermNF "auto" 5 "Arg meta" env (snd $ metaApp arg)
          ok <- solveIfUndefined env (snd $ metaApp arg) argdef
          if ok
             then pure ()
@@ -192,11 +194,11 @@ exactlyOne {vars} fc env top target all
                        commit
                        pure res
               [] => throw (CantSolveGoal fc (gamma !(get Ctxt)) ScopeEmpty top Nothing)
-              rs => throw (AmbiguousSearch fc env !(quote !(get Ctxt) env target)
+              rs => throw (AmbiguousSearch fc env !(quote env target)
                              !(traverse normRes rs))
   where
     normRes : (Term vars, Defs, UState) -> Core (Term vars)
-    normRes (tm, defs, _) = normaliseHoles defs env tm
+    normRes (tm, defs, _) = normaliseHoles env tm
 
 -- We can only resolve things which are at unrestricted multiplicity. Expression
 -- search happens before linearity checking and we can't guarantee that just
@@ -225,41 +227,37 @@ usableLocal : {vars : _} ->
               FC -> (defaults : Bool) ->
               Env Term vars -> (locTy : NF vars) -> Core Bool
 -- pattern variables count as concrete things!
-usableLocal loc defaults env (NApp fc (NMeta (PV _ _) _ _) args)
+usableLocal loc defaults env (VMeta fc (PV _ _) _ _ _ _)
     = pure True
-usableLocal loc defaults env (NApp fc (NMeta _ _ _) args)
+usableLocal loc defaults env (VMeta{})
     = pure False
-usableLocal {vars} loc defaults env (NTCon _ n _ args)
+usableLocal {vars} loc defaults env (VTCon _ n _ args)
     = do sd <- getSearchData loc (not defaults) n
-         usableLocalArg 0 (detArgs sd) (toList $ map value args)
+         usableLocalArg 0 (detArgs sd) (cast !(traverseSnocList value args))
   -- usable if none of the determining arguments of the local's type are
   -- holes
   where
-    usableLocalArg : Nat -> List Nat -> List (Closure vars) -> Core Bool
+    usableLocalArg : Nat -> List Nat -> List (Glued vars) -> Core Bool
     usableLocalArg i dets [] = pure True
-    usableLocalArg i dets (c :: cs)
+    usableLocalArg i dets (arg :: args)
         = if i `elem` dets
              then do defs <- get Ctxt
-                     u <- usableLocal loc defaults env !(evalClosure defs c)
+                     u <- usableLocal loc defaults env !(expand arg)
                      if u
-                        then usableLocalArg (1 + i) dets cs
+                        then usableLocalArg (1 + i) dets args
                         else pure False
-             else usableLocalArg (1 + i) dets cs
-usableLocal loc defaults env (NDCon _ n _ _ args)
-    = do defs <- get Ctxt
-         us <- traverse (usableLocal loc defaults env)
-                        !(traverse (evalClosure defs) $ map value args)
+             else usableLocalArg (1 + i) dets args
+usableLocal loc defaults env (VDCon _ n _ _ args)
+    = do us <- traverseSnocList (usableLocal loc defaults env)
+                        !(traverseSnocList spineVal args)
          pure (all id us)
-usableLocal loc defaults env (NApp _ (NLocal _ _ _) args)
-    = do defs <- get Ctxt
-         us <- traverse (usableLocal loc defaults env)
-                        !(traverse (evalClosure defs) $ map value args)
+usableLocal loc defaults env (VLocal _ _ _ args)
+    = do us <- traverseSnocList (usableLocal loc defaults env)
+                        !(traverseSnocList spineVal args)
          pure (all id us)
-usableLocal loc defaults env (NBind fc x (Pi _ _ _ _) sc)
-    = do defs <- get Ctxt
-         usableLocal loc defaults env
-                !(sc defs (toClosure defaultOpts env (Erased fc Placeholder)))
-usableLocal loc defaults env (NErased _ _) = pure False
+usableLocal loc defaults env (VBind fc x (Pi _ _ _ _) sc)
+    = usableLocal loc defaults env !(expand !(sc (pure (VErased fc Placeholder))))
+usableLocal loc defaults env (VErased _ _) = pure False
 usableLocal loc _ _ _ = pure True
 
 searchLocalWith : {vars : _} ->
@@ -273,9 +271,13 @@ searchLocalWith : {vars : _} ->
                   (target : NF vars) -> Core (Term vars)
 searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) target
     = do defs <- get Ctxt
-         nty <- nf defs env ty
-         findPos defs pure nty target
+         nty <- nf env ty
+         findPos defs prf id !(expand nty) target
   where
+    ambig : Error -> Bool
+    ambig (AmbiguousSearch _ _ _ _) = True
+    ambig _ = False
+
     clearEnvType : {idx : Nat} -> (0 p : IsVar nm idx vs) ->
                    FC -> Env Term vs -> Env Term vs
     clearEnvType First fc (env :< b)
@@ -288,24 +290,20 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
     clearEnv _ env = env
 
     findDirect : Defs ->
-                 (Term vars -> Core (Term vars)) ->
+                 Term vars ->
+                 (Term vars -> Term vars) ->
                  NF vars ->  -- local's type
                  (target : NF vars) ->
                  Core (Term vars)
-    findDirect defs f ty target
+    findDirect defs p f ty target
         = do (args, appTy) <- mkArgs fc rigc env ty
-             fprf <- f prf
-             logTermNF "auto" 10 "Trying" env fprf
-             logNF "auto" 10 "Type" env ty
-             logNF "auto" 10 "For target" env target
              ures <- unify inTerm fc env target appTy
              let [] = constraints ures
                  | _ => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
              -- We can only use the local if its type is not an unsolved hole
              if !(usableLocal fc defaults env ty)
                 then do
-                   let candidate = apply fc fprf (map metaApp args)
-                   logTermNF "auto" 10 "Local var candidate " env candidate
+                   let candidate = apply fc (f prf) (map metaApp args)
                    -- Clear the local from the environment to avoid getting
                    -- into a loop repeatedly applying it
                    let env' = clearEnv prf env
@@ -314,44 +312,47 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                    traverse_ (searchIfHole fc defaults trying False depth def top env')
                             (impLast args)
                    pure candidate
-                else do logNF "auto" 10 "Can't use " env ty
-                        throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
+                else do throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
 
     findPos : Defs ->
-              (Term vars -> Core (Term vars)) ->
+              Term vars ->
+              (Term vars -> Term vars) ->
               NF vars ->  -- local's type
               (target : NF vars) ->
               Core (Term vars)
-    findPos defs f nty@(NTCon pfc pn _ [<(_, _, xty), (_, _, yty)]) target
-        = tryUnifyUnambig (findDirect defs f nty target) $
-             do fname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
+    findPos defs p f nty@(VTCon pfc pn _ [< MkSpineEntry _ xc xty, MkSpineEntry _ yc yty]) target
+        = handleUnify (findDirect defs prf f nty target) (\e =>
+           if ambig e then throw e else
+             do defs <- get Ctxt
+                fname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
                                pure
                                !fstName
                 sname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
                                pure
                                !sndName
                 if !(isPairType pn)
-                   then do empty <- clearDefs defs
-                           xtytm <- quote empty env xty
-                           ytytm <- quote empty env yty
+                   then do xty' <- xty
+                           yty' <- yty
+                           xtytm <- quote env xty'
+                           ytytm <- quote env yty'
                            exactlyOne fc env top target
-                            [(do xtynf <- evalClosure defs xty
-                                 findPos defs
-                                     (\arg => normalise defs env $ apply fc (Ref fc Func fname)
+                            [(do xtynf <- expand xty'
+                                 findPos defs p
+                                     (\arg => apply fc (Ref fc Func fname)
                                                         [(erased, xtytm),
                                                          (erased, ytytm),
-                                                         (Preorder.top, !(f arg))])
+                                                         (Preorder.top, f arg)])
                                      xtynf target),
-                             (do ytynf <- evalClosure defs yty
-                                 findPos defs
-                                     (\arg => normalise defs env $ apply fc (Ref fc Func sname)
+                             (do ytynf <- expand yty'
+                                 findPos defs p
+                                     (\arg => apply fc (Ref fc Func sname)
                                                         [(erased, xtytm),
                                                          (erased, ytytm),
-                                                         (Preorder.top, !(f arg))])
+                                                         (Preorder.top, f arg)])
                                      ytynf target)]
-                   else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-    findPos defs f nty target
-        = findDirect defs f nty target
+                   else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
+    findPos defs p f nty target
+        = findDirect defs p f nty target
 
 searchLocalVars : {vars : _} ->
                   {auto c : Ref Ctxt Defs} ->
@@ -369,12 +370,12 @@ searchLocalVars fc rig defaults trying depth def top env target
          exactlyOne fc env top target elabs
 
 isPairNF : {auto c : Ref Ctxt Defs} ->
-           Env Term vars -> NF vars -> Defs -> Core Bool
-isPairNF env (NTCon _ n _ _) defs
+           Env Term vars -> NF vars -> Core Bool
+isPairNF env (VTCon _ n _ _)
     = isPairType n
-isPairNF env (NBind fc b (Pi _ _ _ _) sc) defs
-    = isPairNF env !(sc defs (toClosure defaultOpts env (Erased fc Placeholder))) defs
-isPairNF _ _ _ = pure False
+isPairNF env (VBind fc b (Pi _ _ _ _) sc)
+    = isPairNF env !(expand !(sc (pure (VErased fc Placeholder))))
+isPairNF _ _ = pure False
 
 searchName : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
@@ -403,15 +404,15 @@ searchName fc rigc defaults trying depth def top env target (n, ndef)
                         DCon _ tag arity => DataCon tag arity
                         TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
-         nty <- nf defs env (embed ty)
-         logNF "auto" 10 ("Searching Name " ++ show n) env nty
+         nty <- expand !(nf env (embed ty))
+         -- logNF "auto" 10 ("Searching Name " ++ show n) env nty
          (args, appTy) <- mkArgs fc rigc env nty
          ures <- unify inTerm fc env target appTy
          let [] = constraints ures
              | _ => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-         ispair <- isPairNF env nty defs
+         ispair <- isPairNF env nty
          let candidate = apply fc (Ref fc namety n) (map metaApp args)
-         logTermNF "auto" 10 "Candidate " env candidate
+         -- logTermNF "auto" 10 "Candidate " env candidate
          -- Work right to left, because later arguments may solve earlier
          -- dependencies by unification
          traverse_ (searchIfHole fc defaults trying ispair depth def top env)
@@ -449,20 +450,20 @@ searchNames fc rigc defaults trying depth defining topty env ambig (n :: ns) tar
 
 concreteDets : {vars : _} ->
                {auto c : Ref Ctxt Defs} ->
+               {auto u : Ref UST UState} ->
                FC -> Bool ->
                Env Term vars -> (top : ClosedTerm) ->
                (pos : Nat) -> (dets : List Nat) ->
-               (args : List (Closure vars)) ->
+               (args : List (Glued vars)) ->
                Core ()
 concreteDets fc defaults env top pos dets [] = pure ()
 concreteDets {vars} fc defaults env top pos dets (arg :: args)
     = do when (pos `elem` dets) $ do
-           defs <- get Ctxt
-           argnf <- evalClosure defs arg
-           logNF "auto.determining" 10
-             "Checking that the following argument is concrete"
-             env argnf
-           concrete defs argnf True
+           argnf <- expand arg
+           -- logNF "auto.determining" 10
+           --   "Checking that the following argument is concrete"
+           --   env argnf
+           concrete argnf True
          concreteDets fc defaults env top (1 + pos) dets args
   where
     drop : Nat -> List Nat -> List t -> List t
@@ -472,54 +473,59 @@ concreteDets {vars} fc defaults env top pos dets (arg :: args)
              then x :: drop (1+i) ns xs
              else drop (1+i) ns xs
 
-    concrete : Defs -> NF vars -> (atTop : Bool) -> Core ()
-    concrete defs (NBind nfc x b sc) atTop
-        = do scnf <- sc defs (toClosure defaultOpts env (Erased nfc Placeholder))
-             concrete defs scnf False
-    concrete defs (NTCon nfc n a args) atTop
+    concrete : NF vars -> (atTop : Bool) -> Core ()
+    concrete (VBind nfc x b sc) atTop
+        = do scnf <- expand !(sc (pure (VErased nfc Placeholder)))
+             concrete scnf False
+    concrete (VTCon nfc n a args) atTop
         = do sd <- getSearchData nfc False n
-             let args' = drop 0 (detArgs sd) (cast {to = List (FC, RigCount, Closure vars)} args)
-             traverse_ (\ parg => do argnf <- evalClosure defs parg
-                                     concrete defs argnf False) (map value args')
-    concrete defs (NDCon nfc n t a args) atTop
-        = do traverse_ (\ parg => do argnf <- evalClosure defs parg
-                                     concrete defs argnf False) (map value args)
-    concrete defs (NApp _ (NMeta n i _) _) True
-        = do Just (Hole _ b) <- lookupDefExact n (gamma defs)
-                  | _ => throw (DeterminingArg fc n i ScopeEmpty top)
+             let args' = drop 0 (detArgs sd) (toList args)
+             traverse_ (\ parg => do argnf <- expand parg
+                                     concrete argnf False) !(traverse value args')
+    concrete (VDCon nfc n t a args) atTop
+        = do traverse_ (\ parg => do argnf <- expand parg
+                                     concrete argnf False)
+                       !(Core.Core.traverse value (toList args))
+    concrete (VMeta _ n i _ _ _) True
+        = do defs <- get Ctxt
+             Just (Hole _ b) <- lookupDefExact n (gamma defs)
+                  | _ => throw (DeterminingArg fc n i [<] top)
              unless (implbind b) $
-                  throw (DeterminingArg fc n i ScopeEmpty top)
-    concrete defs (NApp _ (NMeta n i _) _) False
-        = do Just (Hole _ b) <- lookupDefExact n (gamma defs)
-                  | def => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
+                  throw (DeterminingArg fc n i [<] top)
+    concrete (VMeta _ n i _ _ _) False
+        = do defs <- get Ctxt
+             Just (Hole _ b) <- lookupDefExact n (gamma defs)
+                  | def => throw (CantSolveGoal fc (gamma defs) [<] top Nothing)
              unless (implbind b) $
-                  throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-    concrete defs tm atTop = pure ()
+                  throw (CantSolveGoal fc (gamma defs) [<] top Nothing)
+    concrete tm atTop = pure ()
 
 checkConcreteDets : {vars : _} ->
                     {auto c : Ref Ctxt Defs} ->
+                    {auto u : Ref UST UState} ->
                     FC -> Bool ->
                     Env Term vars -> (top : ClosedTerm) ->
                     NF vars ->
                     Core ()
-checkConcreteDets fc defaults env top (NTCon tfc tyn a args)
+checkConcreteDets fc defaults env top (VTCon tfc tyn a args)
     = do defs <- get Ctxt
-         let args = map value args
          if !(isPairType tyn)
             then case args of
-                      [<aty, bty] =>
-                          do anf <- evalClosure defs aty
-                             bnf <- evalClosure defs bty
+                      [< MkSpineEntry _ _ aty, MkSpineEntry _ _ bty] =>
+                          do anf <- expand !aty
+                             bnf <- expand !bty
                              checkConcreteDets fc defaults env top anf
                              checkConcreteDets fc defaults env top bnf
                       _ => do sd <- getSearchData fc defaults tyn
-                              concreteDets fc defaults env top 0 (detArgs sd) (toList args)
+                              concreteDets fc defaults env top 0 (detArgs sd)
+                                  (cast !(traverseSnocList value args))
             else
               do sd <- getSearchData fc defaults tyn
                  log "auto.determining" 10 $
                    "Determining arguments for " ++ show !(toFullNames tyn)
                    ++ " " ++ show (detArgs sd)
-                 concreteDets fc defaults env top 0 (detArgs sd) (toList args)
+                 concreteDets fc defaults env top 0 (detArgs sd)
+                     (cast !(traverseSnocList value args))
 checkConcreteDets fc defaults env top _
     = pure ()
 
@@ -530,7 +536,7 @@ abandonIfCycle : {vars : _} ->
 abandonIfCycle env tm [] = pure ()
 abandonIfCycle env tm (ty :: tys)
     = do defs <- get Ctxt
-         if !(convert defs env tm ty)
+         if !(convert env tm ty)
             then throw (InternalError "Cycle in search")
             else abandonIfCycle env tm tys
 
@@ -547,25 +553,29 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
     = do defs <- get Ctxt
          abandonIfCycle env target trying
          let trying' = target :: trying
-         nty <- nf defs env target
+         nty <- expand !(nf env target)
          case nty of
-              NTCon tfc tyn a args =>
+              VTCon tfc tyn a args =>
                   if a == length args
-                     then do logNF "auto" 10 "Next target" env nty
-                             sd <- getSearchData fc defaults tyn
+                     then do sd <- getSearchData fc defaults tyn
                              -- Check determining arguments are okay for 'args'
                              when checkdets $
                                  checkConcreteDets fc defaults env top
-                                                   (NTCon tfc tyn a args)
+                                                   (VTCon tfc tyn a args)
                              if defaults && checkdets
                                 then tryGroups Nothing nty (hintGroups sd)
-                                else tryUnifyUnambig
+                                else handleUnify
                                        (searchLocalVars fc rigc defaults trying' depth def top env nty)
-                                       (tryGroups Nothing nty (hintGroups sd))
+                                       (\e => if ambig e
+                                                 then throw e
+                                                 else tryGroups Nothing nty (hintGroups sd))
                      else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-              _ => do logNF "auto" 10 "Next target: " env nty
-                      searchLocalVars fc rigc defaults trying' depth def top env nty
+              _ => searchLocalVars fc rigc defaults trying' depth def top env nty
   where
+    ambig : Error -> Bool
+    ambig (AmbiguousSearch _ _ _ _) = True
+    ambig _ = False
+
     -- Take the earliest error message (that's when we look inside pairs,
     -- typically, and it's best to be more precise)
     tryGroups : Maybe Error ->
@@ -578,7 +588,7 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                         (do gn <- traverse getFullName g
                             pure ("Search: Trying " ++ show (length gn) ++
                                            " names " ++ show gn))
-                 logNF "auto" 5 "For target" env nty
+                 -- logNF "auto" 5 "For target" env nty
                  tryNoDefaultsFirst $ \d =>
                    searchNames fc rigc d (target :: trying) depth def top env ambigok g nty)
              (\err => tryGroups (Just $ fromMaybe err merr) nty gs)
@@ -592,10 +602,7 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
 --          (defining : Name) -> (topTy : Term vars) -> Env Term vars ->
 --          Core (Term vars)
 Core.Unify.search fc rigc defaults depth def top env
-    = do logTermNF "auto" 3 "Initial target: " env top
-         log "auto" 3 $ "Running search with defaults " ++ show defaults
-         tm <- searchType fc rigc defaults [] depth def
+    = do log "auto" 3 $ "Running search with defaults " ++ show defaults
+         searchType fc rigc defaults [] depth def
                           True (abstractEnvType fc env top) env
                           top
-         logTermNF "auto" 3 "Result" env tm
-         pure tm

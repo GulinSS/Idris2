@@ -115,6 +115,26 @@ getBinderLoc : {vars : _} -> {idx : Nat} -> (0 p : IsVar x idx vars) -> Env tm v
 getBinderLoc {idx = Z}   First     (_ :< b)   = binderLoc b
 getBinderLoc {idx = S k} (Later p) (env :< _) = getBinderLoc p env
 
+getLetUnder : {idx : Nat} ->
+                 (0 ns : SnocList Name) ->
+                 SizeOf ns ->
+                 (0 p : IsVar x idx vars) -> Env Term vars ->
+                 Maybe (Term (reverseOnto vars ns))
+getLetUnder {idx = Z} {vars = vs :< v} ns w First (env :< Let _ _ val _)
+    = rewrite Extra.revOnto (vs :< x) ns in
+        rewrite sym $ appendAssociative vs [<v] (reverse ns) in
+                Just $ weakenNs (sucR (reverse w)) val
+getLetUnder {idx = S k} {vars = vs :< v} ns w (Later lp) (env :< b)
+    = getLetUnder (ns :< v) (suc w) lp env
+getLetUnder _ _ _ _ = Nothing
+
+-- as getBinder but only return result if it's a let bound name
+-- to save unnecessary weakening
+export
+getLet : {idx : Nat} ->
+         (0 p : IsVar x idx vars) -> Env Term vars -> Maybe (Term vars)
+getLet el env = getLetUnder [<] zero el env
+
 -- Make a type which abstracts over an environment
 -- Don't include 'let' bindings, since they have a concrete value and
 -- shouldn't be generalised

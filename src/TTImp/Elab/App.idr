@@ -5,10 +5,13 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate.Convert
+import Core.Evaluate
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -69,7 +72,7 @@ getNameType elabMode rigc env fc x
                      log "ide-mode.highlight" 7 $ "getNameType is adding Bound: " ++ show x
                      addSemanticDecorations [(nfc, Bound, Just x)]
 
-                 pure (Local fc (Just (isLet binder)) _ lv, gnf env bty)
+                 pure (Local fc (Just (isLet binder)) _ lv, !(nf env bty))
            Nothing =>
               do defs <- get Ctxt
                  [(pname, i, def)] <- lookupCtxtName x (gamma defs)
@@ -91,7 +94,7 @@ getNameType elabMode rigc env fc x
                        $ "getNameType is adding " ++ show decor ++ ": " ++ show def.fullname
                      addSemanticDecorations [(nfc, decor, Just def.fullname)]
 
-                 pure (Ref fc nt (Resolved i), gnf env (embed (type def)))
+                 pure (Ref fc nt (Resolved i), !(nf env (embed (type def))))
   where
     rigSafe : RigCount -> RigCount -> Core ()
     rigSafe lhs rhs = when (lhs < rhs)
@@ -146,7 +149,7 @@ getVarType elabMode rigc nest env fc x
                                                                  ++ show ndef.fullname
                                     addSemanticDecorations [(nfc, decor, Just ndef.fullname)]
 
-                                pure (tm, arglen, gnf env tyenv)
+                                pure (tm, arglen, !(nf env tyenv))
     where
       useVars : {vars : _} ->
                 List (Term vars) -> Term vars -> Term vars
@@ -158,7 +161,7 @@ getVarType elabMode rigc nest env fc x
       useVars _ sc = sc -- Can't happen?
 
 isHole : NF vars -> Bool
-isHole (NApp _ (NMeta _ _ _) _) = True
+isHole (VMeta{}) = True
 isHole _ = False
 
 mutual
@@ -172,7 +175,7 @@ mutual
                  RigCount -> RigCount -> ElabInfo ->
                  NestedNames vars -> Env Term vars ->
                  FC -> (fntm : Term vars) -> RigCount ->
-                 Name -> Closure vars -> (Defs -> Closure vars -> Core (NF vars)) ->
+                 Name -> Glued vars -> (Core (Glued vars) -> Core (Glued vars)) ->
                  (argdata : (Maybe Name, Nat)) ->
                  (expargs : List RawImp) ->
                  (autoargs : List RawImp) ->
@@ -184,10 +187,10 @@ mutual
       = do defs <- get Ctxt
            nm <- genMVName x
            empty <- clearDefs defs
-           metaty <- quote empty env aty
+           metaty <- quote env aty
            metaval <- metaVar fc argRig env nm metaty
            let fntm = App fc tm tmrig metaval
-           fnty <- sc defs (toClosure defaultOpts env metaval)
+           fnty <- expand !(sc (nf env metaval))
            when (bindingVars elabinfo) $ update EST $
              addBindIfUnsolved nm (getLoc (getFn tm)) argRig Implicit env metaval metaty
            checkAppWith rig elabinfo nest env fc
@@ -203,7 +206,7 @@ mutual
                      RigCount -> RigCount -> ElabInfo ->
                      NestedNames vars -> Env Term vars ->
                      FC -> (fntm : Term vars) -> RigCount ->
-                     Name -> Closure vars -> (Defs -> Closure vars -> Core (NF vars)) ->
+                     Name -> Glued vars -> (Core (Glued vars) -> Core (Glued vars)) ->
                      (argpos : (Maybe Name, Nat)) ->
                      (expargs : List RawImp) ->
                      (autoargs : List RawImp) ->
@@ -218,29 +221,23 @@ mutual
            then do defs <- get Ctxt
                    nm <- genMVName x
                    empty <- clearDefs defs
-                   metaty <- quote empty env aty
+                   metaty <- quote env aty
                    metaval <- metaVar fc argRig env nm metaty
                    let fntm = App fc tm tmrig metaval
-                   fnty <- sc defs (toClosure defaultOpts env metaval)
+                   fnty <- expand !(sc (nf env metaval))
                    update EST $ addBindIfUnsolved nm (getLoc (getFn tm)) argRig AutoImplicit env metaval metaty
                    checkAppWith rig elabinfo nest env fc
                                 fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
            else do defs <- get Ctxt
                    nm <- genMVName x
                    empty <- clearDefs defs
-                   -- Normalise fully, but only if it's cheap enough.
-                   -- We have to get the normal form eventually anyway, but
-                   -- it might be too early to do it now if something is
-                   -- blocking it and we're not yet ready to search.
-                   metaty <- catch (quoteOpts (MkQuoteOpts False False (Just 10))
-                                              defs env aty)
-                                   (\err => quote empty env aty)
+                   metaty <- quote env aty
                    est <- get EST
                    lim <- getAutoImplicitLimit
                    metaval <- searchVar fc argRig lim (Resolved (defining est))
                                         env nest nm metaty
                    let fntm = App fc tm tmrig metaval
-                   fnty <- sc defs (toClosure defaultOpts env metaval)
+                   fnty <- expand !(sc (nf env metaval))
                    checkAppWith rig elabinfo nest env fc
                                 fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
     where
@@ -259,8 +256,8 @@ mutual
                     RigCount -> RigCount -> ElabInfo ->
                     NestedNames vars -> Env Term vars ->
                     FC -> (fntm : Term vars) -> RigCount ->
-                    Name -> Closure vars -> Closure vars ->
-                    (Defs -> Closure vars -> Core (NF vars)) ->
+                    Name -> Glued vars -> Glued vars ->
+                    (Core (Glued vars) -> Core (Glued vars)) ->
                     (argpos : (Maybe Name, Nat)) ->
                     (expargs : List RawImp) ->
                     (autoargs : List RawImp) ->
@@ -275,18 +272,18 @@ mutual
            then do defs <- get Ctxt
                    nm <- genMVName x
                    empty <- clearDefs defs
-                   metaty <- quote empty env aty
+                   metaty <- quote env aty
                    metaval <- metaVar fc argRig env nm metaty
                    let fntm = App fc tm tmrig metaval
-                   fnty <- sc defs (toClosure defaultOpts env metaval)
+                   fnty <- expand !(sc (nf env metaval))
                    update EST $ addBindIfUnsolved nm (getLoc (getFn tm)) argRig AutoImplicit env metaval metaty
                    checkAppWith rig elabinfo nest env fc
                                 fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
            else do defs <- get Ctxt
                    empty <- clearDefs defs
-                   aval <- quote empty env arg
+                   aval <- quote env arg
                    let fntm = App fc tm tmrig aval
-                   fnty <- sc defs (toClosure defaultOpts env aval)
+                   fnty <- expand !(sc (pure arg))
                    checkAppWith rig elabinfo nest env fc
                                 fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
     where
@@ -358,7 +355,7 @@ mutual
            _ => pure (tm, ty)
 
   dotErased : {vars : _} ->
-              {auto c : Ref Ctxt Defs} -> (argty : Closure vars) ->
+              {auto c : Ref Ctxt Defs} -> (argty : Glued vars) ->
               Maybe Name -> Nat -> ElabMode -> RigCount -> RawImp -> Core RawImp
   dotErased argty mn argpos (InLHS lrig ) rig tm
       = if not (isErased lrig) && isErased rig
@@ -366,12 +363,12 @@ mutual
             -- if the argument type aty has a single constructor, there's no need
             -- to dot it
             defs <- get Ctxt
-            nfargty <- evalClosure defs argty
+            nfargty <- expand argty
             mconsCount <- countConstructors nfargty
-            logNF "elab.app.dot" 50
-              "Found \{show mconsCount} constructors for type"
-              (mkEnv emptyFC vars)
-              nfargty
+            -- logNF "elab.app.dot" 50
+            --   "Found \{show mconsCount} constructors for type"
+            --   (mkEnv emptyFC vars)
+            --   nfargty
             if mconsCount == Just 1 || mconsCount == Just 0
               then pure tm
               else
@@ -388,7 +385,7 @@ mutual
       -- meta, shouldn't we delay the check instead of declaring the tm dotted?
       ||| Count the constructors of a fully applied concrete datatype
       countConstructors : NF vars -> Core (Maybe Nat)
-      countConstructors (NTCon _ tycName n args) =
+      countConstructors (VTCon _ tycName n args) =
         if length args == n
         then do defs <- get Ctxt
                 Just gdef <- lookupCtxtExact tycName (gamma defs)
@@ -427,7 +424,7 @@ mutual
                  RigCount -> RigCount -> ElabInfo ->
                  NestedNames vars -> Env Term vars ->
                  FC -> (fntm : Term vars) -> Name ->
-                 RigCount -> (aty : Closure vars) -> (sc : Defs -> Closure vars -> Core (NF vars)) ->
+                 RigCount -> (aty : Glued vars) -> (sc : Core (Glued vars) -> Core (Glued vars)) ->
                  (argdata : (Maybe Name, Nat)) ->
                  (arg : RawImp) ->
                  (expargs : List RawImp) ->
@@ -442,14 +439,14 @@ mutual
           arg <- dotErased aty n argpos (elabMode elabinfo) argRig arg_in
           kr <- if knownret
                    then pure True
-                   else do sc' <- sc defs (toClosure defaultOpts env (Erased fc Placeholder))
-                           concrete defs env sc'
+                   else do sc' <- sc (pure (VErased fc Placeholder))
+                           concrete env !(expand sc')
           -- In theory we can check the arguments in any order. But it turns
           -- out that it's sometimes better to do the rightmost arguments
           -- first to give ambiguity resolution more to work with. So
           -- we do that if the target type is unknown, or if we see that
           -- the raw term is otherwise worth delaying.
-          if (isHole !(evalClosure defs aty) && kr) || !(needsDelay (elabMode elabinfo) kr arg_in)
+          if (isHole !(expand aty) && kr) || !(needsDelay (elabMode elabinfo) kr arg_in)
              then handle (checkRtoL kr arg)
                   -- if the type isn't resolved, we might encounter an
                   -- implicit that we can't use yet because we don't know
@@ -470,32 +467,33 @@ mutual
         = do defs <- get Ctxt
              nm <- genMVName x
              empty <- clearDefs defs
-             metaty <- quote empty env aty
+             metaty <- quote env aty
              (idx, metaval) <- argVar (getFC arg) argRig env nm metaty
              let fntm = App fc tm rigb metaval
              logTerm "elab" 10 "...as" metaval
-             fnty <- sc defs (toClosure defaultOpts env metaval)
+             fnty <- expand !(sc (nf env metaval))
              (tm, gty) <- checkAppWith rig elabinfo nest env fc
                                        fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
              defs <- get Ctxt
-             aty' <- nf defs env metaty
-             logNF "elab" 10 ("Now trying " ++ show nm ++ " " ++ show arg) env aty'
+             aty' <- nf env metaty
+             atyNF <- if onLHS (elabMode elabinfo)
+                         then Just <$> expand aty'
+                         else pure Nothing
 
              -- On the LHS, checking an argument can't resolve its own type,
              -- it must be resolved from elsewhere. Otherwise we might match
              -- on things which are too specific for their polymorphic type.
-             when (onLHS (elabMode elabinfo)) $
-                case aty' of
-                     NApp _ (NMeta _ i _) _ =>
-                          do Just gdef <- lookupCtxtExact (Resolved i) (gamma defs)
+             case atyNF of
+                  Just (VMeta _ _ i _ _ _) =>
+                          do defs <- get Ctxt
+                             Just gdef <- lookupCtxtExact (Resolved i) (gamma defs)
                                   | Nothing => pure ()
                              when (isErased (multiplicity gdef)) $ addNoSolve i
-                     _ => pure ()
-             res <- check argRig ({ topLevel := False } elabinfo) nest env arg (Just $ glueBack defs env aty')
-             when (onLHS (elabMode elabinfo)) $
-                case aty' of
-                     NApp _ (NMeta _ i _) _ => removeNoSolve i
-                     _ => pure ()
+                  _ => pure ()
+             res <- check argRig ({ topLevel := False } elabinfo) nest env arg (Just aty')
+             case atyNF of
+                  Just (VMeta _ _ i _ _ _) => removeNoSolve i
+                  _ => pure ()
 
              (argv, argt) <-
                if not (onLHS (elabMode elabinfo))
@@ -508,16 +506,16 @@ mutual
              -- *may* have as patterns in it and we need to retain them.
              -- (As patterns are a bit of a hack but I don't yet see a
              -- better way that leads to good code...)
-             logTerm "elab" 10 ("Solving " ++ show metaval ++ " with") argv
+             logTerm "elab" 10 ("Solving " ++ show !(toFullNames metaval) ++ " with") !(toFullNames argv)
              ok <- solveIfUndefined env metaval argv
              -- If there's a constraint, make a constant, but otherwise
              -- just return the term as expected
              tm <- if not ok
                       then do res <- convert fc elabinfo env
-                                                 (gnf env metaval)
-                                                 (gnf env argv)
+                                                 !(nf env metaval)
+                                                 !(nf env argv)
                               let [] = constraints res
-                                  | cs => do tmty <- getTerm gty
+                                  | cs => do tmty <- quote env gty
                                              newConstant fc rig env tm tmty cs
                               ignore $ updateSolution env metaval argv
                               pure tm
@@ -541,25 +539,22 @@ mutual
                   Core (Term vars, Glued vars)
       checkLtoR kr arg
         = do defs <- get Ctxt
-             logNF "elab" 10 ("Full function type") env
-                      (NBind fc x (Pi fc argRig Explicit aty) sc)
              logC "elab" 10
                      (do ety <- maybe (pure Nothing)
-                                     (\t => pure (Just !(toFullNames!(getTerm t))))
+                                     (\t => pure (Just !(toFullNames !(quote env t))))
                                      expty
                          pure ("Overall expected type: " ++ show ety))
              res <- check argRig ({ topLevel := False } elabinfo)
-                                   nest env arg (Just (glueClosure defs env aty))
+                                   nest env arg (Just aty)
              (argv, argt) <-
                if not (onLHS (elabMode elabinfo))
                  then pure res
                  else do let (argv, argt) = res
                          checkValidPattern rig env fc argv argt
 
-             logGlueNF "elab" 10 "Got arg type" env argt
              defs <- get Ctxt
              let fntm = App fc tm rigb argv
-             fnty <- sc defs (toClosure defaultOpts env argv)
+             fnty <- expand !(sc (nf env argv))
              checkAppWith rig elabinfo nest env fc
                           fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
 
@@ -580,6 +575,60 @@ mutual
   isBindAllExpPattern : Name -> Bool
   isBindAllExpPattern (UN Underscore) = True
   isBindAllExpPattern _ = False
+
+  checkAppNotFnType : {vars : _} ->
+                  {auto c : Ref Ctxt Defs} ->
+                  {auto m : Ref MD Metadata} ->
+                  {auto u : Ref UST UState} ->
+                  {auto e : Ref EST (EState vars)} ->
+                  {auto s : Ref Syn SyntaxInfo} ->
+                  {auto o : Ref ROpts REPLOpts} ->
+                  RigCount -> ElabInfo ->
+                  NestedNames vars -> Env Term vars ->
+                  FC -> (fntm : Term vars) -> (fnty : NF vars) ->
+                  (argdata : (Maybe Name, Nat)) ->
+                       -- function we're applying, and argument position, for
+                       -- checking if it's okay to erase against 'safeErase'
+                  (expargs : List RawImp) ->
+                  (autoargs : List RawImp) ->
+                  (namedargs : List (Name, RawImp)) ->
+                  (knownret : Bool) -> -- Do we know what the return type is yet?
+                               -- if we do, we might be able to use it to work
+                               -- out the types of arguments before elaborating them
+                  (expected : Maybe (Glued vars)) ->
+                  Core (Term vars, Glued vars)
+  -- Invent a function type if we have extra explicit arguments but type is further unknown
+  checkAppNotFnType {vars} rig elabinfo nest env fc tm ty (n, argpos) (arg :: expargs) autoargs namedargs kr expty
+      = -- Invent a function type,  and hope that we'll know enough to solve it
+        -- later when we unify with expty
+        do logTerm "elab.with" 10 "Function " tm
+           argn <- genName "argTy"
+           retn <- genName "retTy"
+           u <- uniVar fc
+           argTy <- metaVar fc erased env argn (TType fc u)
+           argTyG <- nf env argTy
+           retTy <- metaVar -- {vars = argn :: vars}
+                            fc erased env -- (Pi RigW Explicit argTy :: env)
+                            retn (TType fc u)
+           (argv, argt) <- check rig elabinfo
+                                 nest env arg (Just argTyG)
+           let fntm = App fc tm top argv
+           fnty <- nf env retTy
+           expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
+           -- logNF "elab.with" 10 "Expected function type" env expfnty
+           -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
+           res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
+           cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
+           let [] = constraints cres
+              | cs => do cty <- quote env expfnty
+                         ctm <- newConstant fc rig env (fst res) cty cs
+                         pure (ctm, !(nf env retTy))
+           pure res
+  -- Only non-user implicit `as` bindings are allowed to be present as arguments at this stage
+  checkAppNotFnType rig elabinfo nest env fc tm ty argdata [] autoargs namedargs kr expty
+      = if all isImplicitAs (autoargs ++ map snd (filter (not . isBindAllExpPattern . fst) namedargs))
+           then checkExp rig elabinfo env fc tm (asGlued ty) expty
+           else throw (InvalidArgs fc env (map (const (UN $ Basic "<auto>")) autoargs ++ map fst namedargs) tm)
 
   -- Check an application of 'fntm', with type 'fnty' to the given list
   -- of explicit and implicit arguments.
@@ -606,20 +655,20 @@ mutual
                  (expected : Maybe (Glued vars)) ->
                  Core (Term vars, Glued vars)
    -- Explicit Pi, we use provided unnamed explicit argument
-  checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb Explicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb Explicit aty) sc)
                argdata (arg :: expargs') autoargs namedargs kr expty
      = do let argRig = rig |*| rigb
           checkRestApp rig argRig elabinfo nest env fc
                        tm x rigb aty sc argdata arg expargs' autoargs namedargs kr expty
-  checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb Explicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb Explicit aty) sc)
                argdata [] autoargs namedargs kr expty with (findNamed x namedargs)
    -- We found a compatible named argument
-   checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb Explicit aty) sc)
+   checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb Explicit aty) sc)
                 argdata [] autoargs namedargs kr expty | Just ((_, arg), namedargs')
     = do let argRig = rig |*| rigb
          checkRestApp rig argRig elabinfo nest env fc
                       tm x rigb aty sc argdata arg [] autoargs namedargs' kr expty
-   checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb Explicit aty) sc)
+   checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb Explicit aty) sc)
                 argdata [] autoargs namedargs kr expty | Nothing
     = case findBindAllExpPattern namedargs of
            Just arg => -- Bind-all-explicit pattern is present - implicitly bind
@@ -633,67 +682,65 @@ mutual
                                                                     -- Only non-user implicit `as` bindings added by
                                                                     -- the compiler are allowed here
                    then -- We are done
-                        checkExp rig elabinfo env fc tm (glueBack defs env ty) expty
+                        checkExp rig elabinfo env fc tm (asGlued ty) expty
                    else -- Some user defined binding is present while we are out of explicit arguments, that's an error
                         throw (InvalidArgs fc env (map (const (UN $ Basic "<auto>")) autoargs ++ map fst namedargs) tm)
   -- Function type is delayed:
   --   RHS: force the term
   --   LHS: strip off delay but only for explicit functions and disallow any further patterns
-  checkAppWith' rig elabinfo nest env fc tm (NDelayed dfc r ty@(NBind _ _ (Pi _ _ i _) sc)) argdata expargs autoargs namedargs kr expty
-      = if onLHS (elabMode elabinfo)
-           then do when (isImplicit i) $ throw (LazyImplicitFunction fc)
-                   let ([], [], []) = (expargs, autoargs, namedargs)
-                       | _ => throw (LazyPatternVar fc)
-                   (tm, gfty) <- checkAppWith' rig elabinfo nest env fc tm ty argdata expargs autoargs namedargs kr expty
-                   fty <- getTerm gfty
-                   pure (tm, gnf env (TDelayed dfc r fty))
-           else checkAppWith' rig elabinfo nest env fc (TForce dfc r tm) ty argdata expargs autoargs namedargs kr expty
+  checkAppWith' rig elabinfo nest env fc tm dty@(VDelayed dfc r ty) argdata expargs autoargs namedargs kr expty
+      = do ty' <- expand ty
+           case ty' of
+                VBind _ _ (Pi _ _ _ _) sc =>
+                  checkAppWith' rig elabinfo nest env fc (TForce dfc r tm) !(expand ty)
+                        argdata expargs autoargs namedargs kr expty
+                _ => checkAppNotFnType rig elabinfo nest env fc tm dty argdata expargs autoargs namedargs kr expty
   -- If there's no more arguments given, and the plicities of the type and
   -- the expected type line up, stop
-  checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb Implicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb Implicit aty) sc)
                argdata [] [] [] kr (Just expty_in)
       = do let argRig = rig |*| rigb
-           expty <- getNF expty_in
+           expty <- expand expty_in
            defs <- get Ctxt
            case expty of
-                NBind tfc' x' (Pi _ rigb' Implicit aty') sc'
-                   => checkExp rig elabinfo env fc tm (glueBack defs env ty) (Just expty_in)
+                VBind tfc' x' (Pi _ rigb' Implicit aty') sc'
+                   => checkExp rig elabinfo env fc tm (asGlued ty) (Just expty_in)
                 _ => if not (preciseInf elabinfo)
                         then makeImplicit rig argRig elabinfo nest env fc tm rigb x aty sc argdata [] [] [] kr (Just expty_in)
                         -- in 'preciseInf' mode blunder on anyway, and hope
                         -- that we can resolve the implicits
-                        else handle (checkExp rig elabinfo env fc tm (glueBack defs env ty) (Just expty_in))
+                        else handle (checkExp rig elabinfo env fc tm (asGlued ty) (Just expty_in))
                                (\err => makeImplicit rig argRig elabinfo nest env fc tm rigb x aty sc argdata [] [] [] kr (Just expty_in))
   -- Same for auto
-  checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb AutoImplicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb AutoImplicit aty) sc)
                argdata [] [] [] kr (Just expty_in)
       = do let argRig = rig |*| rigb
-           expty <- getNF expty_in
+           expty <- expand expty_in
            defs <- get Ctxt
            case expty of
-                NBind tfc' x' (Pi _ rigb' AutoImplicit aty') sc'
-                   => checkExp rig elabinfo env fc tm (glueBack defs env ty) (Just expty_in)
+                VBind tfc' x' (Pi _ rigb' AutoImplicit aty') sc'
+                   => checkExp rig elabinfo env fc tm (asGlued ty) (Just expty_in)
                 _ => makeAutoImplicit rig argRig elabinfo nest env fc tm rigb x aty sc argdata [] [] [] kr (Just expty_in)
   -- Same for default
-  checkAppWith' rig elabinfo nest env fc tm ty@(NBind tfc x (Pi _ rigb (DefImplicit aval) aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm ty@(VBind tfc x (Pi _ rigb (DefImplicit aval) aty) sc)
                argdata [] [] [] kr (Just expty_in)
       = do let argRig = rigMult rig rigb
-           expty <- getNF expty_in
+           expty <- expand expty_in
            defs <- get Ctxt
            case expty of
-                NBind tfc' x' (Pi _ rigb' (DefImplicit aval') aty') sc'
-                   => if !(convert defs env aval aval')
-                         then checkExp rig elabinfo env fc tm (glueBack defs env ty) (Just expty_in)
+                VBind tfc' x' (Pi _ rigb' (DefImplicit aval') aty') sc'
+                   => if !(convert env aval aval')
+                         then checkExp rig elabinfo env fc tm (asGlued ty) (Just expty_in)
                          else makeDefImplicit rig argRig elabinfo nest env fc tm rigb x aval aty sc argdata [] [] [] kr (Just expty_in)
                 _ => makeDefImplicit rig argRig elabinfo nest env fc tm rigb x aval aty sc argdata [] [] [] kr (Just expty_in)
 
   -- Check next unnamed auto implicit argument
-  checkAppWith' rig elabinfo nest env fc tm (NBind tfc x (Pi _ rigb AutoImplicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm (VBind tfc x (Pi _ rigb AutoImplicit aty) sc)
                argdata expargs (arg :: autoargs') namedargs kr expty
       = checkRestApp rig (rig |*| rigb) elabinfo nest env fc
                          tm x rigb aty sc argdata arg expargs autoargs' namedargs kr expty
   -- Check next named auto implicit argument
-  checkAppWith' rig elabinfo nest env fc tm (NBind tfc x (Pi _ rigb AutoImplicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm (VBind tfc x (Pi _ rigb AutoImplicit aty) sc)
                argdata expargs [] namedargs kr expty
       = let argRig = rig |*| rigb in
             case findNamed x namedargs of
@@ -704,7 +751,7 @@ mutual
                          makeAutoImplicit rig argRig elabinfo nest env fc tm rigb
                                               x aty sc argdata expargs [] namedargs kr expty
   -- Check next implicit argument
-  checkAppWith' rig elabinfo nest env fc tm (NBind tfc x (Pi _ rigb Implicit aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm (VBind tfc x (Pi _ rigb Implicit aty) sc)
                argdata expargs autoargs namedargs kr expty
       = let argRig = rig |*| rigb in
             case findNamed x namedargs of
@@ -714,7 +761,7 @@ mutual
                      checkRestApp rig argRig elabinfo nest env fc tm
                                   x rigb aty sc argdata arg expargs autoargs namedargs' kr expty
   -- Check next default argument
-  checkAppWith' rig elabinfo nest env fc tm (NBind tfc x (Pi _ rigb (DefImplicit arg) aty) sc)
+  checkAppWith' rig elabinfo nest env fc tm (VBind tfc x (Pi _ rigb (DefImplicit arg) aty) sc)
                argdata expargs autoargs namedargs kr expty
       = let argRig = rigMult rig rigb in
             case findNamed x namedargs of
@@ -724,40 +771,9 @@ mutual
                      checkRestApp rig argRig elabinfo nest env fc
                                   tm x rigb aty sc argdata arg expargs autoargs namedargs' kr expty
   -- Invent a function type if we have extra explicit arguments but type is further unknown
-  checkAppWith' {vars} rig elabinfo nest env fc tm ty (n, argpos) (arg :: expargs) autoargs namedargs kr expty
-      = -- Invent a function type,  and hope that we'll know enough to solve it
-        -- later when we unify with expty
-        do logNF "elab.with" 10 "Function type" env ty
-           logTerm "elab.with" 10 "Function " tm
-           argn <- genName "argTy"
-           retn <- genName "retTy"
-           u <- uniVar fc
-           argTy <- metaVar fc erased env argn (TType fc u)
-           let argTyG = gnf env argTy
-           retTy <- metaVar -- {vars = argn :: vars}
-                            fc erased env -- (Pi RigW Explicit argTy :: env)
-                            retn (TType fc u)
-           (argv, argt) <- check rig elabinfo
-                                 nest env arg (Just argTyG)
-           let fntm = App fc tm top argv
-           defs <- get Ctxt
-           fnty <- nf defs env retTy -- (Bind fc argn (Let RigW argv argTy) retTy)
-           let expfnty = gnf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
-           logGlue "elab.with" 10 "Expected function type" env expfnty
-           whenJust expty (logGlue "elab.with" 10 "Expected result type" env)
-           res <- checkAppWith' rig elabinfo nest env fc fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
-           cres <- Check.convert fc elabinfo env (glueBack defs env ty) expfnty
-           let [] = constraints cres
-              | cs => do cty <- getTerm expfnty
-                         ctm <- newConstant fc rig env (fst res) cty cs
-                         pure (ctm, gnf env retTy)
-           pure res
-  -- Only non-user implicit `as` bindings are allowed to be present as arguments at this stage
-  checkAppWith' rig elabinfo nest env fc tm ty argdata [] autoargs namedargs kr expty
-      = do defs <- get Ctxt
-           if all isImplicitAs (autoargs ++ map snd (filter (not . isBindAllExpPattern . fst) namedargs))
-              then checkExp rig elabinfo env fc tm (glueBack defs env ty) expty
-              else throw (InvalidArgs fc env (map (const (UN $ Basic "<auto>")) autoargs ++ map fst namedargs) tm)
+  -- Invent a function type if we have extra explicit arguments but type is further unknown
+  checkAppWith' rig elabinfo nest env fc tm ty argdata expargs autoargs namedargs kr expty
+      = checkAppNotFnType rig elabinfo nest env fc tm ty argdata expargs autoargs namedargs kr expty
 
   ||| Entrypoint for checkAppWith: run the elaboration first and, if we're
   ||| on the LHS and the result is an under-applied constructor then insist
@@ -821,7 +837,7 @@ checkApp rig elabinfo nest env fc (INamedApp fc' fn nm arg) expargs autoargs nam
    = checkApp rig elabinfo nest env fc' fn expargs autoargs ((nm, arg) :: namedargs) exp
 checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
    = do (ntm, arglen, nty_in) <- getVarType elabinfo.elabMode rig nest env fc' n
-        nty <- getNF nty_in
+        nty <- expand nty_in
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
@@ -829,10 +845,10 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
 
         logC "elab" 10
                 (do defs <- get Ctxt
-                    fnty <- quote defs env nty
+                    fnty <- quote env nty
                     exptyt <- maybe (pure Nothing)
-                                       (\t => do ety <- getTerm t
-                                                 etynf <- normaliseHoles defs env ety
+                                       (\t => do ety <- quote env t
+                                                 etynf <- normaliseHoles env ety
                                                  pure (Just !(toFullNames etynf)))
                                        exp
                     pure ("Checking application of " ++ show !(getFullName n) ++
@@ -852,7 +868,7 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
                      (Term vs, Glued vs) ->
                      Core (Term vs, Glued vs)
     normalisePrims prims env res
-        = do tm <- Normalise.normalisePrims (`boundSafe` elabMode elabinfo)
+        = do tm <- Evaluate.normalisePrims (`boundSafe` elabMode elabinfo)
                                             isIPrimVal
                                             (onLHS (elabMode elabinfo))
                                             prims n (cast {to=SnocList RawImp} expargs) (fst res) env
@@ -882,5 +898,5 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
 
 checkApp rig elabinfo nest env fc fn expargs autoargs namedargs exp
    = do (fntm, fnty_in) <- checkImp rig elabinfo nest env fn Nothing
-        fnty <- getNF fnty_in
+        fnty <- expand fnty_in
         checkAppWith rig elabinfo nest env fc fntm fnty (Nothing, 0) expargs autoargs namedargs False exp

@@ -6,10 +6,13 @@ import Core.Context
 import Core.Context.Log
 import Core.Env
 import Core.Name
-import Core.Normalise
 import Core.Options
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
 
 import Data.List
 import Data.SnocList
@@ -42,7 +45,6 @@ numArgs defs (Ref _ _ n)
            Function _ def _ _ => pure (EraseArgs (countArgs def) (eraseArgs gdef))
            ExternDef arity => pure (Arity arity)
            ForeignDef arity _ => pure (Arity arity)
-           Builtin {arity} f => pure (Arity arity)
            _ => pure (Arity 0)
   where
     countArgs : forall vars . Term vars -> Nat
@@ -190,11 +192,164 @@ toCExp : {vars : _} ->
          Name -> Term vars ->
          Core (CExp vars)
 
+conCases : {vars : _} ->
+           {auto c : Ref Ctxt Defs} ->
+           {auto s : Ref NextMN Int} ->
+           Name -> List (CaseAlt vars) ->
+           Core (List (CConAlt vars))
+conCases n [] = pure []
+conCases n (ConCase fc x tag sc :: ns)
+    = do defs <- get Ctxt
+         Just gdef <- lookupCtxtExact x (gamma defs)
+              | Nothing => -- primitive type match
+                   do xn <- getFullName x
+                      pure $ MkConAlt xn TYCON Nothing !(toCExpScope 0 [] sc)
+                               :: !(conCases n ns)
+         let nt = case definition gdef of
+                       DCon di _ arity => newTypeArg di
+                       _ => Nothing
+         case nt of
+              Just pos => conCases n ns -- skip it
+              _ => do xn <- getFullName x
+                      sc' <- toCExpScope 0 (eraseArgs gdef) sc
+                      ns' <- conCases n ns
+                      if dcon (definition gdef)
+                         then pure $ MkConAlt xn !(dconFlag xn) (Just tag) sc' :: ns'
+                         else pure $ MkConAlt xn !(dconFlag xn) Nothing sc' :: ns'
+  where
+    dcon : Def -> Bool
+    dcon (DCon _ _ _) = True
+    dcon _ = False
+
+    toCExpScope : {vars : _} -> Nat -> List Nat ->
+                  CaseScope vars -> Core (CCaseScope vars)
+    toCExpScope i es (RHS _ tm) = pure $ CRHS !(toCExp n tm)
+    toCExpScope {vars} i es (Arg c x sc)
+        = if i `elem` es
+             then pure $ shrinkCScope (Drop Refl) $
+                          !(toCExpScope {vars = vars :< x} (S i) es sc)
+             else pure $ CArg x !(toCExpScope {vars = vars :< x} (S i) es sc)
+conCases n (_ :: ns) = conCases n ns
+
+constCases : {vars : _} ->
+             {auto c : Ref Ctxt Defs} ->
+             {auto s : Ref NextMN Int} ->
+             Name -> List (CaseAlt vars) ->
+             Core (List (CConstAlt vars))
+constCases n [] = pure []
+constCases n (ConstCase _ WorldVal sc :: ns)
+    = constCases n ns
+constCases n (ConstCase _ x sc :: ns)
+    = pure $ MkConstAlt x !(toCExp n sc) ::
+                  !(constCases n ns)
+constCases n (_ :: ns) = constCases n ns
+
+getDef : {vars : _} ->
+         {auto c : Ref Ctxt Defs} ->
+         {auto s : Ref NextMN Int} ->
+         Name -> List (CaseAlt vars) ->
+         Core (Maybe (CExp vars))
+getDef n [] = pure Nothing
+getDef n (DefaultCase fc sc :: ns)
+    = pure $ Just !(toCExp n sc)
+getDef n (ConstCase fc WorldVal sc :: ns)
+    = pure $ Just !(toCExp n sc)
+getDef n (_ :: ns) = getDef n ns
+
+-- If there's a case which matches on a 'newtype', return the RHS
+-- without matching.
+-- Take some care if the newtype involves a WorldVal - in that case we
+-- still need to let bind the scrutinee to ensure it's evaluated exactly
+-- once.
+getNewType : {vars : _} ->
+             {auto c : Ref Ctxt Defs} ->
+             {auto s : Ref NextMN Int} ->
+             FC -> CExp vars ->
+             Name -> List (CaseAlt vars) ->
+             Core (Maybe (CExp vars))
+getNewType fc scr n [] = pure Nothing
+getNewType fc scr n (DefaultCase _ sc :: ns)
+    = pure $ Nothing
+getNewType fc scr n (ConCase _ x tag sc :: ns)
+    = do defs <- get Ctxt
+         Just (DCon di t a) <- lookupDefExact x (gamma defs)
+              | _ => pure Nothing
+         let Just (noworld, pos) = newTypeArg di
+              | _ => pure Nothing
+         if noworld
+            then substScr 0 pos scr Lin sc
+            else substLetScr 0 pos scr Lin sc
+  where
+    -- no %World, so substitute diretly
+    substScr : {args : _} ->
+               Nat -> Nat -> CExp vars ->
+               SubstCEnv args vars ->
+               CaseScope (vars ++ args) ->
+               Core (Maybe (CExp vars))
+    substScr i pos x env (RHS _ tm)
+        = do tm' <- toCExp n tm
+             pure $ Just (substs (mkSizeOf args) env tm')
+    substScr i pos x env (Arg c n sc)
+        = if i == pos
+             then substScr (S i) pos x (env :< x) sc
+             else substScr (S i) pos x (env :< CErased fc) sc
+
+    -- When we find the scrutinee, let bind it and substitute the name into
+    -- the RHS, so the thing still gets evaluated if it's an action on %World
+    substLetScr : {args : _} ->
+               Nat -> Nat -> CExp vars ->
+               SubstCEnv args (vars :< MN "eff" 0) ->
+               CaseScope (vars ++ args) ->
+               Core (Maybe (CExp vars))
+    substLetScr i pos x env (RHS _ tm)
+        = do tm' <- toCExp n tm
+             let tm' = insertNames {outer = args} {inner = vars} {ns = [<MN "eff" 0]}
+                            (mkSizeOf _) (mkSizeOf _) tm'
+             let rettm = CLet fc (MN "eff" 0) NotInline x
+                       (substs (mkSizeOf args) env
+                          (rewrite sym (appendAssociative vars [<MN "eff" 0] args)
+                                     in tm'))
+             pure $ Just rettm
+    substLetScr i pos x env (Arg c n sc)
+        = if i == pos
+             then substLetScr (S i) pos x (env :< CLocal fc First) sc
+             else substLetScr (S i) pos x (env :< CErased fc) sc
+
+getNewType fc scr n (_ :: ns) = getNewType fc scr n ns
+
 toCExpCase : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto s : Ref NextMN Int} ->
              Name -> FC -> CExp vars -> List (CaseAlt vars) ->
              Core (CExp vars)
+toCExpCase n fc x (DelayCase _ ty arg sc :: rest)
+    = pure $
+          CLet fc ty YesInline (CErased fc) $
+          CLet fc arg YesInline (CForce fc LInf (weaken x)) $
+               !(toCExp n sc)
+toCExpCase n fc sc alts@(ConCase _ _ _ _ :: _)
+    = do Nothing <- getNewType fc sc n alts
+             | Just def => pure def
+         defs <- get Ctxt
+         cases <- conCases n alts
+         def <- getDef n alts
+         let smaller_seq = sequence
+                [ nat
+                , pure . enum
+                , unitTree
+                ]
+         if isNil cases
+            then pure (fromMaybe (CErased fc) def)
+            else smaller_seq $ CConCase fc sc cases def
+toCExpCase n fc sc alts@(ConstCase _ _ _ :: _)
+    = do cases <- constCases n alts
+         def <- getDef n alts
+         if isNil cases
+            then pure (fromMaybe (CErased fc) def)
+            else pure $ CConstCase fc sc cases def
+toCExpCase n fc _ alts@(DefaultCase _ tm :: _) = toCExp n tm
+toCExpCase n fc sc []
+      = pure $ CCrash fc $ "Missing case tree in " ++ show n
 
 toCExpTm n (Local fc _ _ prf)
     = pure $ CLocal fc prf
@@ -202,7 +357,12 @@ toCExpTm n (Ref fc (DataCon tag arity) fn)
     = do -- get full name for readability, and %builtin Natural
          cn <- getFullName fn
          fl <- dconFlag cn
-         pure $ CCon fc cn fl (Just tag) []
+         case fl of
+              (ENUM n) => pure $ CPrimVal fc (enumTag n tag)
+              ZERO => pure $ CPrimVal fc (BI 0)
+              SUCC => do x <- newMN "succ"
+                         pure $ CLam fc x $ COp fc (Add IntegerType) [CPrimVal fc (BI 1), CLocal fc First]
+              _ => pure $ CCon fc cn fl (Just tag) []
 toCExpTm n (Ref fc (TyCon arity) fn)
     = pure $ CCon fc fn TYCON Nothing []
 toCExpTm n (Ref fc _ fn)
@@ -210,7 +370,7 @@ toCExpTm n (Ref fc _ fn)
              -- ^ For readability of output code, and the Nat hack,
          pure $ CApp fc (CRef fc full) []
 toCExpTm n (Meta fc mn i args)
-    = pure $ CApp fc (CRef fc mn) !(traverse (toCExp n) $ map snd args)
+    = pure $ CApp fc (CRef fc mn) !(traverse (toCExp n) (map snd args))
 toCExpTm n (Bind fc x (Lam _ _ _ _) sc)
     = pure $ CLam fc x !(toCExp n sc)
 toCExpTm n (Bind fc x (Let _ rig val _) sc)
@@ -228,9 +388,9 @@ toCExpTm n (App fc tm _ arg)
     = pure $ CApp fc !(toCExp n tm) [!(toCExp n arg)]
 -- This shouldn't be in terms any more, but here for completeness
 toCExpTm n (As _ _ _ p) = toCExpTm n p
+-- TODO: Either make sure 'Delayed' is always Rig0, or add to typecase
 toCExpTm n (Case fc _ _ sc _ alts)
     = toCExpCase n fc !(toCExp n sc) alts
--- TODO: Either make sure 'Delayed' is always Rig0, or add to typecase
 toCExpTm n (TDelayed fc _ _) = pure $ CErased fc
 toCExpTm n (TDelay fc lr _ arg)
     = pure (CDelay fc lr !(toCExp n arg))
@@ -238,6 +398,8 @@ toCExpTm n (TForce fc lr arg)
     = pure (CForce fc lr !(toCExp n arg))
 toCExpTm n (PrimVal fc $ PrT c) = pure $ CCon fc (UN $ Basic $ show c) TYCON Nothing [] -- Primitive type constant
 toCExpTm n (PrimVal fc c) = pure $ CPrimVal fc c -- Non-type constant
+toCExpTm n (PrimOp {arity} fc fn args)
+    = pure $ COp fc fn !(traverseVect (toCExp n) args)
 toCExpTm n (Erased fc _) = pure $ CErased fc
 toCExpTm n (Unmatched fc str) = pure $ CCrash fc str
 toCExpTm n (TType fc _) = pure $ CCon fc (UN (Basic "Type")) TYCON Nothing []
@@ -255,6 +417,15 @@ toCExp n tm
                         pure $ eraseConArgs arity epos f' args'
                       Arity a =>
                         pure $ expandToArity a f' args'
+                --  Arity a <- numArgs defs f
+                --     | NewTypeBy arity pos =>
+                --           do let res = applyNewType arity pos f' args'
+                --              pure $ builtinMagic res
+                --     | EraseArgs arity epos =>
+                --           do let res = eraseConArgs arity epos f' args'
+                --              pure $ builtinMagic res
+                --  let res = expandToArity a f' args'
+                --  pure $ builtinMagic res
 
 -- Need this for ensuring that argument list matches up to operator arity for
 -- builtins
@@ -269,43 +440,43 @@ mkArgList i (S k)
           (_ ** ConsArg (MN "arg" (i - 1)) rec)
 
 data NArgs : Type where
-     User : Name -> List ClosedClosure -> NArgs
-     Struct : String -> List (String, ClosedClosure) -> NArgs
+     User : Name -> List (Glued [<]) -> NArgs
+     Struct : String -> List (String, Glued [<]) -> NArgs
      NUnit : NArgs
      NPtr : NArgs
      NGCPtr : NArgs
      NBuffer : NArgs
      NForeignObj : NArgs
-     NIORes : ClosedClosure -> NArgs
+     NIORes : Glued [<] -> NArgs
 
 getPArgs : {auto c : Ref Ctxt Defs} ->
-           Defs -> ClosedClosure -> Core (String, ClosedClosure)
+           Defs -> Glued [<] -> Core (String, Glued [<])
 getPArgs defs cl
-    = do NDCon fc _ _ _ args <- evalClosure defs cl
+    = do VDCon fc _ _ _ args <- expand cl
              | nf => throw (GenericMsg (getLoc nf) "Badly formed struct type")
-         case map snd args of
+         case !(traverseSnocList value args) of
               (_ :< n :< tydesc) =>
-                  do NPrimVal _ (Str n') <- evalClosure defs $ snd n
+                  do VPrimVal _ (Str n') <- expand n
                          | nf => throw (GenericMsg (getLoc nf) "Unknown field name")
-                     pure (n', snd tydesc)
+                     pure (n', tydesc)
               _ => throw (GenericMsg fc "Badly formed struct type")
 
 getFieldArgs : {auto c : Ref Ctxt Defs} ->
-               Defs -> ClosedClosure -> Core (List (String, ClosedClosure))
+               Defs -> Glued [<] -> Core (List (String, Glued [<]))
 getFieldArgs defs cl
-    = do NDCon fc _ _ _ args <- evalClosure defs cl
+    = do VDCon fc _ _ _ args <- expand cl
              | nf => throw (GenericMsg (getLoc nf) "Badly formed struct type")
-         case map snd args of
+         case !(traverseSnocList value args) of
               -- cons
               [< _, t, rest] =>
-                  do rest' <- getFieldArgs defs $ snd rest
-                     (n, ty) <- getPArgs defs $ snd t
+                  do rest' <- getFieldArgs defs rest
+                     (n, ty) <- getPArgs defs t
                      pure ((n, ty) :: rest')
               -- nil
               _ => pure []
 
 getNArgs : {auto c : Ref Ctxt Defs} ->
-           Defs -> Name -> List ClosedClosure -> Core NArgs
+           Defs -> Name -> List (Glued [<]) -> Core NArgs
 getNArgs defs (NS _ (UN $ Basic "IORes")) [arg] = pure $ NIORes arg
 getNArgs defs (NS _ (UN $ Basic "Ptr")) [arg] = pure NPtr
 getNArgs defs (NS _ (UN $ Basic "AnyPtr")) [] = pure NPtr
@@ -315,49 +486,49 @@ getNArgs defs (NS _ (UN $ Basic "Buffer")) [] = pure NBuffer
 getNArgs defs (NS _ (UN $ Basic "ForeignObj")) [] = pure NForeignObj
 getNArgs defs (NS _ (UN $ Basic "Unit")) [] = pure NUnit
 getNArgs defs (NS _ (UN $ Basic "Struct")) [n, args]
-    = do NPrimVal _ (Str n') <- evalClosure defs n
+    = do VPrimVal _ (Str n') <- expand n
              | nf => throw (GenericMsg (getLoc nf) "Unknown name for struct")
          pure (Struct n' !(getFieldArgs defs args))
 getNArgs defs n args = pure $ User n args
 
 nfToCFType : {auto c : Ref Ctxt Defs} ->
-             FC -> (inStruct : Bool) -> ClosedNF -> Core CFType
-nfToCFType _ _ (NPrimVal _ $ PrT IntType) = pure CFInt
-nfToCFType _ _ (NPrimVal _ $ PrT IntegerType) = pure CFInteger
-nfToCFType _ _ (NPrimVal _ $ PrT Bits8Type) = pure CFUnsigned8
-nfToCFType _ _ (NPrimVal _ $ PrT Bits16Type) = pure CFUnsigned16
-nfToCFType _ _ (NPrimVal _ $ PrT Bits32Type) = pure CFUnsigned32
-nfToCFType _ _ (NPrimVal _ $ PrT Bits64Type) = pure CFUnsigned64
-nfToCFType _ _ (NPrimVal _ $ PrT Int8Type) = pure CFInt8
-nfToCFType _ _ (NPrimVal _ $ PrT Int16Type) = pure CFInt16
-nfToCFType _ _ (NPrimVal _ $ PrT Int32Type) = pure CFInt32
-nfToCFType _ _ (NPrimVal _ $ PrT Int64Type) = pure CFInt64
-nfToCFType _ False (NPrimVal _ $ PrT StringType) = pure CFString
-nfToCFType fc True (NPrimVal _ $ PrT StringType)
+             FC -> (inStruct : Bool) -> NF [<] -> Core CFType
+nfToCFType _ _ (VPrimVal _ $ PrT IntType) = pure CFInt
+nfToCFType _ _ (VPrimVal _ $ PrT IntegerType) = pure CFInteger
+nfToCFType _ _ (VPrimVal _ $ PrT Bits8Type) = pure CFUnsigned8
+nfToCFType _ _ (VPrimVal _ $ PrT Bits16Type) = pure CFUnsigned16
+nfToCFType _ _ (VPrimVal _ $ PrT Bits32Type) = pure CFUnsigned32
+nfToCFType _ _ (VPrimVal _ $ PrT Bits64Type) = pure CFUnsigned64
+nfToCFType _ _ (VPrimVal _ $ PrT Int8Type) = pure CFInt8
+nfToCFType _ _ (VPrimVal _ $ PrT Int16Type) = pure CFInt16
+nfToCFType _ _ (VPrimVal _ $ PrT Int32Type) = pure CFInt32
+nfToCFType _ _ (VPrimVal _ $ PrT Int64Type) = pure CFInt64
+nfToCFType _ False (VPrimVal _ $ PrT StringType) = pure CFString
+nfToCFType fc True (VPrimVal _ $ PrT StringType)
     = throw (GenericMsg fc "String not allowed in a foreign struct")
-nfToCFType _ _ (NPrimVal _ $ PrT DoubleType) = pure CFDouble
-nfToCFType _ _ (NPrimVal _ $ PrT CharType) = pure CFChar
-nfToCFType _ _ (NPrimVal _ $ PrT WorldType) = pure CFWorld
-nfToCFType _ False (NBind fc _ (Pi _ _ _ ty) sc)
+nfToCFType _ _ (VPrimVal _ $ PrT DoubleType) = pure CFDouble
+nfToCFType _ _ (VPrimVal _ $ PrT CharType) = pure CFChar
+nfToCFType _ _ (VPrimVal _ $ PrT WorldType) = pure CFWorld
+nfToCFType _ False (VBind fc _ (Pi _ _ _ ty) sc)
     = do defs <- get Ctxt
-         sty <- nfToCFType fc False !(evalClosure defs ty)
-         sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+         sty <- nfToCFType fc False !(expand ty)
+         sc' <- expand !(sc (pure (VErased fc Placeholder)))
          tty <- nfToCFType fc False sc'
          pure (CFFun sty tty)
-nfToCFType _ True (NBind fc _ _ _)
+nfToCFType _ True (VBind fc _ _ _)
     = throw (GenericMsg fc "Function types not allowed in a foreign struct")
-nfToCFType _ s (NTCon fc n_in _ args)
+nfToCFType _ s (VTCon fc n_in _ args)
     = do defs <- get Ctxt
          n <- toFullNames n_in
-         case !(getNArgs defs n $ toList (map value args)) of
+         case !(getNArgs defs n $ cast !(traverseSnocList value args)) of
               User un uargs =>
-                do nargs <- traverse (evalClosure defs) uargs
+                do nargs <- traverse expand uargs
                    cargs <- traverse (nfToCFType fc s) nargs
                    pure (CFUser n cargs)
               Struct n fs =>
                 do fs' <- traverse
                              (\ (n, ty) =>
-                                    do tynf <- evalClosure defs ty
+                                    do tynf <- expand ty
                                        tycf <- nfToCFType fc True tynf
                                        pure (n, tycf)) fs
                    pure (CFStruct n fs')
@@ -367,27 +538,27 @@ nfToCFType _ s (NTCon fc n_in _ args)
               NBuffer => pure CFBuffer
               NForeignObj => pure CFForeignObj
               NIORes uarg =>
-                do narg <- evalClosure defs uarg
+                do narg <- expand uarg
                    carg <- nfToCFType fc s narg
                    pure (CFIORes carg)
-nfToCFType _ s (NType _ _)
+nfToCFType _ s (VType _ _)
     = pure (CFUser (UN (Basic "Type")) [])
-nfToCFType _ s (NErased _ _)
+nfToCFType _ s (VErased _ _)
     = pure (CFUser (UN (Basic "__")) [])
 nfToCFType fc s t
     = do defs <- get Ctxt
-         ty <- quote defs ScopeEmpty t
+         ty <- quote [<] t
          throw (GenericMsg (getLoc t)
                        ("Can't marshal type for foreign call " ++
                                       show !(toFullNames ty)))
 
 getCFTypes : {auto c : Ref Ctxt Defs} ->
-             List CFType -> ClosedNF ->
+             List CFType -> NF [<] ->
              Core (List CFType, CFType)
-getCFTypes args (NBind fc _ (Pi _ _ _ ty) sc)
+getCFTypes args (VBind fc _ (Pi _ _ _ ty) sc)
     = do defs <- get Ctxt
-         aty <- nfToCFType fc False !(evalClosure defs ty)
-         sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+         aty <- nfToCFType fc False !(expand ty)
+         sc' <- expand !(sc (pure (VErased fc Placeholder)))
          getCFTypes (aty :: args) sc'
 getCFTypes args t
     = pure (reverse args, !(nfToCFType (getLoc t) False t))
@@ -435,13 +606,14 @@ mergeLambdas args (CLam fc x sc)
     = mergeLambdas (args :< x) sc
 mergeLambdas args exp = (args ** exp)
 
-toCDef : Ref Ctxt Defs => Ref NextMN Int =>
+toCDef : {auto c : Ref Ctxt Defs} ->
          Name -> ClosedTerm -> List Nat -> Def ->
          Core CDef
 toCDef n ty _ None
     = pure $ MkError $ CCrash emptyFC ("Encountered undefined name " ++ show !(getFullName n))
 toCDef n ty erased (Function fi _ tree _)
-    = do t <- toCExp n tree
+    = do s <- newRef NextMN 0
+         t <- toCExp n tree
          let (args ** comptree) = mergeLambdas [<] t
          let (args' ** p) = mkSub args erased
          pure $ toLam (externalDecl fi) $ if isNil erased
@@ -449,11 +621,14 @@ toCDef n ty erased (Function fi _ tree _)
             else MkFun args' (shrinkCExp p comptree)
   where
     toLam : Bool -> CDef -> CDef
-    toLam True (MkFun args rhs) = MkFun ScopeEmpty (lamRHS args rhs)
+    toLam True (MkFun args rhs) = MkFun [<] (lamRHS args rhs)
     toLam _ d = d
 toCDef n ty _ (ExternDef arity)
-    = let (ns ** args) = mkArgList (cast arity) arity in
-          pure $ MkFun _ (CExtPrim emptyFC !(getFullName n) (reverse $ map toArgExp (getVars args)))
+    = let (ns ** args) = mkArgList 0 arity in
+          -- Reverse the args since we build them in the wrong order (most
+          -- recently bound lambda is last argument to primitive)
+          pure $ MkFun _ (CExtPrim emptyFC !(getFullName n)
+                             (reverse (map toArgExp (getVars args))))
   where
     toArgExp : (Var ns) -> CExp ns
     toArgExp (MkVar p) = CLocal emptyFC p
@@ -463,22 +638,12 @@ toCDef n ty _ (ExternDef arity)
     getVars (ConsArg a rest) = MkVar First :: map weakenVar (getVars rest)
 toCDef n ty _ (ForeignDef arity cs)
     = do defs <- get Ctxt
-         (atys, retty) <- getCFTypes [] !(nf defs ScopeEmpty ty)
+         (atys, retty) <- getCFTypes [] !(expand !(nf [<] ty))
          pure $ MkForeign cs atys retty
-toCDef n ty _ (Builtin {arity} op)
-    = let (ns ** args) = mkArgList (cast arity) arity in
-          pure $ MkFun _ (COp emptyFC op (reverse $ map toArgExp (getVars args)))
-  where
-    toArgExp : (Var ns) -> CExp ns
-    toArgExp (MkVar p) = CLocal emptyFC p
-
-    getVars : ArgList k ns -> Vect k (Var ns)
-    getVars NoArgs = []
-    getVars (ConsArg a rest) = MkVar First :: map weakenVar (getVars rest)
 toCDef n _ _ (DCon pos tag arity)
     = do let nt = snd <$> (newTypeArg pos)
          defs <- get Ctxt
-         args <- numArgs {vars = ScopeEmpty} defs (Ref EmptyFC (DataCon tag arity) n)
+         args <- numArgs {vars = [<]} defs (Ref EmptyFC (DataCon tag arity) n)
          let arity' = case args of
                  NewTypeBy ar _ => ar
                  EraseArgs ar erased => ar `minus` length erased

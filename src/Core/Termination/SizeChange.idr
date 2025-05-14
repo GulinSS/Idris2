@@ -34,12 +34,11 @@ Arg : Type
 Arg = Nat
 
 ||| A change in (g y₀ ⋯ yₙ) with respect to (f x₀ ⋯ xₙ) is
-||| for argument yᵢ in g and xⱼ in f:
-|||   Smaller        if yᵢ < xⱼ
-|||   Equal          if yᵢ <= xⱼ
-|||   Unknown        if yᵢ is not related to xⱼ
+||| for each argument yᵢ in g either:
+|||   Nothing        if it's not related to any of the xⱼ
+|||   Just (j, rel)  if yᵢ `rel` xⱼ
 Change : {- f g -} Type
-Change = Matrix SizeChange
+Change = List (Maybe (Arg, SizeChange))
 
 ||| A sequence in the call graph lists the source location of the successive
 ||| calls and the name of each of the functions being called
@@ -51,38 +50,48 @@ public export
 CallSeq : {- f g -} Type
 CallSeq = List (FC, Name)
 
-||| An edge from f to g is given by:
+||| A path in the call graph lists the source location of the successive calls
+||| and the name of each of the functions being called
+||| TODO: also record the arguments so that we can print e.g.
+|||   flip x y -> flop y x -> flip x y
+||| instead of the less useful
+|||   flip -> flop -> flip
+public export
+Path : {- f g -} Type
+Path = List (FC, Name)
+
+||| An arg change in g with respect to f is given by:
 |||   the actual changes in g with respect to f
-|||   the sequence in the call graph leading from f to g
+|||   the path in the call graph leading from f to g
 ||| The path is only here for error-reporting purposes
-record Graph {- f g -} where
-  constructor MkGraph
+record ArgChange {- f g -} where
+  constructor MkArgChange
   change : Change {- f g -}
-  seq : CallSeq {- f g -}
+  path : Path {- f g -}
 
 ||| Sc graphs to be added
 WorkList : Type
-WorkList = SortedSet (Name, Name, Graph)
+WorkList = SortedSet (Name, Name, ArgChange)
 
 ||| Transitively-closed (modulo work list) set of sc-graphs
 ||| Note: oh if only we had dependent name maps!
 SCSet : Type
 SCSet = NameMap {- \ f => -}
       $ NameMap {- \ g => -}
-      $ SortedSet $ Graph {- f g -}
+      $ SortedSet $ ArgChange {- f g -}
 
 ------------------------------------------------------------------------
 -- Instances
 
--- ignore call sequence
-Eq Graph where
+-- ignore path
+Eq ArgChange where
   (==) a1 a2 = a1.change == a2.change
 
-Ord Graph where
+Ord ArgChange where
   compare a1 a2 = compare a1.change a2.change
 
-Show Graph where
-  show a = show a.change ++ "\n    via call seq: " ++ show a.seq ++ "\n"
+Show ArgChange where
+  show a = show a.change ++ " @" ++ show a.path
 
 ------------------------------------------------------------------------
 -- Utility functions
@@ -97,7 +106,7 @@ lookupMap n m = fromMaybe empty (lookup n m)
 lookupSet : Ord v => Name -> NameMap (SortedSet v) -> SortedSet v
 lookupSet n m = fromMaybe empty (lookup n m)
 
-lookupGraphs : Name -> Name -> SCSet -> SortedSet Graph
+lookupGraphs : Name -> Name -> SCSet -> SortedSet ArgChange
 lookupGraphs f g = lookupSet g . lookupMap f
 
 ||| Smart filter: only keep the paths starting from f
@@ -108,7 +117,7 @@ selectDom f s = insert f (lookupMap f s) empty
 selectCod : Name -> SCSet -> SCSet
 selectCod g s = map (\m => insert g (lookupSet g m) empty) s
 
-foldl : (acc -> Name -> Name -> Graph -> acc) -> acc -> SCSet -> acc
+foldl : (acc -> Name -> Name -> ArgChange -> acc) -> acc -> SCSet -> acc
 foldl f_acc acc
     = foldlNames (\acc, f =>
         foldlNames (\acc, g =>
@@ -116,7 +125,7 @@ foldl f_acc acc
           acc)
         acc
 
-insertGraph : (f, g : Name) -> Graph {- f g -} -> SCSet -> SCSet
+insertGraph : (f, g : Name) -> ArgChange {- f g -} -> SCSet -> SCSet
 insertGraph f g ch s
   = let s_f = lookupMap f s in
     let s_fg = lookupSet g s_f in
@@ -128,52 +137,62 @@ insertGraph f g ch s
 ||| Diagrammatic composition:
 ||| Given a (Change f g) and a (Change g h), compute a (Change f h)
 composeChange : Change {- f g -} -> Change {- g h -} -> Change {- f h -}
-composeChange
+composeChange c1 c2
+    -- We have (giving more precise types)
+    -- h z₀ ⋯ zₚ, g y₀ ⋯ yₙ, f x₀ ⋯ xₘ
+    -- c1 : Vect n (Maybe (Fin m, SizeChange))
+    -- c2 : Vect p (Maybe (Fin n, SizeChange))
+    -- and we want
+    -- Vect p (Maybe (Fin m, SizeChange))
     -- We use the SizeChange monoid: Unknown is a 0, Same is a neutral
-    = mult
+    = map (>>= (\(i, r) => map (r <+>) <$> getArg i c1)) c2
+  where
+    getArg : Nat -> List (Maybe a) -> Maybe a
+    getArg i c = join $ getAt i c
 
 ||| Diagrammatic composition:
-||| Given an (Graph f g) and an (Graph g h), compute an (Graph f h)
-composeGraph : Graph {- f g -} -> Graph {- g h -} -> Graph {- f h -}
-composeGraph a1 a2
-    = MkGraph
+||| Given an (ArgChange f g) and an (ArgChange g h), compute an (ArgChange f h)
+composeArgChange : ArgChange {- f g -} -> ArgChange {- g h -} -> ArgChange {- f h -}
+composeArgChange a1 a2
+    = MkArgChange
         (composeChange a1.change a2.change)
-        (a1.seq ++ a2.seq)
+        (a1.path ++ a2.path)
 
-||| Precompose a give an sc-graph & insert it in the worklist (unless it's already known)
-preCompose : (f : Name) -> Graph {- f g -} -> -- /!\ g bound later
+||| Precompose a given Arg change & insert it in the worklist (unless it's already known)
+preCompose : (f : Name) -> ArgChange {- f g -} -> -- /!\ g bound later
              SCSet ->
              WorkList ->
-             (g : Name) -> (h : Name) -> Graph {- g h -} ->
+             (g : Name) -> (h : Name) -> ArgChange {- g h -} ->
              WorkList
 preCompose f ch1 s work _ h ch2
-   = let ch : Graph {- f h -} = composeGraph ch1 ch2 in
+   = let ch : ArgChange {- f h -} = composeArgChange ch1 ch2 in
      if contains ch (lookupGraphs f h s) then
        work
      else
        insert (f, h, ch) work
 
 ||| Precompose a given Arg change & insert it in the worklist (unless it's already known)
-postCompose : (h : Name) -> Graph {- g h -} -> -- /!\ g bound later
+postCompose : (h : Name) -> ArgChange {- g h -} -> -- /!\ g bound later
               SCSet ->
               WorkList ->
-              (f : Name) -> (g : Name) -> Graph {- f g -} ->
+              (f : Name) -> (g : Name) -> ArgChange {- f g -} ->
               WorkList
 postCompose h ch2 s work f _ ch1
-   = let ch : Graph {- f h -} = composeGraph ch1 ch2 in
+   = let ch : ArgChange {- f h -} = composeArgChange ch1 ch2 in
      if contains ch (lookupGraphs f h s) then
        work
      else
        insert (f, h, ch) work
 
 mutual
-  addGraph : (f, g : Name) -> Graph {- f g -} ->
+  addGraph : {auto c : Ref Ctxt Defs} ->
+             (f, g : Name) -> ArgChange {- f g -} ->
              WorkList ->
              SCSet ->
              SCSet
   addGraph f g ch work s_in
       = let s = insertGraph f g ch s_in
-            -- Now that (ch : Graph f g) has been added, we need to update
+            -- Now that (ch : ArgChange f g) has been added, we need to update
             -- the graph with the paths it has extended i.e.
 
             -- the ones start in g
@@ -187,7 +206,8 @@ mutual
         -- And then we need to close over all of these new paths too
         transitiveClosure work_post s
 
-  transitiveClosure : WorkList ->
+  transitiveClosure : {auto c : Ref Ctxt Defs} ->
+                      WorkList ->
                       SCSet ->
                       SCSet
   transitiveClosure work s
@@ -209,33 +229,51 @@ prefixCallSeq pred g = go g []
           else
             go f ((l, g) :: seq)
 
--- returns `Just a` iff there is no self-decreasing arc,
--- i.e. there is no argument `n` with `a.change_{n,n} === Smaller`
-checkNonDesc : (a : Graph) -> Maybe Graph
-checkNonDesc a = if any selfDecArc a.change then Nothing else Just a
+
+-- find (potential) chain of calls to given function (inclusive)
+prefixPath : NameMap (FC, Name) -> (g : Name) -> {- Exists \ f => -} Path {- f g -}
+prefixPath pred g = go g []
   where
-    selfDecArc : (Nat, Vector1 SizeChange) -> Bool
-    selfDecArc (i, xs) = lookupOrd i xs == Just Smaller
+    go : Name -> Path -> Path
+    go g path
+        = let Just (l, f) = lookup g pred
+             | Nothing => path in
+          if f == g then -- we've reached the entry point!
+            path
+          else
+            go f ((l, g) :: path)
+
+-- returns `Just a.path` iff there is no self-decreasing edge,
+-- i.e. there is no argument `n` with `index n a.change === (n, Smaller)`
+checkNonDesc : ArgChange -> Maybe Path
+checkNonDesc a = go Z a.change
+  where
+    go : Nat -> Change -> Maybe Path
+    go _ [] = Just a.path
+    go n (Just (k, Smaller) :: xs) = if n == k then Nothing else go (S n) xs
+    go n (_ :: xs) = go (S n) xs
 
 ||| Finding non-terminating loops
-findLoops : SCSet ->
-            NameMap {- $ \ f => -} (Maybe (Graph {- f f -} ))
+findLoops : {auto c : Ref Ctxt Defs} -> SCSet ->
+            Core (NameMap {- $ \ f => -} (Maybe (Path {- f f -} )))
 findLoops s
-    = -- An `SCSet` is non-terminating iff it contains a size graph that is
-      -- idempotent, i.e. stable under self-composition,
-      let loops = filterEndos (\a => composeChange a.change a.change == a.change) s in
-      -- and has no self-decreasing arcs.
-      map (foldMap checkNonDesc) loops
+    = do -- Comparing (f x₀ ⋯ xₙ) with (f xᵧ₍₀₎ ⋯ xᵧ₍ₙ₎) for size changes only makes
+         -- sense if the position for we can say something are stable under γ.
+         -- Hence the following filter:
+         let loops = filterEndos (\a => composeChange a.change a.change == a.change) s
+         logC "totality.termination.calc" 7 $ do pure "Loops: \{show loops}"
+         let terms = map (foldMap checkNonDesc) loops
+         pure terms
     where
-      filterEndos : (Graph -> Bool) -> SCSet -> NameMap (List Graph)
+      filterEndos : (ArgChange -> Bool) -> SCSet -> NameMap (List ArgChange)
       filterEndos p = mapWithKey (\f, m => filter p (Prelude.toList (lookupSet f m)))
 
-findNonTerminatingLoop : SCSet -> Maybe (Name, Graph)
-findNonTerminatingLoop s = findNonTerminating (findLoops s)
+findNonTerminatingLoop : {auto c : Ref Ctxt Defs} -> SCSet -> Core (Maybe (Name, Path))
+findNonTerminatingLoop s
+    = do loops <- findLoops s
+         pure $ findNonTerminating loops
     where
-      -- select first non-terminating loop
-      -- TODO: find smallest
-      findNonTerminating : NameMap (Maybe Graph) -> Maybe (Name, Graph)
+      findNonTerminating : NameMap (Maybe Path) -> Maybe (Name, Path)
       findNonTerminating = foldlNames (\acc, g, m => map (g,) m <+> acc) empty
 
 ||| Steps in a call sequence leading to a loop are also problematic
@@ -266,17 +304,17 @@ addFunctions defs (d1 :: ds) pred work
          let (ds, pred, work) = foldl addCall (ds, pred, work) (filter isUnchecked calls)
          addFunctions defs ds pred work
   where
-    resolveCall : List (GlobalDef, FC, (Name, Name, Graph)) ->
+    resolveCall : List (GlobalDef, FC, (Name, Name, ArgChange)) ->
                   SCCall ->
-                  Core (List (GlobalDef, FC, (Name, Name, Graph)))
+                  Core (List (GlobalDef, FC, (Name, Name, ArgChange)))
     resolveCall calls (MkSCCall g ch l)
         = do Just d2 <- lookupCtxtExact g (gamma defs)
                 | Nothing => do logC "totality.termination.calc" 7 $ do pure "Not found: \{show g}"
                                 pure calls
-             pure ((d2, l, (d1.fullname, d2.fullname, MkGraph ch [(l, d2.fullname)])) :: calls)
+             pure ((d2, l, (d1.fullname, d2.fullname, MkArgChange ch [(l, d2.fullname)])) :: calls)
 
     addCall : (List GlobalDef, NameMap (FC, Name), WorkList) ->
-                  (GlobalDef, FC, (Name, Name, Graph)) ->
+                  (GlobalDef, FC, (Name, Name, ArgChange)) ->
                   (List GlobalDef, NameMap (FC, Name), WorkList)
     addCall (ds, pred, work_in) (d2, l, c)
         = let work = insert c work_in in
@@ -309,36 +347,20 @@ calcTerminating : {auto c : Ref Ctxt Defs} ->
                   FC -> Name -> Core Terminating
 calcTerminating loc n
     = do defs <- get Ctxt
-         logC "totality.termination.calc" 7 $ do pure $ "Calculating termination: " ++ show !(toFullNames n)
+         logC "totality.termination.calc" 7 $ do pure "Calculating termination: \{show !(toFullNames n)}"
          Just def <- lookupCtxtExact n (gamma defs)
-           | Nothing => undefinedName loc n
-         IsTerminating <- totRefs defs (nub !(addCases defs (keys (refersTo def))))
-           | bad => pure bad
+            | Nothing => undefinedName loc n
+         IsTerminating <- totRefs defs (keys (refersTo def))
+            | bad => pure bad
          Right (work, pred) <- initWork defs def
-           | Left bad => pure bad
+            | Left bad => pure bad
          let s = transitiveClosure work initSCSet
-         let Nothing = findNonTerminatingLoop s
+         Nothing <- findNonTerminatingLoop s
            | Just (g, loop) =>
                ifThenElse (def.fullname == g)
-                 (pure $ NotTerminating (RecPath loop.seq))
-                 (do setTerminating EmptyFC g (NotTerminating (RecPath loop.seq))
-                     let init = prefixCallSeq pred g
+                 (pure $ NotTerminating (RecPath loop))
+                 (do setTerminating EmptyFC g (NotTerminating (RecPath loop))
+                     let init = prefixPath pred g
                      setPrefixTerminating init g
                      pure $ NotTerminating (BadPath init g))
          pure IsTerminating
-  where
-    addCases' : Defs -> NameMap () -> List Name -> Core (List Name)
-    addCases' defs all [] = pure (keys all)
-    addCases' defs all (n :: ns)
-        = case lookup n all of
-             Just _ => addCases' defs all ns
-             Nothing =>
-               if caseFn !(getFullName n)
-                  then case !(lookupCtxtExact n (gamma defs)) of
-                            Just def => addCases' defs (insert n () all)
-                                                  (keys (refersTo def) ++ ns)
-                            Nothing => addCases' defs (insert n () all) ns
-                  else addCases' defs (insert n () all) ns
-
-    addCases : Defs -> List Name -> Core (List Name)
-    addCases defs ns = addCases' defs empty ns

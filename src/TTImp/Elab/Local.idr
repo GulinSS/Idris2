@@ -5,9 +5,9 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.Unify
 import Core.TT
+import Core.Evaluate.Value
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -212,7 +212,7 @@ checkCaseLocal {vars} rig elabinfo nest env fc uname iname args sc expty
          let name = Ref fc nt iname
          (app, args) <- getLocalTerm fc env name args
          log "elab.local" 5 $ "Updating case local " ++ show uname ++ " " ++ show args
-         logTermNF "elab.local" 5 "To" env app
+         -- logTermNF "elab.local" 5 "To" env app
          let nest' = { names $= ((uname, (Just iname, args,
                                          (\fc, nt => app))) :: ) }
                      nest
