@@ -1273,6 +1273,17 @@ mutual
   mkArg : FC -> Name -> Core (Glued vars)
   mkArg fc var = pure $ mkArgVar fc var
 
+  unifyPiInfo : {auto c : Ref Ctxt Defs} ->
+                {auto u : Ref UST UState} ->
+                {vars : _} ->
+                UnifyInfo -> FC -> Env Term vars ->
+                PiInfo (Glued vars) -> PiInfo (Glued vars) ->
+                Core (Maybe UnifyResult)
+  unifyPiInfo mode loc env Explicit Explicit = pure $ Just success
+  unifyPiInfo mode loc env Implicit Implicit = pure $ Just success
+  unifyPiInfo mode loc env AutoImplicit AutoImplicit = pure $ Just success
+  unifyPiInfo mode loc env (DefImplicit x) (DefImplicit y) = Just <$> unify mode loc env x y
+  unifyPiInfo mode loc env _ _ = pure Nothing
 
   unifyBothBinders: {auto c : Ref Ctxt Defs} ->
                     {auto u : Ref UST UState} ->
@@ -1284,11 +1295,14 @@ mutual
                     (Core (Glued vars) -> Core (Glued vars)) ->
                     Core UnifyResult
   unifyBothBinders mode fc env fcx nx bx@(Pi bfcx cx ix tx) scx fcy ny by@(Pi bfcy cy iy ty) scy
-      = if cx /= cy
-          then convertGluedError fc env
+      = let err = convertGluedError fc env
                  (VBind fcx nx bx scx)
                  (VBind fcy ny by scy)
-          else do csarg <- unify (lower mode) fc env tx ty
+        in if cx /= cy
+          then err
+          else do Just ci <- unifyPiInfo (lower mode) fc env ix iy
+                    | Nothing => err
+                  csarg <- unify (lower mode) fc env tx ty
                   tx' <- quote env tx
                   x' <- genVarName "x"
                   logTerm "unify.binder" 10 "Unifying arg" tx'
@@ -1309,9 +1323,10 @@ mutual
                             logTermNF "unify.binder" 10 "..........with" env tmy
                             logTermNF "unify.binder" 10 "refsToLocals: Unifying scope" env' (refsToLocals (Add nx x' None) tmx)
                             logTermNF "unify.binder" 10 "refsToLocals: ..........with" env' (refsToLocals (Add nx x' None) tmy)
-                            unify (lower mode) fc env'
+                            cs <- unify (lower mode) fc env'
                               (refsToLocals (Add nx x' None) tmx)
                               (refsToLocals (Add nx x' None) tmy)
+                            pure (union ci cs)
                       cs => -- Constraints, make new constant
                          do txtm <- quote env tx
                             tytm <- quote env ty
@@ -1326,7 +1341,30 @@ mutual
                             cs' <- unify (lower mode) fc env'
                                      (refsToLocals (Add nx x' None) tmx)
                                      (refsToLocals (Add nx x' None) tmy)
-                            pure (union csarg cs')
+                            pure (union ci (union csarg cs'))
+  unifyBothBinders mode fc env xfc nx bx@(Lam fcx cx ix tx) scx yfc ny by@(Lam fcy cy iy ty) scy
+      = let err = convertGluedError fc env
+                 (VBind fcx nx bx scx)
+                 (VBind fcy ny by scy)
+        in if cx /= cy
+          then err
+          else do Just ci <- unifyPiInfo (lower mode) fc env ix iy
+                    | Nothing => err
+                  ct <- unify (lower mode) fc env tx ty
+                  xn <- genVarName "x"
+                  txtm <- quote env tx
+                  let env' : Env Term (_ :< nx)
+                           = env :< Lam fcx cx Explicit txtm
+
+                  tscx <- scx (mkArg fc xn)
+                  tscy <- scy (mkArg fc xn)
+                  tmx <- quote env tscx
+                  tmy <- quote env tscy
+                  cs' <- unify (lower mode) fc env'
+                           (refsToLocals (Add nx xn None) tmx)
+                           (refsToLocals (Add nx xn None) tmy)
+                  pure (union ci (union ct cs'))
+
   unifyBothBinders mode fc env fcx nx bx scx fcy ny by scy
       = convertGluedError fc env
                   (VBind fcx nx bx scx)
