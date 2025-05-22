@@ -134,16 +134,25 @@ parameters {auto c : Ref Ctxt Defs}
            var <- genVar fc "conv"
            convGen s env !(sc (pure var)) !(sc' (pure var))
     where
+      sameBinders : Binder (Value f vars) -> Binder (Value f' vars) -> Bool
+      sameBinders (Pi {}) (Pi {}) = True
+      sameBinders (Lam {}) (Lam {}) = True
+      sameBinders _ _ = False
+
+      convPiInfo : PiInfo (Value f vars) -> PiInfo (Value f' vars) -> Core Bool
+      convPiInfo Implicit Implicit = pure True
+      convPiInfo Explicit Explicit = pure True
+      convPiInfo AutoImplicit AutoImplicit = pure True
+      convPiInfo (DefImplicit x) (DefImplicit y) = convGen s env x y
+      convPiInfo _ _ = pure False
+
       convBinders : Binder (Value f vars) -> Binder (Value f' vars) -> Core Bool
-      convBinders (Lam _ cx _ tx) (Lam _ cy _ ty)
-          = if cx /= cy
-               then pure False
-               else convGen s env tx ty
-      convBinders (Pi _ cx _ tx) (Pi _ cy _ ty)
-          = if cx /= cy
-               then pure False
-               else convGen s env tx ty
-      convBinders _ _ = pure False
+      convBinders bx by
+          = if sameBinders bx by && multiplicity bx == multiplicity by
+               then allM id [ convPiInfo (piInfo bx) (piInfo by)
+                            , convGen s env (binderType bx) (binderType by)]
+               else pure False
+
   convNF s env x@(VApp fc nt n args val) y@(VApp fc' nt' n' args' val')
       = convertAppsNF s env x y
   convNF s env (VLocal _ i _ sp) (VLocal _ i' _ sp')
