@@ -5,6 +5,7 @@ module TTImp.Interactive.GenerateDef
 import Core.Context
 import Core.Context.Log
 import Core.Env
+import Core.Evaluate
 import Core.Metadata
 import Core.TT
 import Core.Unify
@@ -77,7 +78,7 @@ expandClause loc opts n c
          rhs' <- exprSearchOpts opts loc (Resolved fn) []
          traverse (\rhs' =>
             do let rhsraw = dropLams locs rhs'
-               -- logTermNF "interaction.generate" 5 "Got clause" env lhs
+               logTermNF "interaction.generate" 5 "Got clause" env lhs
                log "interaction.generate" 5 $ "        = " ++ show rhsraw
                pure [updateRHS c rhsraw]) rhs'
   where

@@ -581,7 +581,7 @@ groupCons fc fn pvars cs
                               expand !(nf (mkEnv fc vars') (embed t))
              (patnames ** (l, newargs)) <- logDepth $ do
                 log "compile.casetree" 25 $ "addConG nextNames for " ++ show pargs
-                -- logNF "compile.casetree" 25 "addConG nextNames cty" (mkEnv fc vars') cty
+                logNF "compile.casetree" 25 "addConG nextNames cty" (mkEnv fc vars') cty
                 nextNames {vars=vars'} rig fc "e" pargs cty
              log "compile.casetree" 25 $ "addConG patnames  " ++ show patnames
              log "compile.casetree" 25 $ "addConG newargs  " ++ show newargs
@@ -1219,9 +1219,9 @@ mkPatClause fc fn args s ty pid (ps, rhs)
     = maybe (throw (CaseCompile fc fn DifferingArgNumbers))
             (\eq =>
                do defs <- get Ctxt
-                  -- logTerm "compile.casetree" 20 "mkPatClause ty" ty
+                  logTerm "compile.casetree" 20 "mkPatClause ty" ty
                   nty <- expand !(nf ScopeEmpty ty)
-                  -- log "compile.casetree" 20 $ "mkPatClause nty: " ++ show nty
+                  logNF "compile.casetree" 20 "mkPatClause nty: " ScopeEmpty nty
                   -- The arguments are in reverse order, so we need to
                   -- read what we know off 'nty', and reverse it
                   argTys <- getArgTys ScopeEmpty args nty

@@ -177,8 +177,8 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
                                    (const caseretty) splitOn)
          (erasedargs, _) <- findErased casefnty
 
-         -- logEnv "elab.case" 10 "Case env" env
-         -- logTermNF "elab.case" 2 ("Case function type: " ++ show casen) ScopeEmpty casefnty
+         logEnv "elab.case" 10 "Case env" env
+         logTermNF "elab.case" 2 ("Case function type: " ++ show casen) ScopeEmpty casefnty
          traverse_ addToSave (keys (getMetas casefnty))
 
          -- If we've had to add implicits to the case type (because there
@@ -211,7 +211,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          let alts' = map (updateClause casen splitOn nest env) alts
          log "elab.case" 2 $ "Nested: " ++ show (map getNestData (names nest))
          log "elab.case" 2 $ "Generated alts: " ++ show alts'
-         -- logTermNF "elab.case" 2 "Case application" env appTm
+         logTermNF "elab.case" 2 "Case application" env appTm
 
          -- Start with empty nested names, since we've extended the rhs with
          -- ICaseLocal so they'll get rebuilt with the right environment
@@ -370,7 +370,7 @@ checkCase rig elabinfo nest env fc opts scr scrty_in alts exp
                 e => throw e
 
            scrty <- quote env gscrty
-           -- logTermNF "elab.case" 5 "Scrutinee type" env scrty
+           logTermNF "elab.case" 5 "Scrutinee type" env scrty
            defs <- get Ctxt
            checkConcrete !(expand !(nf env scrty))
            caseBlock rig elabinfo fc nest env opts scr scrtm_in scrty caseRig alts exp

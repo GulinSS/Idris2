@@ -124,7 +124,6 @@ logTerm s n msg tm
 --              logString depth s.topic n $ msg ++ ": " ++ show x ++ " :: " ++ show closure
 --              dumpEnv s bs
 
-
 export
 log' : {auto c : Ref Ctxt Defs} ->
        LogLevel -> Lazy String -> Core ()
