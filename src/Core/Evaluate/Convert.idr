@@ -6,7 +6,6 @@ import Core.Core
 import Core.Env
 import Core.Evaluate.Quote
 import Core.TT
-import Core.UnifyState
 
 import Core.Evaluate.Normalise
 import Core.Evaluate.Value

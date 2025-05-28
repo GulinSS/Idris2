@@ -4,7 +4,7 @@ import Core.Context
 import Core.Context.Log
 import Core.Options.Log
 import Core.Env
--- import public Core.Evaluate.Convert
+import public Core.Evaluate.Convert
 import public Core.Evaluate.Normalise
 import public Core.Evaluate.Quote
 import public Core.Evaluate.Value
@@ -216,8 +216,7 @@ parameters {auto c : Ref Ctxt Defs}
         (orig : Value f vars) -> (parg : Term vars) -> (tm : Value f' vars) ->
         Core (Term vars, Bool)
   replace' {vars} expand tmpi env orig parg tm
-      -- circle dep
-      = do ok <- ?convert env orig tm
+      = do ok <- convert env orig tm
            if ok
               then pure (parg, True)
               else repSub tm
