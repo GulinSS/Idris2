@@ -859,7 +859,7 @@ inferAndNormalize emode itm
        defs <- get Ctxt
        let norm = replEval emode
        ntm <- norm ScopeEmpty tm
-       -- logTermNF "repl.eval" 5 "Normalised" ScopeEmpty ntm
+       logTermNF "repl.eval" 5 "Normalised" ScopeEmpty ntm
        pure $ ntm `WithType` ty
   where
     elabMode : REPLEval -> ElabMode

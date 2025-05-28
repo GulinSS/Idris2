@@ -207,8 +207,8 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                                       (Just (gType vfc u))
                    let fullty = abstractFullEnvType vfc env ty
                    ok <- convert ScopeEmpty fullty (type gdef)
-                   unless ok $ do -- logTermNF "elab.implementation" 1 "Previous" ScopeEmpty (type gdef)
-                                  -- logTermNF "elab.implementation" 1 "Now" ScopeEmpty fullty
+                   unless ok $ do logTermNF "elab.implementation" 1 "Previous" ScopeEmpty (type gdef)
+                                  logTermNF "elab.implementation" 1 "Now" ScopeEmpty fullty
                                   throw (CantConvert (getFC impTy) (gamma defs) ScopeEmpty fullty (type gdef))
 
          -- If the body is empty, we're done for now (just declaring that

@@ -126,8 +126,8 @@ searchIfHole fc defaults trying ispair (S depth) def top env arg
 
          argdef <- searchType fc rig defaults trying depth def False top' env
                               !(normaliseScope env (argType arg))
-         -- logTermNF "auto" 5 "Solved arg" env argdef
-         -- logTermNF "auto" 5 "Arg meta" env (snd $ metaApp arg)
+         logTermNF "auto" 5 "Solved arg" env argdef
+         logTermNF "auto" 5 "Arg meta" env (snd $ metaApp arg)
          ok <- solveIfUndefined env (snd $ metaApp arg) argdef
          if ok
             then pure ()
@@ -301,11 +301,10 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
     findDirect defs p f ty target
         = do (args, appTy) <- mkArgs fc rigc env ty
              -- log "auto" 10 $ "findDirect args" ++ show args
-             -- logNF "auto" 10 "findDirect appTy" env appTy
-             -- let fprf = f prf
-             -- logTermNF "auto" 10 "Trying" env fprf
-             -- logNF "auto" 10 "Type" env ty
-             -- logNF "auto" 10 "For target" env target
+             logNF "auto" 10 "findDirect appTy" env appTy
+             logTermNF "auto" 10 "Trying" env (f prf)
+             logNF "auto" 10 "Type" env ty
+             logNF "auto" 10 "For target" env target
              ures <- unify inTerm fc env target appTy
              log "auto" 10 $ "findDirect ures: " ++ show ures
              let [] = constraints ures
@@ -314,6 +313,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
              if !(usableLocal fc defaults env ty)
                 then do
                    let candidate = apply fc (f prf) (map metaApp args)
+                   logTermNF "auto" 10 "Local var candidate " env candidate
                    -- Clear the local from the environment to avoid getting
                    -- into a loop repeatedly applying it
                    let env' = clearEnv prf env
@@ -322,7 +322,8 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                    traverse_ (searchIfHole fc defaults trying False depth def top env')
                             (impLast args)
                    pure candidate
-                else do throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
+                else do logNF "auto" 10 "Can't use " env ty
+                        throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
 
     findPos : Defs ->
               Term vars ->
@@ -415,14 +416,14 @@ searchName fc rigc defaults trying depth def top env target (n, ndef)
                         TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
          nty <- expand !(nf env (embed ty))
-         -- logNF "auto" 10 ("Searching Name " ++ show n) env nty
+         logNF "auto" 10 ("Searching Name " ++ show n) env nty
          (args, appTy) <- mkArgs fc rigc env nty
          ures <- unify inTerm fc env target appTy
          let [] = constraints ures
              | _ => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
          ispair <- isPairNF env nty
          let candidate = apply fc (Ref fc namety n) (map metaApp args)
-         -- logTermNF "auto" 10 "Candidate " env candidate
+         logTermNF "auto" 10 "Candidate " env candidate
          -- Work right to left, because later arguments may solve earlier
          -- dependencies by unification
          traverse_ (searchIfHole fc defaults trying ispair depth def top env)
@@ -470,9 +471,9 @@ concreteDets fc defaults env top pos dets [] = pure ()
 concreteDets {vars} fc defaults env top pos dets (arg :: args)
     = do when (pos `elem` dets) $ do
            argnf <- expand arg
-           -- logNF "auto.determining" 10
-           --   "Checking that the following argument is concrete"
-           --   env argnf
+           logNF "auto.determining" 10
+             "Checking that the following argument is concrete"
+             env argnf
            concrete argnf True
          concreteDets fc defaults env top (1 + pos) dets args
   where
@@ -565,11 +566,11 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
          abandonIfCycle env target trying
          let trying' = target :: trying
          nty <- expand !(nf env target)
-         -- logDepth $ logNF "auto" 3 "searchType-3 nty" env nty
+         logDepth $ logNF "auto" 3 "searchType-3 nty" env nty
          case nty of
               VTCon tfc tyn a args =>
                   if a == length args
-                     then do -- logNF "auto" 10 "Next target NTCon" env nty
+                     then do logNF "auto" 10 "Next target NTCon" env nty
                              sd <- getSearchData fc defaults tyn
                              log "auto" 10 $ "Next target NTCon search result detArgs: " ++ show (detArgs sd) ++ ", hintGroups: " ++ show (hintGroups sd)
                              -- Check determining arguments are okay for 'args'
@@ -584,7 +585,7 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                                                  then throw e
                                                  else tryGroups Nothing nty (hintGroups sd))
                      else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
-              _ => do -- logNF "auto" 10 "Next target other: " env nty
+              _ => do logNF "auto" 10 "Next target other: " env nty
                       result <- searchLocalVars fc rigc defaults trying' depth def top env nty
                       logTerm "auto" 10 "Next target other result" result
                       pure result
@@ -605,7 +606,7 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                         (do gn <- traverse getFullName g
                             pure ("Search: Trying " ++ show (length gn) ++
                                            " names " ++ show gn))
-                 -- logNF "auto" 5 "For target" env nty
+                 logNF "auto" 5 "For target" env nty
                  tryNoDefaultsFirst $ \d =>
                    searchNames fc rigc d (target :: trying) depth def top env ambigok g nty)
              (\err => tryGroups (Just $ fromMaybe err merr) nty gs)
@@ -620,9 +621,9 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
 --          Core (Term vars)
 Core.Unify.search fc rigc defaults depth def top env
     = do log "auto" 3 $ "Running search with defaults " ++ show defaults
-         -- logDepth $ logTermNF "auto" 3 "Initial target: " env top
+         logDepth $ logTermNF "auto" 3 "Initial target: " env top
          tm <- logDepth $ searchType fc rigc defaults [] depth def
                           True (abstractEnvType fc env top) env
                           top
-         -- logTermNF "auto" 3 "Result" env tm
+         logTermNF "auto" 3 "Result" env tm
          pure tm

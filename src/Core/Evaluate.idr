@@ -155,70 +155,58 @@ parameters {auto c : Ref Ctxt Defs}
           _ => pure tm
 
   -- Log message with a value, translating back to human readable names first
-  -- export
-  -- logNF : {vars : _} ->
-  --         (s : String) ->
-  --         {auto 0 _ : KnownTopic s} ->
-  --         Nat -> Lazy String -> Env Term vars -> Value f vars -> Core ()
-  -- logNF str n msg env tmnf
-  --     = when !(logging str n) $
-  --         do tm <- quote env tmnf
-  --            tm' <- toFullNames tm
-  --            logString str n (msg ++ ": " ++ show tm')
-  -- export
-  -- logNF : {vars : _} ->
-  --         {auto c : Ref Ctxt Defs} ->
-  --         LogTopic -> Nat -> Lazy String -> Env Term vars -> Value f vars -> Core ()
-  -- logNF s n msg env tmnf
-  --     = when !(logging s n) $
-  --         do defs <- get Ctxt
-  --            tm <- logQuiet $ quote env tmnf
-  --            tm' <- toFullNames tm
-  --            depth <- getDepth
-  --            logString depth s.topic n (msg ++ ": " ++ show tm')
+  export
+  logNF : {vars : _} ->
+          LogTopic -> Nat -> Lazy String -> Env Term vars -> Value f vars -> Core ()
+  logNF s n msg env tmnf
+      = when !(logging s n) $
+          do defs <- get Ctxt
+             tm <- logQuiet $ quote env tmnf
+             tm' <- toFullNames tm
+             depth <- getDepth
+             logString depth s.topic n (msg ++ ": " ++ show tm')
 
   -- Log message with a term, reducing holes and translating back to human
   -- readable names first
   -- export
-  -- logTermNF' : {vars : _} ->
-  --              (s : String) ->
-  --              {auto 0 _ : KnownTopic s} ->
-  --              Nat -> Lazy String -> Env Term vars -> Term vars -> Core ()
-  -- logTermNF' str n msg env tm
-  --     = do defs <- get Ctxt
-  --          tmnf <- normalise env tm
-  --          tm' <- toFullNames tmnf
-  --          logString str n (msg ++ ": " ++ show tm')
+  logTermNF' : {vars : _} ->
+               LogTopic ->
+               Nat -> Lazy String -> Env Term vars -> Term vars -> Core ()
+  logTermNF' s n msg env tm
+      = do defs <- get Ctxt
+           tmnf <- logQuiet $ normalise env tm
+           tm' <- toFullNames tmnf
+           depth <- getDepth
+           logString depth s.topic n (msg ++ ": " ++ show tm')
 
-  -- export
-  -- logTermNF : {vars : _} ->
-  --             (s : String) ->
-  --             {auto 0 _ : KnownTopic s} ->
-  --             Nat -> Lazy String -> Env Term vars -> Term vars -> Core ()
-  -- logTermNF str n msg env tm
-  --     = when !(logging str n) $ logTermNF' str n msg env tm
+  export
+  logTermNF : {vars : _} ->
+              LogTopic ->
+              Nat -> Lazy String -> Env Term vars -> Term vars -> Core ()
+  logTermNF s n msg env tm
+      = when !(logging s n) $ logTermNF' s n msg env tm
 
-  -- export
-  -- logEnv : {vars : _} ->
-  --          (s : String) ->
-  --          {auto 0 _ : KnownTopic s} ->
-  --          Nat -> String -> Env Term vars -> Core ()
-  -- logEnv str n msg env
-  --     = when !(logging str n) $
-  --         do logString str n msg
-  --            dumpEnv env
-  --   where
-  --     dumpEnv : {vs : SnocList Name} -> Env Term vs -> Core ()
-  --     dumpEnv [<] = pure ()
-  --     dumpEnv {vs = _ :< x} (bs :< Let _ c val ty)
-  --         = do logTermNF' str n (msg ++ ": let " ++ show x) bs val
-  --              logTermNF' str n (msg ++ ":" ++ show c ++ " " ++ show x) bs ty
-  --              dumpEnv bs
-  --     dumpEnv {vs = _ :< x} (bs :< b)
-  --         = do logTermNF' str n (msg ++ ":" ++ show (multiplicity b) ++ " " ++
-  --                            show (piInfo b) ++ " " ++
-  --                            show x) bs (binderType b)
-  --              dumpEnv bs
+  export
+  logEnv : {vars : _} ->
+           LogTopic ->
+           Nat -> String -> Env Term vars -> Core ()
+  logEnv s n msg env
+      = when !(logging s n) $
+          do depth <- getDepth
+             logString depth s.topic n msg
+             dumpEnv env
+    where
+      dumpEnv : {vs : SnocList Name} -> Env Term vs -> Core ()
+      dumpEnv [<] = pure ()
+      dumpEnv {vs = _ :< x} (bs :< Let _ c val ty)
+          = do logTermNF' s n (msg ++ ": let " ++ show x) bs val
+               logTermNF' s n (msg ++ ":" ++ show c ++ " " ++ show x) bs ty
+               dumpEnv bs
+      dumpEnv {vs = _ :< x} (bs :< b)
+          = do logTermNF' s n (msg ++ ":" ++ show (multiplicity b) ++ " " ++
+                             show (piInfo b) ++ " " ++
+                             show x) bs (binderType b)
+               dumpEnv bs
 
   -- Return a new term, and whether any updates were made. If no updates were
   -- made, we should stick with the original term (so no unnecessary expansion)

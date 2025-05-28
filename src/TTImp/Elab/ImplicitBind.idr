@@ -382,8 +382,8 @@ getToBind {vars} fc elabmode impmode env excepts
                Core (List (Name, ImplBinding vars))
     normImps defs ns [] = pure []
     normImps defs ns ((PV n i, bty) :: ts)
-        = do -- logTermNF "elab.implicits" 10 ("Implicit pattern var " ++ show (PV n i)) env
-             --           (bindingType bty)
+        = do logTermNF "elab.implicits" 10 ("Implicit pattern var " ++ show (PV n i)) env
+                       (bindingType bty)
              if PV n i `elem` ns
                 then normImps defs ns ts
                 else do rest <- normImps defs (PV n i :: ns) ts
@@ -595,9 +595,7 @@ checkBindHere rig elabinfo nest env fc bindmode tm exp
                    -- before binding names
 
          logTerm "elab.implicits" 5 "Binding names" tmv
-         -- defs <- get Ctxt
-         -- log "elab.implicits" 5 $ "Normal form: " ++ show !(toFullNames !(nfOpts withHoles defs env tmv))
-         -- logTermNF "elab.implicits" 5 "Normalised" env tmv
+         logTermNF "elab.implicits" 5 "Normalised" env tmv
          argImps <- getToBind fc (elabMode elabinfo)
                               bindmode env dontbind
          clearToBind dontbind

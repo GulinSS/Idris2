@@ -5,6 +5,7 @@ import Core.Context.Log
 import Core.Core
 import Core.Directory
 import Core.Env
+import Core.Evaluate
 import Core.Metadata
 import Core.Options
 import Core.Reflect
@@ -93,7 +94,8 @@ elabScript : {vars : _} ->
 elabScript rig fc nest env script@(VDCon nfc nm t ar args) exp
     = do defs <- get Ctxt
          fnm <- toFullNames nm
-         -- log "reflection.reify" 10 $ "elabScript fnm: \{show fnm}, args: \{show $ toList $ map snd args}"
+         log "reflection.reify" 10 $ "elabScript fnm: \{show fnm}"
+         flip traverse_ args $ \v => logNF "reflection.reify" 10 "  " env !(v.value)
          case fnm of
               NS ns (UN (Basic n))
                  => if ns == reflectionNS
@@ -376,7 +378,7 @@ checkRunElab rig elabinfo nest env fc reqExt script exp
          solveConstraints inTerm Normal
          defs <- get Ctxt -- checking might have resolved some holes
          logTerm "reflection.reify" 10 "checkRunElab stm" stm
-         -- logEnv "reflection.reify" 10 "checkRunElab env" env
+         logEnv "reflection.reify" 10 "checkRunElab env" env
          ntm <- elabScript rig fc nest env
                            !(expand !(nf env stm)) (Just !(nf env expected))
          defs <- get Ctxt -- might have updated as part of the script

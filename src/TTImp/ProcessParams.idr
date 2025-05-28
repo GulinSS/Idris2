@@ -52,7 +52,7 @@ processParams {vars} {c} {m} {u} nest env fc ps ds
          pty <- checkTerm (-1) InType []
                           nest env pty_imp (gType fc u)
          let (vs ** (prf, env', nest')) = extend env Refl nest pty
-         -- logEnv "declare.param" 5 "Param env" env'
+         logEnv "declare.param" 5 "Param env" env'
 
          -- Treat the names in the block as 'nested names' so that we expand
          -- the applications as we need to

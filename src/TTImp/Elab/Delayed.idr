@@ -79,9 +79,9 @@ delayOnFailure fc rig env exp pred pri elab
                     then
                       do nm <- genName "delayed"
                          (ci, dtm) <- newDelayed fc linear env nm !(quote env expected)
-                         --  logGlueNF "elab.delay" 5 ("Postponing elaborator " ++ show nm ++
-                         --               " at " ++ show fc ++
-                         --               " for") env expected
+                         logNF "elab.delay" 5 ("Postponing elaborator " ++ show nm ++
+                                       " at " ++ show fc ++
+                                       " for") env expected
                          log "elab.delay" 10 ("Due to error " ++ show err)
                          defs <- get Ctxt
                          update UST { delayedElab $=
@@ -123,8 +123,7 @@ delayElab {vars} fc rig env exp pri elab
          nm <- genName "delayed"
          expected <- mkExpected exp
          (ci, dtm) <- newDelayed fc linear env nm !(quote env expected)
-         --  logGlueNF "elab.delay" 5 ("Postponing elaborator " ++ show nm ++
-         --               " for") env expected
+         logNF "elab.delay" 5 ("Postponing elaborator " ++ show nm ++ " for") env expected
          defs <- get Ctxt
          update UST { delayedElab $=
                  ((pri, ci, localHints defs, mkClosedElab fc env
@@ -272,7 +271,7 @@ retryDelayed' errmode p acc (d@(_, i, hints, elab) :: ds)
                updateDef (Resolved i) (const (Just
                     (Function (MkPMDefInfo NotHole True False) tm tm Nothing)))
                logTerm "elab.update" 5 ("Resolved delayed hole " ++ show i) tm
-               -- logTermNF "elab.update" 5 ("Resolved delayed hole NF " ++ show i) ScopeEmpty tm
+               logTermNF "elab.update" 5 ("Resolved delayed hole NF " ++ show i) ScopeEmpty tm
                removeHole i
                retryDelayed' errmode True acc ds')
            (\err => do logC "elab" 5 $ do pure $ show errmode ++ ":Error in " ++ show !(getFullName (Resolved i))

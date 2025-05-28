@@ -5,6 +5,7 @@ import Core.Context
 import Core.Context.Log
 import Core.Env
 import Core.TT
+import Core.Evaluate
 import Core.Evaluate.Value
 import Core.Evaluate.Quote
 import Core.Evaluate.Normalise
@@ -188,8 +189,7 @@ getMissingAlts fc defs (VType _ _) alts
                    pure []
            else pure [DefaultCase fc (Unmatched fc "Coverage check")]
 getMissingAlts fc defs nfty alts
-    = do -- log "coverage.missing" 50 $ "Getting constructors for: " ++ show nfty
-         -- logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
+    = do logNF "coverage.missing" 20 "Getting constructors for" (mkEnv fc _) nfty
          allCons <- getCons defs nfty
          pure (filter (noneOf alts)
                  (map (mkAltTm fc (Unmatched fc "Coverage check")) allCons))
@@ -487,11 +487,11 @@ checkMatched cs ulhs
   where
     tryClauses : List Clause -> ClosedTerm -> Core (Maybe ClosedTerm)
     tryClauses [] ulhs
-        = do -- logTermNF "coverage" 10 "Nothing matches" ScopeEmpty ulhs
+        = do logTermNF "coverage" 10 "Nothing matches" ScopeEmpty ulhs
              pure $ Just ulhs
     tryClauses (MkClause env lhs _ :: cs) ulhs
         = if !(clauseMatches env lhs ulhs)
-             then do -- logTermNF "coverage" 10 "Yes" env lhs
+             then do logTermNF "coverage" 10 "Yes" env lhs
                      pure Nothing -- something matches, discared it
-             else do -- logTermNF "coverage" 10 "No match" env lhs
+             else do logTermNF "coverage" 10 "No match" env lhs
                      tryClauses cs ulhs
