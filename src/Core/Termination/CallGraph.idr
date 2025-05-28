@@ -395,7 +395,7 @@ mutual
                   pure ("Force equalities " ++ show tms))
           let eqs' = eqsc ++ eqs
           args' <- maybe (pure args) (\v => replaceInArgs v pat args) var
-          -- logNF "totality.termination.sizechange" 10 "RHS" [<] rhs
+          logNF "totality.termination.sizechange" 10 "RHS" [<] rhs
           findSC g eqs'
                  !(traverse (\ (n, arg) => pure (n, !(canonicalise eqs' arg))) args')
                  rhs
@@ -619,7 +619,7 @@ getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
 getSC defs (Function _ tm _ _)
    = do ntm <- nfTotality [<] tm
-        -- logNF "totality.termination.sizechange" 5 "From tree" [<] ntm
+        logNF "totality.termination.sizechange" 5 "From tree" [<] ntm
         v <- newRef SCVar 0
         sc <- findSCTop 0 [] ntm
         pure $ nub sc

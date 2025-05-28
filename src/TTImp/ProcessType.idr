@@ -165,7 +165,7 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc n_in ty_raw)
                    checkTerm idx InType (HolesOkay :: eopts) nest env
                              (IBindHere fc (PI erased) ty_raw)
                              (gType fc u)
-         -- logTermNF "declare.type" 3 ("Type of " ++ show n) ScopeEmpty (abstractFullEnvType tfc env ty)
+         logTermNF "declare.type" 3 ("Type of " ++ show n) ScopeEmpty (abstractFullEnvType tfc env ty)
 
          def <- initDef fc n env ty opts
          let fullty = abstractFullEnvType tfc env ty

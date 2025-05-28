@@ -739,9 +739,9 @@ convertWithLazy withLazy fc elabinfo env x y
                        _ => inTerm in
           catch
             (do let lazy = !isLazyActive && withLazy
-                -- logGlueNF "elab.unify" 5 ("Unifying " ++ show withLazy ++ " "
-                --              ++ show (elabMode elabinfo)) env x
-                vs <- do -- logGlueNF "elab.unify" 5 "....with lazy=\{show lazy}" env y
+                logNF "elab.unify" 5 ("Unifying " ++ show withLazy ++ " "
+                            ++ show (elabMode elabinfo)) env x
+                vs <- do logNF "elab.unify" 5 "....with lazy=\{show lazy}" env y
                          if lazy
                            then logDepth $ unifyWithLazy umode fc env x y
                            else logDepth $ unify umode fc env x y
@@ -789,8 +789,8 @@ checkExp rig elabinfo env fc tm got (Just exp)
                          NoLazy => do logTerm "elab" 5 "Solved" tm
                                       pure (tm, got)
                          AddForce r => do logTerm "elab" 5 "Force" tm
-                                          -- logGlue "elab" 5 "Got" env got
-                                          -- logGlue "elab" 5 "Exp" env exp
+                                          logNF "elab" 5 "Got" env got
+                                          logNF "elab" 5 "Exp" env exp
                                           pure (TForce fc r tm, exp)
                          AddDelay r => do ty <- quote env got
                                           logTerm "elab" 5 "Delay" tm

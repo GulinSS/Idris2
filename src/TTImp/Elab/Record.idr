@@ -7,6 +7,7 @@ import Core.Env
 import Core.Metadata
 import Core.Unify
 import Core.TT
+import Core.Evaluate
 import Core.Evaluate.Value
 import Core.Evaluate.Quote
 import Core.Evaluate.Normalise
@@ -263,7 +264,7 @@ checkUpdate rig elabinfo nest env fc upds rec expected
                 recty' <- if delayed
                                 then nf env !(quote env exp)
                                 else pure recty
-                -- logGlueNF "elab.record" 5 (show delayed ++ " record type " ++ show rec) env recty'
+                logNF "elab.record" 5 (show delayed ++ " record type " ++ show rec) env recty'
                 rcase <- recUpdate rig elabinfo fc nest env upds rec recty'
                 log "elab.record" 5 $ "Record update: " ++ show rcase
                 check rig elabinfo nest env rcase expected

@@ -299,8 +299,8 @@ searchName fc rigc opts hints env target topty (n, ndef)
          log "interaction.search" 5 $ "Trying " ++ show (fullname ndef)
          nty <- expand !(nf env (embed ty))
          (args, appTy) <- mkArgs fc rigc env nty
-         -- logNF "interaction.search" 5 "Target" env target
-         -- logNF "interaction.search" 10 "App type" env appTy
+         logNF "interaction.search" 5 "Target" env target
+         logNF "interaction.search" 10 "App type" env appTy
          ures <- unify inSearch fc env target appTy
          let [] = constraints ures
              | _ => noResult
@@ -559,11 +559,11 @@ makeHelper fc rig opts env letty targetty ((locapp, ds) :: next)
          let def = App fc (Bind fc intn (Lam fc top Explicit letty) scope)
                           top locapp
 
-         -- logTermNF "interaction.search" 10 "Binding def" env def
+         logTermNF "interaction.search" 10 "Binding def" env def
          defs <- get Ctxt
          Just ty <- lookupTyExact helpern (gamma defs)
              | Nothing => throw (InternalError "Can't happen")
-         -- logTermNF "interaction.search" 10 "Type of scope name" ScopeEmpty ty
+         logTermNF "interaction.search" 10 "Type of scope name" ScopeEmpty ty
 
          -- Generate a definition for the helper, but with more restrictions.
          -- Always take the first result, to avoid blowing up search space.

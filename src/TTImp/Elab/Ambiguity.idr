@@ -4,6 +4,7 @@ import Core.Context
 import Core.Context.Log
 import Core.Core
 import Core.Env
+import Core.Evaluate
 import Core.Metadata
 import Core.Options
 import Core.Unify
@@ -320,7 +321,7 @@ pruneByType env target alts
     = do defs <- get Ctxt
          matches_in <- traverse (couldBe defs !(stripDelay target)) alts
          let matches = mapMaybe id matches_in
-         -- logNF "elab.prune" 10 "Prune by" env target
+         logNF "elab.prune" 10 "Prune by" env target
          log "elab.prune" 10 (show matches)
          res <- if any Builtin.fst matches
                 -- if there's any concrete matches, drop the non-concrete
@@ -389,11 +390,11 @@ checkAlternative rig elabinfo nest env fc (UniqueDefault def) alts mexpected
                                  nf env exp)
                              (pure expected)
 
-                  -- logGlueNF "elab.ambiguous" 5 (fastConcat
-                  --   [ "Ambiguous elaboration at ", show fc, ":\n"
-                  --   , unlines (map (("  " ++) . show) alts)
-                  --   , "With default. Target type "
-                  --   ]) env exp'
+                  logNF "elab.ambiguous" 5 (fastConcat
+                    [ "Ambiguous elaboration at ", show fc, ":\n"
+                    , unlines (map (("  " ++) . show) alts)
+                    , "With default. Target type "
+                    ]) env exp'
                   alts' <- pruneByType env !(expand exp') alts
                   log "elab.prune" 5 $
                     "Pruned " ++ show (minus (length alts) (length alts')) ++ " alts."
@@ -442,15 +443,15 @@ checkAlternative rig elabinfo nest env fc uniq alts mexpected
 
                           alts' <- pruneByType env !(expand exp') alts
 
-                          -- logGlueNF "elab.ambiguous" 5 (fastConcat
-                          --     [ "Ambiguous elaboration"
-                          --     , " (kept ", show (length alts'), " out of "
-                          --     , show (length alts), " candidates)"
-                          --     , " (", if delayed then "" else "not ", "delayed)"
-                          --     , " at ", show fc, ":\n"
-                          --     , unlines (map show alts')
-                          --     , "Target type "
-                          --     ]) env exp'
+                          logNF "elab.ambiguous" 5 (fastConcat
+                              [ "Ambiguous elaboration"
+                              , " (kept ", show (length alts'), " out of "
+                              , show (length alts), " candidates)"
+                              , " (", if delayed then "" else "not ", "delayed)"
+                              , " at ", show fc, ":\n"
+                              , unlines (map show alts')
+                              , "Target type "
+                              ]) env exp'
                           let tryall = case uniq of
                                             FirstSuccess => anyOne fc
                                             _ => exactlyOne' (not delayed) fc env
@@ -465,5 +466,5 @@ checkAlternative rig elabinfo nest env fc uniq alts mexpected
                                   solveConstraints solvemode Normal
                                   solveConstraints solvemode Normal
                                   log "elab.ambiguous" 10 $ show (getName t) ++ " success"
-                                  -- logTermNF "elab.ambiguous" 10 "Result" env (fst res)
+                                  logTermNF "elab.ambiguous" 10 "Result" env (fst res)
                                   pure res)) alts')

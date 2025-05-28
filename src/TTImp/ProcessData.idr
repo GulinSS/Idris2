@@ -114,7 +114,7 @@ checkCon {vars} opts nest env vis tn_in tn (MkImpTy fc cn_in ty_raw)
          -- Check 'ty' returns something in the right family
          checkFamily fc cn tn env !(nf env ty)
          let fullty = abstractEnvType fc env ty
-         -- logTermNF "declare.data.constructor" 5 ("Constructor " ++ show cn) ScopeEmpty fullty
+         logTermNF "declare.data.constructor" 5 ("Constructor " ++ show cn) ScopeEmpty fullty
 
          traverse_ addToSave (keys (getMetas ty))
          addToSave cn
@@ -422,7 +422,7 @@ processData {vars} eopts nest env fc def_vis mbtot (MkImpLater dfc n_in ty_raw)
                               (IBindHere fc (PI erased) ty_raw)
                               (Just (gType dfc u))
          let fullty = abstractEnvType dfc env ty
-         -- logTermNF "declare.data" 5 ("data " ++ show n) ScopeEmpty fullty
+         logTermNF "declare.data" 5 ("data " ++ show n) ScopeEmpty fullty
 
          checkIsType fc n env !(nf env ty)
          arity <- getArity ScopeEmpty fullty
@@ -507,12 +507,12 @@ processData {vars} eopts nest env fc def_vis mbtot (MkImpData dfc n_in mty_raw o
                         Just fullty =>
                             do ok <- convert ScopeEmpty fullty (type ndef)
                                if ok then pure (mw, vis, tot, fullty)
-                                     else do -- logTermNF "declare.data" 1 "Previous" ScopeEmpty (type ndef)
-                                             -- logTermNF "declare.data" 1 "Now" ScopeEmpty fullty
+                                     else do logTermNF "declare.data" 1 "Previous" ScopeEmpty (type ndef)
+                                             logTermNF "declare.data" 1 "Now" ScopeEmpty fullty
                                              throw (AlreadyDefined fc n)
                       _ => throw (AlreadyDefined fc n)
 
-         -- logTermNF "declare.data" 5 ("data " ++ show n) ScopeEmpty fullty
+         logTermNF "declare.data" 5 ("data " ++ show n) ScopeEmpty fullty
 
          arity <- getArity ScopeEmpty fullty
 

@@ -89,8 +89,8 @@ elabRewrite loc env expected rulety
          -- the metavariables might have been updated
          expnf <- nf env expected
 
-         -- logNF "elab.rewrite" 5 "Rewriting" env lt
-         -- logNF "elab.rewrite" 5 "Rewriting in" env expnf
+         logNF "elab.rewrite" 5 "Rewriting" env lt
+         logNF "elab.rewrite" 5 "Rewriting in" env expnf
          rwexp_sc <- replace env lt (Ref loc Bound parg) expnf
          logTerm "elab.rewrite" 5 "Rewritten to" rwexp_sc
 

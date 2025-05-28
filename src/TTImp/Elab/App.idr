@@ -366,10 +366,10 @@ mutual
             defs <- get Ctxt
             nfargty <- expand argty
             mconsCount <- countConstructors nfargty
-            -- logNF "elab.app.dot" 50
-            --   "Found \{show mconsCount} constructors for type"
-            --   (mkEnv emptyFC vars)
-            --   nfargty
+            logNF "elab.app.dot" 50
+              "Found \{show mconsCount} constructors for type"
+              (mkEnv emptyFC vars)
+              nfargty
             if mconsCount == Just 1 || mconsCount == Just 0
               then pure tm
               else
@@ -479,10 +479,10 @@ mutual
              (tm, gty) <- checkAppWith rig elabinfo nest env fc
                                        fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
              defs <- get Ctxt
-             -- logEnv "elab" 10 "Metaty Env" env
+             logEnv "elab" 10 "Metaty Env" env
              logMetatyCtxt defs metaty
              aty' <- nf env metaty
-             -- logNF "elab" 10 ("Now trying " ++ show nm ++ " " ++ show arg) env aty'
+             logNF "elab" 10 ("Now trying " ++ show nm ++ " " ++ show arg) env aty'
              atyNF <- if onLHS (elabMode elabinfo)
                          then Just <$> expand aty'
                          else pure Nothing
@@ -514,7 +514,7 @@ mutual
              -- (As patterns are a bit of a hack but I don't yet see a
              -- better way that leads to good code...)
              logTerm "elab" 10 ("Solving " ++ show !(toFullNames !(toFullNames metaval)) ++ " with") !(toFullNames !(toFullNames argv))
-             -- logEnv "elab" 10 "In env" env
+             logEnv "elab" 10 "In env" env
              ok <- solveIfUndefined env metaval argv
              -- If there's a constraint, make a constant, but otherwise
              -- just return the term as expected
@@ -554,6 +554,8 @@ mutual
                   Core (Term vars, Glued vars)
       checkLtoR kr arg
         = do defs <- get Ctxt
+             logNF "elab" 10 ("Full function type") env
+                     (VBind {f=Normal} fc x (Pi fc argRig Explicit aty) sc)
              logC "elab" 10
                      (do ety <- maybe (pure Nothing)
                                      (\t => pure (Just !(toFullNames !(quote env t))))
@@ -567,6 +569,7 @@ mutual
                  else do let (argv, argt) = res
                          checkValidPattern rig env fc argv argt
 
+             logNF "elab" 10 "Got arg type" env argt
              defs <- get Ctxt
              let fntm = App fc tm rigb argv
              fnty <- expand !(sc (nf env argv))
@@ -616,7 +619,8 @@ mutual
   checkAppNotFnType {vars} rig elabinfo nest env fc tm ty (n, argpos) (arg :: expargs) autoargs namedargs kr expty
       = -- Invent a function type,  and hope that we'll know enough to solve it
         -- later when we unify with expty
-        do logTerm "elab.with" 10 "Function " tm
+        do logNF "elab.with" 10 "Function type" env ty
+           logTerm "elab.with" 10 "Function " tm
            argn <- genName "argTy"
            retn <- genName "retTy"
            u <- uniVar fc
@@ -630,7 +634,7 @@ mutual
            let fntm = App fc tm top argv
            fnty <- nf env retTy
            expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
-           -- logNF "elab.with" 10 "Expected function type" env expfnty
+           logNF "elab.with" 10 "Expected function type" env expfnty
            -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
            res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
            cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
@@ -857,10 +861,10 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
         logTerm "elab" 10 "checkApp-IVar ntm" ntm
-        -- log "elab" 10 $ "checkApp-IVar nty_in NF: " ++ show !(toFullNames nty)
-        -- logTerm "elab" 10 "checkApp-IVar nty_in Term" !(getTerm nty_in)
-        -- logEnv "elab" 10 "checkApp-IVar Env" env
-        -- logNF "elab" 10 "checkApp-IVar nty_in NF" env nty
+        logNF "elab" 10 "checkApp-IVar nty_in NF" env nty
+        logTerm "elab" 10 "checkApp-IVar nty_in Term" !(quote env nty_in)
+        logEnv "elab" 10 "checkApp-IVar Env" env
+        logNF "elab" 10 "checkApp-IVar nty_in NF" env nty
         addNameLoc fc' n
 
         logC "elab" 10

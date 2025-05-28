@@ -122,9 +122,9 @@ inferLambda rig elabinfo nest env fc rigl info n argTy scope expTy
                                 check {e=e'} rig elabinfo
                                       nest' env' scope Nothing)
          lamty <- nf env (Bind fc n (Pi fc rigb info' tyv) !(quote env' scopet))
-         -- logGlue "elab.binder" 5 "Inferred lambda type" env lamty
-         -- maybe (pure ())
-         --       (logGlueNF "elab.binder" 5 "Expected lambda type" env) expTy
+         logNF "elab.binder" 5 "Inferred lambda type" env lamty
+         maybe (pure ())
+               (logNF "elab.binder" 5 "Expected lambda type" env) expTy
          checkExp rig elabinfo env fc
                   (Bind fc n (Lam fc rigb info' tyv) scopev)
                   lamty expTy
@@ -170,8 +170,8 @@ checkLambda rig_in elabinfo nest env fc rigl info n argTy scope (Just expty_in)
                        inScope fc env' (\e' =>
                           check {e=e'} rig elabinfo nest' env' scope
                                 (Just !(nf env' (compat psc))))
-                    -- logTermNF "elab.binder" 10 "Lambda type" env exptynf
-                    -- logGlueNF "elab.binder" 10 "Got scope type" env' scopet
+                    logTermNF "elab.binder" 10 "Lambda type" env expty
+                    logNF "elab.binder" 10 "Got scope type" env' scopet
 
                     -- Currently, the fc a PLam holds (and that ILam gets as a consequence)
                     -- is the file context of the argument to the lambda. This fits nicely

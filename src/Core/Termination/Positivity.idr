@@ -3,6 +3,7 @@ module Core.Termination.Positivity
 import Core.Context
 import Core.Context.Log
 import Core.Env
+import Core.Evaluate
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
 
@@ -51,7 +52,7 @@ posArgs : {auto c : Ref Ctxt Defs} ->
 posArgs tyn [<] = pure IsTerminating
 posArgs tyn (xs :< x)
   = do xNF <- expand x
-       -- logNF "totality.positivity" 50 "Checking parameter for positivity" [<] xNF
+       logNF "totality.positivity" 50 "Checking parameter for positivity" [<] xNF
        IsTerminating <- posArg tyn xNF
           | err => pure err
        posArgs tyn xs
@@ -59,7 +60,7 @@ posArgs tyn (xs :< x)
 -- a tyn can only appear in the parameter positions of
 -- tc; report positivity failure if it appears anywhere else
 posArg tyns nf@(VTCon loc tc _ args) =
-  do -- logNF "totality.positivity" 50 "Found a type constructor" [<] nf
+  do logNF "totality.positivity" 50 "Found a type constructor" [<] nf
      defs <- get Ctxt
      testargs <- case !(lookupDefExact tc (gamma defs)) of
                     Just (TCon _ params _ _ _ _ _) => do
@@ -83,23 +84,23 @@ posArg tyns nf@(VTCon loc tc _ args) =
              else mapSnd (:< x) (splitParams (S i) ps xs)
 -- a tyn can not appear as part of ty
 posArg tyns nf@(VBind fc x (Pi _ _ e ty) sc)
-  = do -- logNF "totality.positivity" 50 "Found a Pi-type" [<] nf
+  = do logNF "totality.positivity" 50 "Found a Pi-type" [<] nf
        if !(nameIn tyns !(expand ty))
          then pure (NotTerminating NotStrictlyPositive)
          else do sc' <- sc (pure (vRef fc Bound (MN ("POSCHECK_" ++ show x) 1)))
                  posArg tyns !(expand sc')
 posArg tyns nf@(VApp _ _ n args _)
     = do False <- isAssertTotal n
-           | True => do -- logNF "totality.positivity" 50 "Trusting an assertion" [<] nf
+           | True => do logNF "totality.positivity" 50 "Trusting an assertion" [<] nf
                         pure IsTerminating
-         -- logNF "totality.positivity" 50 "Found an application" [<] nf
+         logNF "totality.positivity" 50 "Found an application" [<] nf
          args <- traverseSnocList spineVal args
          pure $ if !(Core.Core.anyM (nameIn tyns) (cast args))
            then NotTerminating NotStrictlyPositive
            else IsTerminating
 posArg tyn (VDelayed _ _ ty) = posArg tyn !(expand ty)
 posArg tyn nf
-  = do -- logNF "totality.positivity" 50 "Reached the catchall" [<] nf
+  = do logNF "totality.positivity" 50 "Reached the catchall" [<] nf
        pure IsTerminating
 
 checkPosArgs : {auto c : Ref Ctxt Defs} ->
@@ -111,7 +112,7 @@ checkPosArgs tyns (VBind fc x (Pi _ _ e ty) sc)
                   checkPosArgs tyns !(expand !(sc (pure nm)))
            bad => pure bad
 checkPosArgs tyns nf
-  = do -- logNF "totality.positivity" 50 "Giving up on non-Pi type" [<] nf
+  = do logNF "totality.positivity" 50 "Giving up on non-Pi type" [<] nf
        pure IsTerminating
 
 checkCon : {auto c : Ref Ctxt Defs} ->
@@ -126,7 +127,7 @@ checkCon tyns cn
              case !(totRefsIn defs ty) of
                 IsTerminating =>
                   do tyNF <- nf [<] ty
-                     -- logNF "totality.positivity" 20 "Checking the type " [<] tyNF
+                     logNF "totality.positivity" 20 "Checking the type " [<] tyNF
                      checkPosArgs tyns !(expand tyNF)
                 bad => pure bad
 
