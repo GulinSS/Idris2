@@ -153,7 +153,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                    (Var (vars ++ free), Term (vars ++ free)) ->
                    Core (Glued vars, Glued vars)
       evalForced locs (MkVar v, tm)
-          = do v' <- eval locs env (?fgdfgdf (Local fc _ ?v))
+          = do v' <- eval locs env (Local fc Nothing _ v)
                tm' <- eval locs env tm
                pure (v', tm')
 

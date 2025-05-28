@@ -19,7 +19,7 @@ mkFn i Z op args
     = PrimOp EmptyFC op (reverse (map mkLoc args))
   where
     mkLoc : Var vars -> Term vars
-    mkLoc (MkVar p) = ?p --Local EmptyFC _ ?p
+    mkLoc (MkVar p) = Local EmptyFC Nothing _ p
 mkFn i (S k) op args
     = Bind EmptyFC (MN "arg" i)
            (Lam EmptyFC Algebra.ZeroOneOmega.top Explicit (Erased EmptyFC Placeholder))
