@@ -101,7 +101,7 @@ addData vars vis tidx (MkData (MkCon dfc tyn arity tycon) datacons)
             "Positions of parameters for datatype" ++ show tyn ++
             ": [" ++ showSep ", " (map show paramPositions) ++ "]"
          let tydef = newDef dfc tyn top vars tycon (specified vis)
-                            (TCon tag arity
+                            (TCon arity
                                   paramPositions
                                   allPos
                                   defaultFlags [] (Just $ map name datacons) Nothing)

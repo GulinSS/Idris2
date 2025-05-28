@@ -229,7 +229,7 @@ usableLocal loc defaults env (NApp fc (NMeta (PV _ _) _ _) args)
     = pure True
 usableLocal loc defaults env (NApp fc (NMeta _ _ _) args)
     = pure False
-usableLocal {vars} loc defaults env (NTCon _ n _ _ args)
+usableLocal {vars} loc defaults env (NTCon _ n _ args)
     = do sd <- getSearchData loc (not defaults) n
          usableLocalArg 0 (detArgs sd) (toList $ map value args)
   -- usable if none of the determining arguments of the local's type are
@@ -322,7 +322,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
               NF vars ->  -- local's type
               (target : NF vars) ->
               Core (Term vars)
-    findPos defs f nty@(NTCon pfc pn _ _ [<(_, _, xty), (_, _, yty)]) target
+    findPos defs f nty@(NTCon pfc pn _ [<(_, _, xty), (_, _, yty)]) target
         = tryUnifyUnambig (findDirect defs f nty target) $
              do fname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
                                pure
@@ -370,7 +370,7 @@ searchLocalVars fc rig defaults trying depth def top env target
 
 isPairNF : {auto c : Ref Ctxt Defs} ->
            Env Term vars -> NF vars -> Defs -> Core Bool
-isPairNF env (NTCon _ n _ _ _) defs
+isPairNF env (NTCon _ n _ _) defs
     = isPairType n
 isPairNF env (NBind fc b (Pi _ _ _ _) sc) defs
     = isPairNF env !(sc defs (toClosure defaultOpts env (Erased fc Placeholder))) defs
@@ -401,7 +401,7 @@ searchName fc rigc defaults trying depth def top env target (n, ndef)
          let namety : NameType
                  = case definition ndef of
                         DCon tag arity _ => DataCon tag arity
-                        TCon tag arity _ _ _ _ _ _ => TyCon tag arity
+                        TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
          nty <- nf defs env (embed ty)
          logNF "auto" 10 ("Searching Name " ++ show n) env nty
@@ -476,7 +476,7 @@ concreteDets {vars} fc defaults env top pos dets (arg :: args)
     concrete defs (NBind nfc x b sc) atTop
         = do scnf <- sc defs (toClosure defaultOpts env (Erased nfc Placeholder))
              concrete defs scnf False
-    concrete defs (NTCon nfc n t a args) atTop
+    concrete defs (NTCon nfc n a args) atTop
         = do sd <- getSearchData nfc False n
              let args' = drop 0 (detArgs sd) (cast {to = List (FC, RigCount, Closure vars)} args)
              traverse_ (\ parg => do argnf <- evalClosure defs parg
@@ -502,7 +502,7 @@ checkConcreteDets : {vars : _} ->
                     Env Term vars -> (top : ClosedTerm) ->
                     NF vars ->
                     Core ()
-checkConcreteDets fc defaults env top (NTCon tfc tyn t a args)
+checkConcreteDets fc defaults env top (NTCon tfc tyn a args)
     = do defs <- get Ctxt
          let args = map value args
          if !(isPairType tyn)
@@ -549,14 +549,14 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
          let trying' = target :: trying
          nty <- nf defs env target
          case nty of
-              NTCon tfc tyn t a args =>
+              NTCon tfc tyn a args =>
                   if a == length args
                      then do logNF "auto" 10 "Next target" env nty
                              sd <- getSearchData fc defaults tyn
                              -- Check determining arguments are okay for 'args'
                              when checkdets $
                                  checkConcreteDets fc defaults env top
-                                                   (NTCon tfc tyn t a args)
+                                                   (NTCon tfc tyn a args)
                              if defaults && checkdets
                                 then tryGroups Nothing nty (hintGroups sd)
                                 else tryUnifyUnambig

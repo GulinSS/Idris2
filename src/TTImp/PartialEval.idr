@@ -650,9 +650,9 @@ mutual
   quoteGenNF q defs bound env (NDCon fc n t ar args)
       = do args' <- quoteArgsWithFC q defs bound env args
            pure $ applySpineWithFC (Ref fc (DataCon t ar) n) args'
-  quoteGenNF q defs bound env (NTCon fc n t ar args)
+  quoteGenNF q defs bound env (NTCon fc n ar args)
       = do args' <- quoteArgsWithFC q defs bound env args
-           pure $ applySpineWithFC (Ref fc (TyCon t ar) n) args'
+           pure $ applySpineWithFC (Ref fc (TyCon ar) n) args'
   quoteGenNF q defs bound env (NAs fc s n pat)
       = do n' <- quoteGenNF q defs bound env n
            pat' <- quoteGenNF q defs bound env pat

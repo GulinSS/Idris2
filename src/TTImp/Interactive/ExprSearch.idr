@@ -295,7 +295,7 @@ searchName fc rigc opts hints env target topty (n, ndef)
          let namety : NameType
                  = case definition ndef of
                         DCon tag arity _ => DataCon tag arity
-                        TCon tag arity _ _ _ _ _ _ => TyCon tag arity
+                        TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
          log "interaction.search" 5 $ "Trying " ++ show (fullname ndef)
          nty <- nf defs env (embed ty)
@@ -413,7 +413,7 @@ tryRecursive fc rig opts hints env ty topty rdata
                  Bool
       appsDiff (Ref _ (DataCon _ _) f) (Ref _ (DataCon _ _) f') args args'
          = f /= f' || any (uncurry argDiff) (zip args args')
-      appsDiff (Ref _ (TyCon _ _) f) (Ref _ (TyCon _ _) f') args args'
+      appsDiff (Ref _ (TyCon _) f) (Ref _ (TyCon _) f') args args'
          = f /= f' || any (uncurry argDiff) (zip args args')
       appsDiff (Ref _ _ f) (Ref _ _ f') args args'
          = f == f'
@@ -487,7 +487,7 @@ searchLocalWith {vars} fc nofn rig opts hints env ((p, pty) :: rest) ty topty
     findPos : Defs -> Term vars ->
               (Term vars -> Term vars) ->
               NF vars -> NF vars -> Core (Search (Term vars, ExprDefs))
-    findPos defs prf f x@(NTCon pfc pn _ _ [<(fc1, xc, xty), (fc2, xy, yty)]) target
+    findPos defs prf f x@(NTCon pfc pn _ [<(fc1, xc, xty), (fc2, xy, yty)]) target
         = getSuccessful fc rig opts False env ty topty
               [findDirect defs prf f x target,
                  (do fname <- maybe (throw (InternalError "No fst"))
@@ -612,7 +612,7 @@ tryIntermediateWith fc rig opts hints env ((p, pty) :: rest) ty topty
     matchable defs (NBind fc x (Pi _ _ _ _) sc)
         = matchable defs !(sc defs (toClosure defaultOpts env
                                               (Erased fc Placeholder)))
-    matchable defs (NTCon _ _ _ _ _) = pure True
+    matchable defs (NTCon _ _ _ _) = pure True
     matchable _ _ = pure False
 
     applyLocal : Defs -> Term vars ->
@@ -681,8 +681,8 @@ tryIntermediateRec fc rig opts hints env ty topty (Just rd)
     isSingleCon defs (NBind fc x (Pi _ _ _ _) sc)
         = isSingleCon defs !(sc defs (toClosure defaultOpts ScopeEmpty
                                               (Erased fc Placeholder)))
-    isSingleCon defs (NTCon _ n _ _ _)
-        = do Just (TCon _ _ _ _ _ _ (Just [con]) _) <- lookupDefExact n (gamma defs)
+    isSingleCon defs (NTCon _ n _ _)
+        = do Just (TCon _ _ _ _ _ (Just [con]) _) <- lookupDefExact n (gamma defs)
                   | _ => pure False
              pure True
     isSingleCon _ _ = pure False
@@ -712,7 +712,7 @@ searchType {vars} fc rig opts hints env topty Z (Bind bfc n b@(Pi fc' c info ty)
                              (Bind bfc n' (Lam fc' c info ty) sc, ds)) scVal))]
 searchType fc rig opts hints env topty _ ty
     = case getFnArgs ty of
-           (Ref rfc (TyCon t ar) n, args) =>
+           (Ref rfc (TyCon ar) n, args) =>
                 do defs <- get Ctxt
                    if length args == ar
                      then do sd <- getSearchData fc False n
