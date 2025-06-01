@@ -52,7 +52,7 @@ emptyRHS _ (TCase cfc c idx el sc alts) = TCase cfc c idx el sc (map emptyRHSalt
     emptyRHSalt (TDelayCase fc c arg sc) = TDelayCase fc c arg (emptyRHS fc sc)
     emptyRHSalt (TConstCase fc c sc) = TConstCase fc c (emptyRHS fc sc)
     emptyRHSalt (TDefaultCase fc sc) = TDefaultCase fc (emptyRHS fc sc)
-emptyRHS fc (STerm i s) = STerm i (Erased fc Placeholder)
+emptyRHS fc (STerm i fs s) = STerm i fs (Erased fc Placeholder)
 emptyRHS _ sc = sc
 
 export
