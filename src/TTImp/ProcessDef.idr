@@ -842,7 +842,6 @@ mkRunTime fc (ct, n)
                , "Runtime tree for " ++ show (fullname gdef) ++ ":"
                , show (indent 2 $ prettyTree tree_rt)
                ]
-           log "compile.casetree" 10 $ "tree_rt " ++ show tree_rt
            ignore $ addDef n $
                        { definition := Function r tree_ct tree_rt (Just pats)
                        } gdef
@@ -1024,8 +1023,10 @@ processDef opts nest env fc n_in cs_in
 
          logC "declare.def" 2 $
                  do t <- toFullNames tree_ct
-                    pure ("Case tree for " ++ show n ++ ": " ++ show t)
-
+                    pure $ unlines
+                      [ "Compile time tree for " ++ show (fullname gdef) ++ ":"
+                      , show (indent 2 $ prettyTree t)
+                      ]
          -- check whether the name was declared in a different source file
          defs <- get Ctxt
          let pi = case lookup n (userHoles defs) of
