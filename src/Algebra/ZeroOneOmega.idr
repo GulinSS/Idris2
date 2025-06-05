@@ -37,18 +37,6 @@ Eq ZeroOneOmega where
   (==) _ _ = False
 
 export
-erased : ZeroOneOmega
-erased = Rig0
-
-export
-linear : ZeroOneOmega
-linear = Rig1
-
-export
-top : ZeroOneOmega
-top = RigW
-
-export
 Show ZeroOneOmega where
   show Rig0 = "Rig0"
   show Rig1 = "Rig1"

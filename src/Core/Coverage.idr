@@ -321,7 +321,7 @@ buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsI
         = do let con = Ref fc (DataCon t (length args)) n
              let app = applySpine fc con
                              (map @{Compose} (Ref fc Bound) args)
-             let ps' = map @{Compose} (substName zero var app) ps
+             let ps' = map @{Compose} (substName var app) ps
              buildArgs defs (weakenNs s known) (weakenNs s not') ps' tm
     buildArgSc s fc var known not' n t args (Arg c x sc)
         = buildArgSc (suc s) fc var known not' n t (args :< (c, x)) sc
@@ -332,13 +332,13 @@ buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsI
         = buildArgSc zero cfc var ((MkVar el, t) :: known) not' n t [<] sc
     buildArgAlt var not' (DelayCase _ t a sc)
         = let l = mkSizeOf [< t, a]
-              ps' = map @{Compose} (substName zero var
+              ps' = map @{Compose} (substName var
                                               (TDelay fc LUnknown
                                                       (Ref fc Bound t)
                                                       (Ref fc Bound a))) ps in
               buildArgs defs (weakenNs l known) (weakenNs l not') ps' sc
     buildArgAlt var not' (ConstCase _ i sc)
-        = do let ps' = map @{Compose} (substName zero var (PrimVal fc i)) ps
+        = do let ps' = map @{Compose} (substName var (PrimVal fc i)) ps
              buildArgs defs known not' ps' sc
     buildArgAlt var not' (DefaultCase _ sc)
         = buildArgs defs known not' ps sc

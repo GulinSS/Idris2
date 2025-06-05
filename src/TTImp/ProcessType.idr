@@ -92,8 +92,8 @@ initDef fc n env ty (_ :: opts) = initDef fc n env ty opts
 -- generalising partially evaluated definitions and (potentially) in interactive
 -- editing
 findInferrable : {auto c : Ref Ctxt Defs} ->
-                 Defs -> ClosedNF -> Core (List Nat)
-findInferrable defs ty = fi 0 0 [] [] ty
+                 ClosedNF -> Core (List Nat)
+findInferrable ty = fi 0 0 [] [] ty
   where
     mutual
       -- Add to the inferrable arguments from the given type. An argument is
@@ -171,9 +171,7 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc n_in ty_raw)
          let fullty = abstractFullEnvType tfc env ty
 
          (erased, dterased) <- findErased fullty
-         defs <- get Ctxt
-         empty <- clearDefs defs
-         infargs <- findInferrable defs !(expand !(nf [<] fullty))
+         infargs <- findInferrable !(expand !(nf [<] fullty))
 
          ignore $ addDef (Resolved idx)
                 ({ eraseArgs := erased,

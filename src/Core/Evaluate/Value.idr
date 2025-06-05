@@ -235,7 +235,8 @@ data VCaseAlt : SnocList Name -> Type where
                 VCaseScope args vars -> VCaseAlt vars
      ||| Lazy match for the Delay type use for codata types
      VDelayCase : FC -> (ty : Name) -> (arg : Name) ->
-                  VCaseScope [<(Algebra.ZeroOneOmega.top, arg), (Algebra.ZeroOneOmega.erased, ty)] vars -> VCaseAlt vars
+                  VCaseScope [<(Algebra.Preorder.top, arg), (Algebra.Semiring.erased, ty)] vars ->
+                  VCaseAlt vars
      ||| Match against a literal
      VConstCase : FC -> Constant -> Glued vars -> VCaseAlt vars
      ||| Catch-all case

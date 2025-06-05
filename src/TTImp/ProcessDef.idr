@@ -846,18 +846,6 @@ mkRunTime fc (ct, n)
                        { definition := Function r tree_ct tree_rt (Just pats)
                        } gdef
   where
-    -- check if the flags contain explicit inline or noinline directives:
-    noInline : List DefFlag -> Bool
-    noInline (Inline :: _)   = False
-    noInline (NoInline :: _) = False
-    noInline (x :: xs) = noInline xs
-    noInline _ = True
-
-    caseName : Name -> Bool
-    caseName (CaseBlock _ _) = True
-    caseName (NS _ n) = caseName n
-    caseName _ = False
-
     mkCrash : {vars : _} -> String -> Term vars
     mkCrash msg
        = apply fc (Ref fc Func (UN $ Basic "prim__crash"))
