@@ -1050,6 +1050,8 @@ mutual
                Core (CaseTree vars)
   caseGroups {vars} fc fn phase c el ty gs errorCase
       = do g <- altGroups gs
+           log "compile.casetree" 50 $ "Making case with " ++ show gs
+           log "compile.casetree" 50 $ "Makes " ++ show g
            pure (TCase fc c _ el (resolveNames vars ty) g)
     where
       mkScope : forall vars . (vs : SnocList Name) ->
