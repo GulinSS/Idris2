@@ -429,12 +429,18 @@ mutual
   export
   {vars : _} -> TTC (Term vars) where
     toBuf b (Local {name} fc c idx y)
-        = if idx < 243
-             then do tag (13 + cast idx)
+        = if idx < free
+             then do tag (cast (used + idx))
                      toBuf b c
              else do tag 0
                      toBuf b c
                      toBuf b idx
+        where
+         used : Nat
+         used = 16 -- it should be a length of all encoding cases at `toBuf` / `fromBuf`
+
+         free : Nat
+         free = 256 `minus` used -- we use 1 byte to encode special cases
     toBuf b (Ref fc nt name)
         = do tag 1;
              toBuf b nt; toBuf b name
@@ -452,39 +458,39 @@ mutual
                                    toBuf b fn
                                    toBuf b c
                                    toBuf b arg
-                  args => do tag 13
-                             toBuf b fn
-                             toBuf b args
+                  args       => do tag 5
+                                   toBuf b fn
+                                   toBuf b args
     toBuf b (As fc s as tm)
-        = do tag 5;
+        = do tag 6
              toBuf b as; toBuf b s; toBuf b tm
     toBuf b (Case fc t c sc scty alts)
-        = do tag 6
+        = do tag 7
              toBuf b t; toBuf b c; toBuf b sc; toBuf b scty
              toBuf b alts
     toBuf b (TDelayed fc r tm)
-        = do tag 7;
+        = do tag 8
              toBuf b r; toBuf b tm
     toBuf b (TDelay fc r ty tm)
-        = do tag 8;
+        = do tag 9
              toBuf b r; toBuf b ty; toBuf b tm
     toBuf b (TForce fc r tm)
-        = do tag 9;
+        = do tag 10
              toBuf b r; toBuf b tm
     toBuf b (PrimVal fc c)
-        = do tag 10;
+        = do tag 11
              toBuf b c
     toBuf b (PrimOp {arity} fc fn args)
-        = do tag 11
+        = do tag 12
              toBuf b arity
              toBuf b fn
              toBuf b args
     toBuf b (Erased fc _)
-        = tag 12
+        = tag 13
     toBuf b (Unmatched fc u)
-        = do tag 13; toBuf b u
-    toBuf b (TType fc u)
         = do tag 14; toBuf b u
+    toBuf b (TType fc u)
+        = do tag 15; toBuf b u
 
     fromBuf {vars} b
         = case !getTag of
@@ -505,32 +511,34 @@ mutual
                        c <- fromBuf b
                        arg <- fromBuf b
                        pure (App emptyFC fn c arg)
-               5 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
+               5 => do fn <- fromBuf b
+                       args <- fromBuf b
+                       pure (apply emptyFC fn args)
+               6 => do as <- fromBuf b; s <- fromBuf b; tm <- fromBuf b
                        pure (As emptyFC s as tm)
-               6 => do t <- fromBuf b; c <- fromBuf b; sc <- fromBuf b; scty <- fromBuf b
+               7 => do t <- fromBuf b; c <- fromBuf b; sc <- fromBuf b; scty <- fromBuf b
                        alts <- fromBuf b
                        pure (Case emptyFC t c sc scty alts)
-               7 => do lr <- fromBuf b; tm <- fromBuf b
+               8 => do lr <- fromBuf b; tm <- fromBuf b
                        pure (TDelayed emptyFC lr tm)
-               8 => do lr <- fromBuf b;
+               9 => do lr <- fromBuf b;
                        ty <- fromBuf b; tm <- fromBuf b
                        pure (TDelay emptyFC lr ty tm)
-               9 => do lr <- fromBuf b; tm <- fromBuf b
-                       pure (TForce emptyFC lr tm)
-               10 => do c <- fromBuf b
+               10 => do lr <- fromBuf b; tm <- fromBuf b
+                        pure (TForce emptyFC lr tm)
+               11 => do c <- fromBuf b
                         pure (PrimVal emptyFC c)
-               11 => do arity <- fromBuf b
+               12 => do arity <- fromBuf b
                         op <- fromBuf b
                         args <- fromBuf b
                         pure (PrimOp {arity} emptyFC op args)
-               12 => pure (Erased emptyFC Placeholder)
-               13 => do str <- fromBuf b
+               13 => pure (Erased emptyFC Placeholder)
+               14 => do str <- fromBuf b
                         pure (Unmatched emptyFC str)
-               14 => do fn <- fromBuf b
-                        args <- fromBuf b
-                        pure (apply emptyFC fn args)
+               15 => do u <- fromBuf b
+                        pure (TType emptyFC u)
                idxp => do c <- fromBuf b
-                          let idx : Nat = fromInteger (cast (idxp - 13))
+                          let idx : Nat = fromInteger (cast (idxp - 16))
                           let Just name = getName idx vars
                               | Nothing => corrupt "Term"
                           pure (Local {name} emptyFC c idx (mkPrf idx))
