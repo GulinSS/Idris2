@@ -22,7 +22,7 @@ mkFn i Z op args
     mkLoc (MkVar p) = Local EmptyFC Nothing _ p
 mkFn i (S k) op args
     = Bind EmptyFC (MN "arg" i)
-           (Lam EmptyFC Algebra.ZeroOneOmega.top Explicit (Erased EmptyFC Placeholder))
+           (Lam EmptyFC top Explicit (Erased EmptyFC Placeholder))
            (mkFn (i + 1) k
                  (rewrite sym (plusSuccRightSucc k done) in op)
                  (MkVar First :: map later args))
@@ -34,7 +34,7 @@ addPrim : {auto c : Ref Ctxt Defs} ->
           Prim -> Core ()
 addPrim p
     = do let fndef = mkPrim (arity p) (fn p)
-         let primdef = newDef EmptyFC (opName (fn p)) Algebra.ZeroOneOmega.top [<]
+         let primdef = newDef EmptyFC (opName (fn p)) top [<]
                               (type p) (specified Public)
                               (Function (MkPMDefInfo NotHole False False)
                                         fndef fndef Nothing)
