@@ -1223,6 +1223,15 @@ getVisibility fc n
               | Nothing => throw (UndefinedName fc n)
          pure $ visibility def
 
+export
+getVisibilityWeaked : {auto c : Ref Ctxt Defs} ->
+                FC -> Name -> Core (WithDefault Visibility Private)
+getVisibilityWeaked fc n
+    = catch (getVisibility fc n) $ \e =>
+        case e of
+          UndefinedName _ _ => pure defaulted
+          x => throw x
+
 maybeMisspelling : {auto c : Ref Ctxt Defs} ->
                    Error -> Name -> Core a
 maybeMisspelling err nm = do

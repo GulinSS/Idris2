@@ -175,7 +175,7 @@ getLoc (VType fc x) = fc
 expand' : {auto c : Ref Ctxt Defs} ->
           Bool -> Value f vars -> Core (NF vars)
 expand' cases v@(VApp fc nt n sp val)
-    = do vis <- getVisibility fc n
+    = do vis <- getVisibilityWeaked fc n
          defs <- get Ctxt
          let ns = currentNS defs :: nestedNS defs
          if reducibleInAny ns n (collapseDefault vis)
