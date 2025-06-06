@@ -234,7 +234,8 @@ mutual
                 let arity = getArity def
                 let gdefFlags = flags gdef
                 if (Inline `elem` gdefFlags)
-                    && (not (n `elem` rec))
+                    && (not (n `elem` rec)) -- requires putting function name at `eval rec env stk (CApp fc f@(CRef nfc n) args)` to make it work
+                                            -- for mutually recursive invocations
                     && (not (NoInline `elem` gdefFlags))
                    then do log "compiler.inline.io_bind" 50 $ "Attempting to CRef Inline Apply, def: \{show def}, n: \{show n}, rec: \{show rec}"
                            ap <- tryApply (n :: rec) stk env def
@@ -270,14 +271,14 @@ mutual
            defs <- get Ctxt
            Just gdef <- lookupCtxtExact n (gamma defs)
                 | Nothing => do log "compiler.inline.io_bind" 50 $ "Attempting to CApp CRef Nothing, rec: \{show rec}, env: \{show env}, args: \{show args}"
-                                -- Yaffle: (n :: rec)
-                                args' <- logDepth $ traverse (eval rec env []) args
+                                -- Passing function name as `n` to determine recursive inlining
+                                args' <- logDepth $ traverse (eval (n :: rec) env []) args
                                 log "compiler.inline.io_bind" 50 $ "Attempting to CApp CRef Nothing, stk: \{show stk}, n: \{show n}, args': \{show args'}"
                                 pure (unload stk
                                           (CApp fc (CRef nfc n) args'))
            log "compiler.inline.io_bind" 50 $ "Attempting to CApp CRef, rec: \{show rec}, env: \{show env}, args: \{show args}"
-           -- Yaffle: (n :: rec)
-           args' <- logDepth $ traverse (eval rec env []) args
+           -- Passing function name as `n` to determine recursive inlining
+           args' <- logDepth $ traverse (eval (n :: rec) env []) args
            log "compiler.inline.io_bind" 50 $ "Attempting to CApp CRef, env: \{show env}, args': \{show args'}, stk: \{show stk}, f: \{show f}"
            eval rec env (args' ++ stk) f
   eval rec env stk (CApp fc f args)
