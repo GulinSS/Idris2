@@ -293,6 +293,12 @@ buildArgs : {auto c : Ref Ctxt Defs} ->
                                     -- (because a previous case matches)
             Scopeable (RigCount, ClosedTerm) -> -- ^ arguments, with explicit names
             Term vars -> Core (List (Scopeable (RigCount, ClosedTerm)))
+-- Coming from the case tree builder, we'll always be splitting on a
+-- variable, so coverage checking has to happen at that point, i.e. before
+-- any inlining
+-- Case blocks appear under lambdas. We only need the case block itself to
+-- be able to construct the application, so we'll only see these at the
+-- top level
 buildArgs defs known not ps (Bind fc x (Lam lfc c p ty) sc)
     = buildArgs defs (weaken known) (weaken not) (ps :< (c, Ref fc Bound x)) sc
 buildArgs defs known not ps cs@(Case fc PatMatch c (Local lfc _ idx el) ty altsIn)
@@ -389,18 +395,8 @@ getNonCoveringRefs fc n
         Just d <- lookupCtxtExact n (gamma defs)
            | Nothing => undefinedName fc n
         let ds = mapMaybe noAssert (toList (refersTo d))
-        let cases = filter isCase !(traverse toFullNames ds)
-
-        -- Case blocks aren't recursive, so we're safe!
-        cbad <- traverse (getNonCoveringRefs fc) cases
-        topbad <- filterM (notCovering defs) ds
-        pure (topbad ++ concat cbad)
+        filterM (notCovering defs) ds
   where
-    isCase : Name -> Bool
-    isCase (NS _ n) = isCase n
-    isCase (CaseBlock _ _) = True
-    isCase _ = False
-
     noAssert : (Name, Bool) -> Maybe Name
     noAssert (n, True) = Nothing
     noAssert (n, False) = Just n
