@@ -4,6 +4,8 @@ import Core.Case.CaseTree
 import Core.Context
 import Core.Evaluate.Value
 
+import Parser.Rule.Source
+
 import Data.SnocList
 import Libraries.Data.SnocList.Extra
 import Libraries.Data.SnocList.SizeOf
@@ -24,12 +26,22 @@ getCons : {auto c : Ref Ctxt Defs} ->
           {vars : _} ->
           Defs -> NF vars -> Core (List DataCon)
 getCons defs (VTCon fc tn _ _)
-    = case !(lookupDefExact tn (gamma defs)) of
-           Just (TCon _ _ _ _ _ cons _) =>
-                do cs' <- traverse addTy (fromMaybe [] cons)
-                   pure (catMaybes cs')
-           _ => throw (InternalError "Called `getCons` on something that is not a Type constructor")
+    = if is_primitive
+        then -- This a primitive type, so nothing to add (we
+             -- can't generate all the possibilities after all!)
+             pure []
+        else
+          case !(lookupDefExact tn (gamma defs)) of
+              Just (TCon _ _ _ _ _ cons _) =>
+                    do cs' <- traverse addTy (fromMaybe [] cons)
+                       pure (catMaybes cs')
+              x => throw (InternalError "Called `getCons` on something that is not a Type constructor: \{show tn} of \{show x}")
   where
+    is_primitive : Bool
+    is_primitive = case tn of
+      UN (Basic n) => elem n reservedNames
+      _ => False
+
     addTy : Name -> Core (Maybe DataCon)
     addTy cn
         = do Just gdef <- lookupCtxtExact cn (gamma defs)
