@@ -123,7 +123,7 @@ mutual
                | Nothing => case umode of
                                  ImplicitHoles => pure (Implicit fc True, gErased fc)
                                  _ => pure (term, gErased fc)
-           pure (IHole fc mkn, !(nf env (embed ty)))
+           pure (term, !(nf env (embed ty)))
 
   unelabTy' umode nest env (Bind fc x b sc)
       = do let env' = env :< b

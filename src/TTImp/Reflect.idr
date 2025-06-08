@@ -308,17 +308,6 @@ mutual
     reify defs val = cantReify val "FnOpt"
 
   export
-  { a: Reify b } -> Reify (WithFC b) where
-    reify defs val@(VDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
-               (UN (Basic "MkFCVal"), [w, y])
-                    => do w' <- reify defs !(expand w)
-                          y' <- reify defs !(expand y)
-                          pure (MkFCVal w' y')
-               _ => cantReify val "WithFC"
-    reify defs val = cantReify val "WithFC"
-
-  export
   Reify ImpTy where
     reify defs val@(VDCon _ n _ _ args)
         = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
@@ -702,13 +691,6 @@ mutual
     reflect fc defs lhs env (SpecArgs r)
         = do r' <- reflect fc defs lhs env r
              appConTop fc defs (reflectionttimp "SpecArgs") [r']
-
-  export
-  { a: Reflect b } -> Reflect (WithFC b) where
-    reflect fc defs lhs env (MkFCVal w x)
-        = do w' <- reflect fc defs lhs env w
-             x' <- reflect fc defs lhs env x
-             appConTop fc defs (reflectionttimp "MkFCVal") [w', x']
 
   export
   Reflect ImpTy where
