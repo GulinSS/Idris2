@@ -314,7 +314,7 @@ elabScript rig fc nest env script@(VDCon nfc nm t ar args) exp
              Just (TCon _ _ _ _ _ cons _) <-
                      lookupDefExact cn (gamma defs)
                  | _ => failWith defs $ show cn ++ " is not a type"
-             scriptRet cons
+             scriptRet $ fromMaybe [] cons
     elabCon defs "GetReferredFns" [<n]
         = do dn <- reify defs !(expand n)
              Just def <- lookupCtxtExact dn (gamma defs)
@@ -323,7 +323,7 @@ elabScript rig fc nest env script@(VDCon nfc nm t ar args) exp
              scriptRet ns
     elabCon defs "GetCurrentFn" [<]
         = do defs <- get Ctxt
-             scriptRet (toList defs.defsStack)
+             scriptRet defs.defsStack
     elabCon defs "Declare" [<d]
         = do d' <- expand d
              decls <- reify {a=List _} defs d'

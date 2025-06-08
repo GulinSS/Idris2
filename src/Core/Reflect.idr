@@ -298,6 +298,26 @@ Reflect a => Reflect (List1 a) where
                                        (top, x'), (top, xs')]
 
 export
+Reify a => Reify (SnocList a) where
+  reify defs val@(VDCon _ n _ _ args)
+      = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+             (UN (Basic "Lin"), _) => pure [<]
+             (UN (Basic ":<"), [_, sx, x])
+                  => do sx' <- reify defs !(expand sx)
+                        x' <- reify defs !(expand x)
+                        pure (sx' :< x')
+             _ => cantReify val "SnocList"
+  reify defs val = cantReify val "SnocList"
+
+export
+Reflect a => Reflect (SnocList a) where
+  reflect fc defs lhs env [<] = appCon fc defs (basics "Lin") [blank fc]
+  reflect fc defs lhs env (sx :< x)
+      = do sx' <- reflect fc defs lhs env sx
+           x' <- reflect fc defs lhs env x
+           appCon fc defs (basics ":<") [blank fc, (top, sx'), (top, x')]
+
+export
 Reify a => Reify (Maybe a) where
   reify defs val@(VDCon _ n _ _ args)
       = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
@@ -331,13 +351,13 @@ export
 Reflect a => Reflect (WithDefault a def) where
   reflect fc defs lhs env
       = onWithDefault
-          (appCon fc defs (reflectionttimp "Default") [blank fc, blank fc])
+          (appCon fc defs (reflectionttimp "DefaultedValue") [blank fc, blank fc])
           (\x => do x' <- reflect fc defs lhs env x
-                    appCon fc defs (reflectionttimp "Value") [blank fc, blank fc, (top, x')])
+                    appCon fc defs (reflectionttimp "SpecifiedValue") [blank fc, blank fc, (top, x')])
 
 export
 (Reify a, Reify b) => Reify (a, b) where
-  reify defs val@(VDCon _ n _ _ args) -- [_, _, (_, x), (_, y)])
+  reify defs val@(VDCon _ n _ _ args)
       = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
              (UN (Basic "MkPair"), [_, _, x, y])
                  => do x' <- reify defs !(expand x)
@@ -861,6 +881,28 @@ Reflect FC where
            end' <- reflect fc defs lhs env end
            appCon fc defs (reflectiontt "MkFC") [(top, fn'), (top, start'), (top, end')]
   reflect fc defs lhs env EmptyFC = getCon fc defs (reflectiontt "EmptyFC")
+
+export
+Reify a => Reify (WithFC a) where
+  reify defs val@(VDCon _ n _ _ args)
+      = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+             (UN (Basic "MkFCVal"), [fcterm, nestedVal]) => do
+                 fc <- reify defs !(expand fcterm)
+                 val <- reify defs !(expand nestedVal)
+                 pure $ MkFCVal fc val
+             (UN (Basic "MkFCVal"), [_, fc, nestedVal]) => do
+                 fc' <- reify defs !(expand fc)
+                 val' <- reify defs !(expand nestedVal)
+                 pure $ MkFCVal fc' val'
+             (t, l) => cantReify val "WithFC constructor: \{show t}, args: \{show (length l)}"
+  reify defs val = cantReify val "Expected WithFC, found something else"
+
+export
+Reflect a => Reflect (WithFC a) where
+  reflect fc defs lhs env (MkFCVal loc val)
+      = do loc' <- reflect fc defs lhs env loc
+           val' <- reflect fc defs lhs env val
+           appCon fc defs (reflectiontt "MkFCVal") [blank fc, (top, loc'), (top, val')]
 
 {-
 -- Reflection of well typed terms: We don't reify terms because that involves
