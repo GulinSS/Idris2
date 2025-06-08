@@ -333,14 +333,9 @@ toCExpCase n fc sc alts@(ConCase _ _ _ _ :: _)
          defs <- get Ctxt
          cases <- conCases n alts
          def <- getDef n alts
-         let smaller_seq = sequence
-                [ nat
-                , pure . enum
-                , unitTree
-                ]
          if isNil cases
             then pure (fromMaybe (CErased fc) def)
-            else smaller_seq $ CConCase fc sc cases def
+            else pure (CConCase fc sc cases def)
 toCExpCase n fc sc alts@(ConstCase _ _ _ :: _)
     = do cases <- constCases n alts
          def <- getDef n alts
@@ -357,12 +352,7 @@ toCExpTm n (Ref fc (DataCon tag arity) fn)
     = do -- get full name for readability, and %builtin Natural
          cn <- getFullName fn
          fl <- dconFlag cn
-         case fl of
-              (ENUM n) => pure $ CPrimVal fc (enumTag n tag)
-              ZERO => pure $ CPrimVal fc (BI 0)
-              SUCC => do x <- newMN "succ"
-                         pure $ CLam fc x $ COp fc (Add IntegerType) [CPrimVal fc (BI 1), CLocal fc First]
-              _ => pure $ CCon fc cn fl (Just tag) []
+         pure $ CCon fc cn fl (Just tag) []
 toCExpTm n (Ref fc (TyCon arity) fn)
     = pure $ CCon fc fn TYCON Nothing []
 toCExpTm n (Ref fc _ fn)
@@ -417,15 +407,6 @@ toCExp n tm
                         pure $ eraseConArgs arity epos f' args'
                       Arity a =>
                         pure $ expandToArity a f' args'
-                --  Arity a <- numArgs defs f
-                --     | NewTypeBy arity pos =>
-                --           do let res = applyNewType arity pos f' args'
-                --              pure $ builtinMagic res
-                --     | EraseArgs arity epos =>
-                --           do let res = eraseConArgs arity epos f' args'
-                --              pure $ builtinMagic res
-                --  let res = expandToArity a f' args'
-                --  pure $ builtinMagic res
 
 -- Need this for ensuring that argument list matches up to operator arity for
 -- builtins
