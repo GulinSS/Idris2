@@ -115,15 +115,15 @@ parameters {auto c : Ref Ctxt Defs}
   --          Ref QVar Int =>
   --          Strategy -> Env Term vars ->
   --          NF vars -> NF vars -> Core Bool
-  convNF s env (VLam fc x r p ty sc) (VLam fc' x' r' p' ty' sc')
+  convNF s env (VBind _ _ (Lam fc _ _ ty) sc) (VBind _ _ (Lam _ _ _ ty') sc')
       = do True <- convGen s env ty ty' | False => pure False
            var <- genVar fc "conv"
-           convGen s env !(sc var) !(sc' var)
-  convNF {vars} s env tmx@(VLam fc x r p ty sc) tmy
-      = do let etay = VLam fc x r p ty (\x => apply fc tmy r (pure x))
+           convGen s env !(sc $ pure var) !(sc' $ pure var)
+  convNF {vars} s env tmx@(VBind fc x (Lam bfc r p ty) sc) tmy
+      = do let etay = VBind fc x (Lam bfc r p ty) (apply fc tmy r)
            convGen {f'=Normal} s env tmx etay
-  convNF {vars} s env tmx tmy@(VLam fc x r p ty sc)
-      = do let etax = VLam fc x r p ty (\x => apply fc tmx r (pure x))
+  convNF {vars} s env tmx tmy@(VBind fc x (Lam bfc r p ty) sc)
+      = do let etax = VBind fc x (Lam bfc r p ty) (apply fc tmx r)
            convGen {f=Normal} s env etax tmy
   convNF {vars} s env (VBind fc x b sc) (VBind fc' x' b' sc')
       = do True <- convBinders b b' | False => pure False

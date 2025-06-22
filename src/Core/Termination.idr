@@ -64,8 +64,8 @@ checkIfGuarded fc n
         = if !(guardedAlt x) then guardedAlts xs else pure False
 
     guardedDef : {vars : _} ->  Glued vars -> Core Bool
-    guardedDef (VLam fc _ _ _ _ sc)
-        = guardedDef !(sc (VErased fc Placeholder))
+    guardedDef (VBind fc _ (Lam _ _ _ _) sc)
+        = guardedDef !(sc $ pure $ VErased fc Placeholder)
     guardedDef (VCase fc ct c _ _ alts)
         = guardedAlts alts
     guardedDef nf = guardedNF nf

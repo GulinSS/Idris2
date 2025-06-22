@@ -1216,9 +1216,7 @@ mutual
                  UnifyInfo -> FC -> Env Term vars ->
                  NF vars -> NF vars -> Core UnifyResult
   -- Pair of binders or lambdas
-  unifyWithEta mode fc env (VBind fcx nx bx scx) (VBind fcy ny by scy)
-      = unifyBothBinders mode fc env fcx nx bx scx fcy ny by scy
-  unifyWithEta mode fc env x@(VLam fcx nx cx ix tx scx) y@(VLam fcy ny cy iy ty scy)
+  unifyWithEta mode fc env x@(VBind _ nx (Lam fcx cx ix tx) scx) y@(VBind _ ny (Lam _ cy iy ty) scy)
       = if cx /= cy
           then convertError fc env x y
           else do ct <- unify (lower mode) fc env tx ty
@@ -1226,8 +1224,8 @@ mutual
                   txtm <- quote env tx
                   let env' : Env Term (_ :< nx)
                            = env :< Lam fcx cx Explicit txtm
-                  tscx <- scx (mkArgVar fc var)
-                  tscy <- scy (mkArgVar fc var)
+                  tscx <- scx $ pure $ mkArgVar fc var
+                  tscy <- scy $ pure $ mkArgVar fc var
                   tmx <- quote env tscx
                   tmy <- quote env tscy
                   logTerm "unify.binder" 10 "Unifying lambda scope" tmx
@@ -1238,7 +1236,7 @@ mutual
                   pure (union ct cs')
 
   -- Eta rules
-  unifyWithEta mode fc env tmx@(VLam fcx x cx ix tx scx) tmy
+  unifyWithEta mode fc env tmx@(VBind fcx x (Lam bfc cx ix tx) scx) tmy
         = do logNF "unify" 10 "EtaR" env tmx
              logNF "unify" 10 "...with" env tmy
              if isHoleApp tmy
@@ -1247,13 +1245,13 @@ mutual
                         else pure success
                 else do domty <- quote env tx
                         etay <- nf env
-                                  $ Bind fcx x (Lam fcx cx Explicit domty)
+                                  $ Bind fcx x (Lam bfc cx Explicit domty)
                                   $ App fcx (weaken !(quote env tmy))
                                             cx
                                             (Local fcx Nothing 0 First)
                         logNF "unify" 10 "Expand" env etay
                         unify (lower mode) fc env tmx etay
-  unifyWithEta mode fc env tmx tmy@(VLam fcy y cy iy ty scy)
+  unifyWithEta mode fc env tmx tmy@(VBind fcy y (Lam bfc cy iy ty) scy)
         = do logNF "unify" 10 "EtaR" env tmx
              logNF "unify" 10 "...with" env tmy
              if isHoleApp tmx
@@ -1262,12 +1260,14 @@ mutual
                         else pure success
                 else do domty <- quote env ty
                         etax <- nf env
-                                  $ Bind fcy y (Lam fcy cy Explicit domty)
+                                  $ Bind fcy y (Lam bfc cy Explicit domty)
                                   $ App fcy (weaken !(quote env tmx))
                                             cy
                                             (Local fcy Nothing 0 First)
                         logNF "unify" 10 "Expand" env etax
                         unify (lower mode) fc env etax tmy
+  unifyWithEta mode fc env (VBind fcx nx bx scx) (VBind fcy ny by scy)
+      = unifyBothBinders mode fc env fcx nx bx scx fcy ny by scy
   unifyWithEta mode fc env x y
       = unifyNoEta mode fc env x y
 
