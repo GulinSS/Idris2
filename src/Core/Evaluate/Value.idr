@@ -100,12 +100,6 @@ Spine vars = SnocList (SpineEntry vars)
 -- a Value
 public export
 data Value : Form -> SnocList Name -> Type where
-     -- Lambdas - we also have a value for binders in general, but
-     -- lambdas are the most common, so save the pattern match/indirection
-     VLam : FC -> (x : Name) -> RigCount -> PiInfo (Glued vars) ->
-            (ty : Glued vars) ->
-            (sc : Glued vars -> Core (Glued vars)) ->
-            Value f vars
      VBind : FC -> (x : Name) -> Binder (Glued vars) ->
              (sc : Core (Glued vars) -> Core (Glued vars)) ->
              Value f vars
@@ -149,7 +143,6 @@ vRef fc nt n = VApp fc nt n [<] (pure Nothing)
 
 export
 getLoc : Value f vars -> FC
-getLoc (VLam fc x y z ty sc) = fc
 getLoc (VBind fc x y sc) = fc
 getLoc (VApp fc x y sx z) = fc
 getLoc (VLocal fc idx p sx) = fc
@@ -190,8 +183,8 @@ expand' cases v@(VApp fc nt n sp val)
             else pure (believe_me v)
   where
     blockedApp : forall f . Value f vars -> Core Bool
-    blockedApp (VLam fc _ _ _ _ sc)
-        = blockedApp !(sc (VErased fc Placeholder))
+    blockedApp (VBind fc _ (Lam {}) sc)
+        = blockedApp !(sc $ pure $ VErased fc Placeholder)
     blockedApp (VCase _ PatMatch _ _ _ _) = pure True
     blockedApp (VPrimOp{}) = pure True
     blockedApp _ = pure False
@@ -245,7 +238,6 @@ data VCaseAlt : SnocList Name -> Type where
 -- Show what form a value has, for debugging
 export
 qshow : Value f vars -> String
-qshow (VLam{}) = "Lam"
 qshow (VBind{}) = "Bind"
 qshow (VApp _ _ n _ _) = "App " ++ show n
 qshow (VLocal{}) = "Local"
