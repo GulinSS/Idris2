@@ -225,7 +225,6 @@ mutual
   mightMatch target (VBind fc n (Pi _ _ _ _) sc)
       = mightMatchD target !(expand !(sc (pure (VErased fc Placeholder))))
   mightMatch (VBind{}) (VBind{}) = pure Poly -- lambdas might match
-  mightMatch (VLam{}) (VLam{}) = pure Poly -- lambdas might match
   mightMatch (VTCon _ n a args) (VTCon _ n' a' args')
       = if n == n'
            then do amatch <- mightMatchArgs (map value args) (map value args')

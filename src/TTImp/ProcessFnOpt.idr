@@ -122,11 +122,6 @@ processFnOpt fc _ ndef (SpecArgs ns)
 
       getDeps : Bool -> NF [<] -> NameMap Bool ->
                 Core (NameMap Bool)
-      getDeps inparam (VLam _ x _ _ ty sc) ns
-          = do defs <- get Ctxt
-               ns' <- getDeps False !(expand ty) ns
-               sc' <- expand !(sc (VErased fc Placeholder))
-               getDeps False sc' ns
       getDeps inparam (VBind _ x (Pi _ _ _ pty) sc) ns
           = do defs <- get Ctxt
                ns' <- getDeps inparam !(expand pty) ns

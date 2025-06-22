@@ -161,13 +161,13 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
 --   quoteGen : {bound, vars : _} ->
 --              Strategy -> Bounds bound -> Env Term vars ->
 --              Value f vars -> Core (Term (vars ++ bound))
-  quoteGen bounds env (VLam fc x c p ty sc) s
+  quoteGen bounds env (VBind fc x (Lam bfc c p ty) sc) s
       = do var <- genName "qv"
            p' <- quotePi s bounds env p
            ty' <- quoteGen bounds env ty s
            sc' <- quoteGen (Add x var bounds) env
-                             !(sc (mkTmp fc var)) s
-           pure (Bind fc x (Lam fc c p' ty') sc')
+                             !(sc $ pure $ mkTmp bfc var) s
+           pure (Bind fc x (Lam bfc c p' ty') sc')
   quoteGen bounds env (VBind fc x b sc) s
       = do var <- genName "qv"
            let s' = case s of
@@ -235,13 +235,12 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
                         else quoteGen bounds env v s
     where
       isBinder : forall f . Value f vars -> Core Bool
-      isBinder (VLam fc _ _ _ _ sc) = pure True
       isBinder (VBind{}) = pure True
       isBinder _ = pure False
 
       blockedApp : forall f . Value f vars -> Core Bool
-      blockedApp (VLam fc _ _ _ _ sc)
-          = blockedApp !(sc (VErased fc Placeholder))
+      blockedApp (VBind fc _ (Lam {}) sc)
+          = blockedApp !(sc $ pure $ VErased fc Placeholder)
       blockedApp (VCase _ PatMatch _ _ _ _) = pure True
       blockedApp (VPrimOp{}) = pure True
       blockedApp _ = pure False

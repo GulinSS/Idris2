@@ -290,9 +290,8 @@ mutual
   -- If we're Guarded and find a Delay, continue with the argument as InDelay
   findSC Guarded eqs pats (VDelay _ LInf _ tm)
       = findSC InDelay eqs pats tm
-  findSC g eqs args (VLam fc x c p ty sc)
-      = do v <- nextVar
-           findSC g eqs args !(sc v)
+  findSC g eqs args (VBind _ _ (Lam _ _ _ _) sc)
+      = findSC g eqs args !(sc nextVar)
   findSC g eqs args (VBind fc n b sc)
       = do v <- nextVar
            pure $ !(findSCbinder b) ++ !(findSC g eqs args !(sc (pure v)))
@@ -610,9 +609,9 @@ mutual
 findSCTop : {auto c : Ref Ctxt Defs} ->
             {auto v : Ref SCVar Int} ->
             Nat -> List (Nat, Glued [<]) -> Glued [<] -> Core (List SCCall)
-findSCTop i args (VLam fc x c p ty sc)
+findSCTop i args (VBind _ _ (Lam _ _ _ _) sc)
     = do arg <- nextVar
-         findSCTop (i + 1) ((i, arg) :: args) !(sc arg)
+         findSCTop (i + 1) ((i, arg) :: args) !(sc $ pure arg)
 findSCTop i args def = findSC Toplevel [] (reverse args) def
 
 getSC : {auto c : Ref Ctxt Defs} ->
