@@ -306,6 +306,8 @@ unifySpine mode fc env (cxs :< ex) (cys :< ey)
          -- reduce any newly solved holes
          cx' <- nf env !(quote env !(value ex))
          cy' <- nf env !(quote env !(value ey))
+         -- Do later arguments first, since they may depend on earlier
+         -- arguments and use their solutions.
          cs <- unify (lower mode) fc env cx' cy'
          res <- unifySpine mode fc env cxs cys
          pure (union cs res)
@@ -569,39 +571,6 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
 
     updateIVars : {vs, newvars : _} ->
                   IVars vs newvars -> Term newvars -> Maybe (Term vs)
-
-    updateForced : {vs, newvars : _} ->
-                   IVars vs newvars -> List (Var newvars, Term newvars) ->
-                   Maybe (List (Var vs, Term vs))
-    updateForced ivs [] = Just []
-    updateForced ivs ((v, tm) :: ts)
-        = case updateIVar ivs v of
-               Nothing => updateForced ivs ts
-               Just v' => Just ((v', !(updateIVars ivs tm)) ::
-                                   !(updateForced ivs ts))
-
-    updateIScope : {vs, newvars : _} ->
-                   IVars vs newvars -> CaseScope newvars -> Maybe (CaseScope vs)
-    updateIScope ivs (RHS fs tm)
-        = Just (RHS !(updateForced ivs fs) !(updateIVars ivs tm))
-    updateIScope ivs (Arg c x sc)
-        = Just (Arg c x !(updateIScope (ICons (Just (MkVar First))
-                                            (weaken ivs)) sc))
-
-    updateIAlts : {vs, newvars : _} ->
-                  IVars vs newvars -> CaseAlt newvars -> Maybe (CaseAlt vs)
-    updateIAlts ivs (ConCase fc n t sc)
-        = Just (ConCase fc n t !(updateIScope ivs sc))
-    updateIAlts ivs (DelayCase fc ty arg rhs)
-        = let ivs' = ICons (Just (MkVar First)) $
-                     ICons (Just (MkVar (Later First))) $
-                     weaken (weaken ivs) in
-              Just (DelayCase fc ty arg !(updateIVars ivs' rhs))
-    updateIAlts ivs (ConstCase fc c rhs)
-        = Just (ConstCase fc c !(updateIVars ivs rhs))
-    updateIAlts ivs (DefaultCase fc rhs)
-        = Just (DefaultCase fc !(updateIVars ivs rhs))
-
     updateIVars ivs (Local fc r idx p)
         = do MkVar p' <- updateIVar ivs (MkVar p)
              Just (Local fc r _ p')
@@ -645,6 +614,39 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
     updateIVars ivs (Case fc t c sc scty alts)
         = Just (Case fc t c !(updateIVars ivs sc) !(updateIVars ivs scty)
                       !(traverse (updateIAlts ivs) alts))
+        where
+            updateForced : {vs, newvars : _} ->
+                        IVars vs newvars -> List (Var newvars, Term newvars) ->
+                        Maybe (List (Var vs, Term vs))
+            updateForced ivs [] = Just []
+            updateForced ivs ((v, tm) :: ts)
+                = case updateIVar ivs v of
+                    Nothing => updateForced ivs ts
+                    Just v' => Just ((v', !(updateIVars ivs tm)) ::
+                                        !(updateForced ivs ts))
+
+            updateIScope : {vs, newvars : _} ->
+                        IVars vs newvars -> CaseScope newvars -> Maybe (CaseScope vs)
+            updateIScope ivs (RHS fs tm)
+                = Just (RHS !(updateForced ivs fs) !(updateIVars ivs tm))
+            updateIScope ivs (Arg c x sc)
+                = Just (Arg c x !(updateIScope (ICons (Just (MkVar First))
+                                                    (weaken ivs)) sc))
+
+            updateIAlts : {vs, newvars : _} ->
+                        IVars vs newvars -> CaseAlt newvars -> Maybe (CaseAlt vs)
+            updateIAlts ivs (ConCase fc n t sc)
+                = Just (ConCase fc n t !(updateIScope ivs sc))
+            updateIAlts ivs (DelayCase fc ty arg rhs)
+                = let ivs' = ICons (Just (MkVar First)) $
+                            ICons (Just (MkVar (Later First))) $
+                            weaken (weaken ivs) in
+                    Just (DelayCase fc ty arg !(updateIVars ivs' rhs))
+            updateIAlts ivs (ConstCase fc c rhs)
+                = Just (ConstCase fc c !(updateIVars ivs rhs))
+            updateIAlts ivs (DefaultCase fc rhs)
+                = Just (DefaultCase fc !(updateIVars ivs rhs))
+
     updateIVars ivs (TDelayed fc r arg)
         = Just (TDelayed fc r !(updateIVars ivs arg))
     updateIVars ivs (TDelay fc r ty arg)
@@ -924,9 +926,16 @@ mutual
   solveHole fc mode env mname mref margs margs' locs submv solfull stm solnf
       = do defs <- get Ctxt
            ust <- get UST
+           -- if the terms are the same, this isn't a solution
+           -- but they are already unifying, so just return
            if solutionHeadSame !(expand solnf) || inNoSolve mref (noSolve ust)
               then pure $ Just success
-              else do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
+              else -- Rather than doing the occurs check here immediately,
+                   -- we'll wait until all metavariables are resolved, and in
+                   -- the meantime look out for cycles when normalising (which
+                   -- is cheap enough because we only need to look out for
+                   -- metavariables)
+                   do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
                            | Nothing => throw (InternalError ("Can't happen: Lost hole " ++ show mname))
                       progress <- tryInstantiate fc mode env mname mref (length margs) hdef (toList locs) solfull stm
                       pure $ toMaybe progress (solvedHole mref)
@@ -961,7 +970,8 @@ mutual
            let pargs = if isLin margs' then margs else margs ++ margs'
            defs <- get Ctxt
            logNF "elab" 10 ("Trying to solve " ++ show mname ++ " with") env tmnf
-           case !(patternEnv env pargs) of
+           patEnv <- patternEnv env pargs
+           case patEnv of
                 Nothing =>
                   do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
                         | _ => postponePatVar swap mode fc env mname mref args sp tmnf
@@ -977,6 +987,10 @@ mutual
                          | wat => postponeS {f=Normal} swap fc mode "Delayed hole" env
                                           (VMeta fc mname mref args sp (pure Nothing))
                                           tmnf
+                     -- let qopts = MkQuoteOpts False False
+                                             -- (Just defs.options.elabDirectives.nfThreshold)
+                     -- Which means topLevel=False, patterns=False
+                     -- Is it same as BlockApp?
                      tm <- quote env tmnf
                      Just tm <- occursCheck fc env mode mname tm
                          | _ => postponeS {f=Normal} swap fc mode "Occurs check failed" env
@@ -1453,18 +1467,6 @@ retry mode c
                              [] => do deleteConstraint c
                                       pure cs
                              _ => pure cs
-  where
-    definedN : Name -> Core Bool
-    definedN n@(NS _ (MN _ _)) -- a metavar will only ever be a MN
-        = do defs <- get Ctxt
-             Just gdef <- lookupCtxtExact n (gamma defs)
-                  | _ => pure False
-             case definition gdef of
-                  Hole _ _ => pure (invertible gdef)
-                  BySearch _ _ _ => pure False
-                  Guess _ _ _ => pure False
-                  _ => pure True
-    definedN _ = pure True
 
 delayMeta : {vars : _} ->
             LazyReason -> Nat -> Term vars -> Term vars -> Term vars
@@ -1542,6 +1544,9 @@ retryGuess mode smode (hid, (loc, hname))
                                            AddForce r => pure $ forceMeta r envb tm
                                            AddDelay r =>
                                               do logTerm "unify.retry" 5 "Retry Delay" tm
+                                                 -- Here ty <- Core.GetType.getType Env.empty tm
+                                                 -- but Yaffle has no it
+                                                 -- Edwin B.: GetType was always a bit of a hack. I don't think it's needed.
                                                  pure $ delayMeta r envb (type def) tm
                                   let gdef = { definition := Function reducePI tm' tm' Nothing } def
                                   logTerm "unify.retry" 5 ("Resolved " ++ show hname) tm'
@@ -1553,6 +1558,9 @@ retryGuess mode smode (hid, (loc, hname))
                                            AddForce r => pure $ forceMeta r envb tm
                                            AddDelay r =>
                                               do logTerm "unify.retry" 5 "Retry Delay (constrained)" tm
+                                                 -- Here ty <- Core.GetType.getType Env.empty tm
+                                                 -- but Yaffle has no it
+                                                 -- Edwin B.: GetType was always a bit of a hack. I don't think it's needed.
                                                  pure $ delayMeta r envb (type def) tm
                                      let gdef = { definition := Guess tm' envb newcs } def
                                      ignore $ addDef (Resolved hid) gdef
@@ -1674,7 +1682,6 @@ checkDots
              y <- nf env yold
              logNF "unify.constraint" 10 "Dot" env y
              logNF "unify.constraint" 10 "  =" env x
-
              -- A dot is okay if the constraint is solvable *without solving
              -- any additional holes*
              ust <- get UST
@@ -1684,6 +1691,7 @@ checkDots
                    -- if indeed it is still a hole
                    (i, _) <- getPosition n (gamma defs)
                    oldholen <- getHoleName (Meta fc n i [])
+
                    -- Check that what was given (x) matches what was
                    -- solved by unification (y).
                    -- In 'InMatch' mode, only metavariables in 'x' can
@@ -1691,6 +1699,7 @@ checkDots
                    -- must be complete.
                    cs <- unify inMatch fc env x y
                    defs <- get Ctxt
+
                    -- If the name standing for the dot wasn't solved
                    -- earlier, but is now (even with another metavariable)
                    -- this is bad (it most likely means there's a non-linear

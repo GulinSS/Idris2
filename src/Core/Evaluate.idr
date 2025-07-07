@@ -56,6 +56,13 @@ parameters {auto c : Ref Ctxt Defs}
            quoteHoles env val
 
   export
+  normaliseArgHoles : Env Term free -> Term free -> Core (Term free)
+  normaliseArgHoles env tm
+      -- = quote env !(nfOpts withArgHoles defs env tm)
+      -- The most similar level of normalization
+      = quote env !(nfKeepLet env tm)
+
+  export
   normaliseLHS : Env Term vars -> Term vars -> Core (Term vars)
   normaliseLHS env tm
       = do val <- nfLHS env tm
@@ -71,14 +78,11 @@ parameters {auto c : Ref Ctxt Defs}
   export
   normaliseScope : Env Term vars -> Term vars -> Core (Term vars)
   normaliseScope env (Bind fc n b sc)
-      = pure $ Bind fc n b !(normaliseScope (env :< b) sc)
+    = pure $ Bind fc n b
+                  !(normaliseScope
+                   -- use Lam because we don't want it reducing in the scope
+                   (env :< Lam fc (multiplicity b) Explicit (binderType b)) sc)
   normaliseScope env tm = normalise env tm
-
-  export
-  normaliseHolesScope : Env Term vars -> Term vars -> Core (Term vars)
-  normaliseHolesScope env (Bind fc n b sc)
-      = pure $ Bind fc n b !(normaliseHolesScope (env :< b) sc)
-  normaliseHolesScope env tm = normaliseHoles env tm
 
   export
   getArityVal : NF vars -> Core Nat

@@ -944,6 +944,15 @@ allM f (x :: xs)
          then allM f xs
          else pure False
 
+namespace SnocList
+  export
+  allM : (a -> Core Bool) -> SnocList a -> Core Bool
+  allM f [<] = pure False
+  allM f (xs :< x)
+      = if !(f x)
+          then allM f xs
+          else pure False
+
 export
 filterM : (a -> Core Bool) -> List a -> Core (List a)
 filterM p [] = pure []

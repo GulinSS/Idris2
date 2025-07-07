@@ -242,6 +242,9 @@ recoverableErr (CantSolveEq fc gam env l r)
        pure ok
 recoverableErr (BadDotPattern _ _ ErasedArg _ _) = pure True
 recoverableErr (CyclicMeta _ _ _ _) = pure True
+-- Don't mark a case as impossible because we can't see the constructor.
+recoverableErr (InvisibleName _ _ _) = pure True
+
 recoverableErr (AllFailed errs)
     = anyM recoverableErr (map snd errs)
 recoverableErr (WhenUnifying _ _ _ _ _ err)
@@ -785,7 +788,7 @@ calcRefs rt at fn
          let Nothing = refs
               | Just _ => pure () -- already done
          let tree : Term [<] = if rt then tree_rt else tree_ct
-         let metas = TT.getMetas tree
+         let metas = getMetas tree
          traverse_ addToSave (keys metas)
          let refs_all = TT.addRefs False at metas tree
          refs <- ifThenElse rt
@@ -878,8 +881,10 @@ mkRunTime fc (ct, n)
         = do lhs_erased <- erase linear env lhs
              -- Partially evaluate RHS here, where appropriate
              rhs' <- applyTransforms env rhs
-             -- Yaffle has no it
-             -- rhs' <- applySpecialise env spec rhs'
+             -- Yaffle has no it but it
+             -- Edwin B.: Would expect specialisation to be done with more control by traversing the Value structure directly.
+             -- rhs' <- TTImp.PartialEval.applySpecialise env spec rhs'
+             linearCheck fc linear env rhs'
              rhs_erased <- erase linear env rhs'
              pure (MkClause env lhs_erased rhs_erased)
 
@@ -1048,7 +1053,7 @@ processDef opts nest env fc n_in cs_in
 
          md <- get MD -- don't need the metadata collected on the coverage check
 
-         cov <- logTime 3 ("Checking Coverage " ++ show n) $ checkCoverage nidx ty mult cs
+         cov <- logTime 3 ("Checking Coverage " ++ show n) $ checkCoverage ct nidx ty mult cs
          setCovering fc n cov
          put MD md
 
@@ -1134,17 +1139,17 @@ processDef opts nest env fc n_in cs_in
                           pure Nothing)
     getClause (Right c) = pure (Just c)
 
-    checkCoverage : Int -> ClosedTerm -> RigCount ->
+    checkCoverage : CaseType -> Int -> ClosedTerm -> RigCount ->
                     List (Either RawImp Clause) ->
                     Core Covering
-    checkCoverage n ty mult cs
+    checkCoverage ct n ty mult cs
         = do covcs' <- traverse getClause cs -- Make stand in LHS for impossible clauses
              log "declare.def" 5 $ unlines
                $ "Using clauses :"
                :: map (("  " ++) . show) !(traverse toFullNames covcs')
              let covcs = mapMaybe id covcs'
              (ctree, _) <-
-                 getPMDef fc PatMatch (CompileTime mult) (Resolved n) ty covcs
+                 getPMDef fc ct (CompileTime mult) (Resolved n) ty covcs
              logC "declare.def" 3 $ do pure $ "Working from " ++ show !(toFullNames ctree)
              missCase <- if any catchAll covcs
                             then do logC "declare.def" 3 $ do pure "Catch all case in \{show !(getFullName (Resolved n))}"

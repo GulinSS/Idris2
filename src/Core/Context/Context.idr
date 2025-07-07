@@ -280,7 +280,7 @@ public export
 record SCCall where
      constructor MkSCCall
      fnCall : Name -- Function called
-     fnArgs : List (Maybe (Nat, SizeChange))
+     fnArgs : Matrix SizeChange
         -- relationship to arguments of calling function; argument position
         -- (in the calling function), and how its size changed in the call.
         -- 'Nothing' if it's not related to any of the calling function's

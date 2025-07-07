@@ -130,9 +130,8 @@ updatePats {todo = pvar :: ns} env (VBind fc _ (Pi _ c _ farg) fsc) (p :: ps)
          Unknown =>
             do defs <- get Ctxt
                empty <- clearDefs defs
-               fsc' <- expand !(fsc (pure (vRef fc Bound pvar)))
                pure ({ argType := Known c !(quote env farg) } p
-                          :: !(updatePats env fsc' ps))
+                          :: !(updatePats env !(expand !(fsc (pure (vRef fc Bound pvar)))) ps))
          _ => pure (p :: ps)
 updatePats env nf (p :: ps)
   = case argType p of
@@ -172,9 +171,9 @@ substInPatInfo {pvar} {vars} fc n tm p ps
                 let env = mkEnv fc vars
                 case !(nf env (substName n tm fty)) of
                      VBind pfc _ (Pi _ c _ farg) fsc =>
-                       do fsc' <- expand !(fsc (pure (vRef pfc Bound pvar)))
-                          pure ({ argType := Known c !(quote env farg) } p,
-                                 !(updatePats env fsc' ps))
+                       pure ({ argType := Known c !(quote env farg) } p,
+                                 !(updatePats env
+                                        !(expand !(fsc (pure (vRef pfc Bound pvar)))) ps))
                      _ => pure (p, ps)
            Unknown => pure (p, ps)
 
@@ -1557,7 +1556,7 @@ makePMDef fc ct phase fn ty clauses
          log "compile.casetree.clauses" 25 $
            "Extra defaults: " ++ (show extraDefaults)
          let unreachable = getUnreachable 0 (allRHS \\ extraDefaults) clauses
-         pure (_ ** (treeTm, unreachable))
+         pure (args' ** (treeTm, unreachable))
   where
     getUnreachable : Int -> List Int -> List Clause -> List Clause
     getUnreachable i is [] = []
@@ -1568,22 +1567,11 @@ makePMDef fc ct phase fn ty clauses
 
     labelPat : Int -> List a -> List (String, a)
     labelPat i [] = []
-    labelPat i (x :: xs) = ("PV" ++ show i ++ ":", x) :: labelPat (i + 1) xs
-
-    mkSubstEnv : Int -> String -> Env Term vars -> SubstEnv vars [<]
-    mkSubstEnv i pname [<] = Lin
-    mkSubstEnv i pname (vs :< v)
-        = mkSubstEnv (i + 1) pname vs :< Ref fc Bound (MN pname i)
-
-    close : {vars : _} ->
-            Env Term vars -> String -> Term vars -> ClosedTerm
-    close {vars} env pname tm
-        = substs (mkSizeOf vars) (mkSubstEnv 0 pname env)
-                                 (rewrite appendLinLeftNeutral vars in tm)
+    labelPat i (x :: xs) = ("pat" ++ show i ++ ":", x) :: labelPat (i + 1) xs
 
     toClosed :  (String, Clause) -> (ClosedTerm, ClosedTerm)
     toClosed  (pname, MkClause env lhs rhs)
-        = (close env pname lhs, close env pname rhs)
+        = (close fc env pname lhs, close fc env pname rhs)
 
 -- Returns the case tree, and a list of the clauses that aren't reachable
 export
@@ -1600,14 +1588,14 @@ getPMDef fc ct p n ty cs
 --          nty <- normaliseBinders [<] ty
 --          let (tyargs ** env) = mkEnv [<] nty
 --          let Just lenOK = areVarsCompatible args tyargs
-         let tm = bindLams _ tree
+         let tm = bindLams args tree
 --              | Nothing => throw (CaseCompile fc n CantResolveType)
          pure (tm, missing)
    where
-     mkEnv : {vars : _} -> Env Term vars -> Term vars ->
-             (args ** Env Term args)
-     mkEnv env (Bind _ x b@(Pi pfc c p ty) sc) = mkEnv (env :< b) sc
-     mkEnv env tm = (_ ** env)
+    --  mkEnv : {vars : _} -> Env Term vars -> Term vars ->
+    --          (args ** Env Term args)
+    --  mkEnv env (Bind _ x b@(Pi pfc c p ty) sc) = mkEnv (env :< b) sc
+    --  mkEnv env tm = (_ ** env)
 
      bindLams : (args' : _) ->
                 Term args' -> Term [<]

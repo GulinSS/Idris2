@@ -136,9 +136,7 @@ namespace Resugared
       sc <- prettyScope env sc
       pure $ annotate (DCon (Just n)) (pretty0 n) <++> sc
   prettyAlt env (DelayCase _ _ arg tm) = do
-      tm <- prettyTree (env :<
-              PVar emptyFC top Explicit (Erased emptyFC Placeholder) :<
-              PVar emptyFC top Explicit (Erased emptyFC Placeholder)) tm
+      tm <- prettyTree (mkEnvOnto emptyFC [_,_] env) tm
       pure $ keyword "Delay" <++> pretty0 arg
         <++> fatArrow
         <+> Union (spaces 1 <+> tm) (nest 2 (hardline <+> tm))
@@ -157,7 +155,7 @@ namespace Resugared
                   _ => do ty <- resugar env ty
                           pure (space <+> keyword ":" <++> pretty ty)
       alts <- assert_total (traverse (prettyAlt env) alts)
-      pure $ case_ <++> annotate Bound (byShow sc) <+> ann <++> of_
+      pure $ case_ <++> byShow sc <+> ann <++> of_
          <+> nest 2 (hardline <+> vsep alts)
   prettyTree env tm = pretty <$> resugar env tm
 

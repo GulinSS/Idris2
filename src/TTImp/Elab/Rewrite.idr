@@ -100,6 +100,10 @@ elabRewrite loc env expected rulety
                           (refsToLocals (Add parg parg None) rwexp_sc)
          let predty = Bind loc parg (Pi loc top Explicit ltyTm)
                           (TType loc (MN "top" 0))
+         -- Yaffle has no it:
+         -- gpredty <- Core.GetType.getType env pred
+         -- predty <- getTerm gpredty
+         -- Edwin B.: GetType was always a bit of a hack. I don't think it's needed.
 
          -- if the rewritten expected type converts with the original,
          -- then the rewrite did nothing, which is an error

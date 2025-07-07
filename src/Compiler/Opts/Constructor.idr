@@ -96,7 +96,6 @@ natHack =
     ]
 
 -- get all builtin transformations
-export
 builtinMagic : forall vars. CExp vars -> Maybe (CExp vars)
 builtinMagic = magic natHack
 
@@ -148,14 +147,12 @@ nat _ = pure Nothing
 =========
 -}
 
-export
 enumTag : Nat -> Int -> Constant
 enumTag k i =
   if      k <= 0xff   then B8 (cast i)
   else if k <= 0xffff then B16 (cast i)
   else                     B32 (cast i)
 
-export
 enum : CExp vars -> Maybe (CExp vars)
 enum (CCon fc _ (ENUM n) (Just tag) []) = Just (CPrimVal fc (enumTag n tag))
 enum (CConCase fc sc alts def) = do
@@ -175,7 +172,6 @@ enum t = Nothing
 -}
 
 -- remove pattern matches on unit
-export
 unitTree : Ref NextMN Int => CExp vars -> Core (Maybe (CExp vars))
 unitTree exp@(CConCase fc sc alts def) =
     let [MkConAlt _ UNIT _ (CRHS e)] = alts
@@ -277,7 +273,6 @@ parameters (try : forall vars. CExp vars -> Core (CExp vars))
     rewriteCConAlt (MkConAlt n ci t e) = MkConAlt n ci t <$> rewriteScope e
     rewriteCConstAlt (MkConstAlt x e) = MkConstAlt x <$> rewriteCExp e
 
-export
 sequence : List (forall vars. CExp vars -> Core (Maybe (CExp vars))) -> CExp vars -> Core (CExp vars)
 sequence [] e = pure e
 sequence (x :: xs) e = do

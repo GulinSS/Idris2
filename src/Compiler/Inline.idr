@@ -548,6 +548,19 @@ inline n (MkFun args def)
     = pure $ MkFun args !(doEval n def)
 inline n d = pure d
 
+-- Move any lambdas in the body of the definition into the lhs list of vars.
+-- Annoyingly, the indices will need fixing up because the order in the top
+-- level definition goes left to right (i.e. first argument has lowest index,
+-- not the highest, as you'd expect if they were all lambdas).
+-- mergeLambdas : (args : Scope) -> CExp args -> (args' ** CExp args')
+Compiler.CompileExpr.mergeLambdas args (CLam fc x sc)
+    = let (args' ** (s, env, exp')) = getLams zero 0 ScopeEmpty (CLam fc x sc)
+          expNs = substs s env exp'
+          newArgs = getNewArgs env
+          expLocs = refsToLocals (mkBounds newArgs) expNs in
+          (_ ** expLocs)
+Compiler.CompileExpr.mergeLambdas args exp = (args ** exp)
+
 -- merge lambdas from expression into top level arguments
 mergeLam : {auto c : Ref Ctxt Defs} ->
            CDef -> Core CDef

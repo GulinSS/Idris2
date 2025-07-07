@@ -375,14 +375,6 @@ weakenUsed {outer} (MkUsed xs) =
           rewrite plusCommutative (length vars) (length outer) in
           replicate (length outer) False ++ xs)
 
-weakenUsedFish : {outer : _} -> Used vars -> Used (vars <>< outer)
-weakenUsedFish {outer} (MkUsed xs) =
-    do rewrite fishAsSnocAppend vars outer
-       MkUsed $ do rewrite lengthHomomorphism vars (cast outer)
-                   rewrite Extra.lengthDistributesOverFish [<] outer
-                   rewrite plusCommutative (length vars) (length outer)
-                   replicate (length outer) False ++ xs
-
 contractUsed : (Used (vars :< x)) -> Used vars
 contractUsed (MkUsed xs) = MkUsed (tail xs)
 

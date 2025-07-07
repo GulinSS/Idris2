@@ -52,7 +52,13 @@ prettyCon x ci mtag
       ]
 
 prettyName : Name -> Doc IdrisSyntax
+-- prettyName : {auto c : Ref Ctxt Defs} ->
+--             Name -> Core (Doc IdrisSyntax)
 prettyName = pretty0
+-- prettyName nm
+--   = pure $ ifThenElse (fullNamespace !(getPPrint))
+--             (pretty0 nm)
+--             (cast $ prettyOp True $ dropNS nm)
 
 mutual
 

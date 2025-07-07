@@ -395,7 +395,12 @@ metaVarI : {vars : _} ->
            Env Term vars -> Name -> Term vars -> Core (Int, Term vars)
 metaVarI fc rig env n ty
     = do defs <- get Ctxt
-         newMeta fc rig env n ty (Hole (length env) (holeInit False)) True
+         tynf <- expand !(nf env ty)
+         let hinf = case tynf of
+                         VMeta{} _ =>
+                              { precisetype := True } (holeInit False)
+                         _ => holeInit False
+         newMeta fc rig env n ty (Hole (length env) hinf) True
 
 export
 argVar : {vars : _} ->

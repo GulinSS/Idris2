@@ -175,6 +175,10 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
                             (maybe (Bind fc scrn (Pi fc caseRig Explicit scrty)
                                        (weaken caseretty))
                                    (const caseretty) splitOn)
+        --  -- If we can normalise the type without the result being excessively
+        --  -- big do it. It's the depth of stuck applications - 10 is already
+        --  -- pretty much unreadable!
+        --  casefnty <- normaliseSizeLimit defs 10 ScopeEmpty casefnty
          (erasedargs, _) <- findErased casefnty
 
          logEnv "elab.case" 10 "Case env" env
@@ -223,6 +227,16 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
          let olddelayed = delayedElab ust
          put UST ({ delayedElab := [] } ust)
          processDecl [InCase] nest' ScopeEmpty (IDef fc casen alts')
+
+         -- If there's no duplication of the scrutinee in the block,
+         -- flag it as inlinable.
+         -- This will be the case either if the scrutinee is a variable, in
+         -- which case the duplication won't hurt, or if there's no variable
+         -- duplicated in the body (what ghc calls W-safe)
+         -- We'll check that second condition later, after generating the
+         -- runtime (erased) case trees
+         let inlineOK = maybe False (const True) splitOn
+         when inlineOK $ setFlag fc casen Inline
 
          -- Set the case block to always reduce, so we get the core 'Case'
          updateDef casen
@@ -327,6 +341,7 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
               args' = mkSplit splitOn lhs args
               lhs' = apply (IVar loc' casen) args' in
               ImpossibleClause loc' (applyNested nest lhs')
+
 
 export
 checkCase : {vars : _} ->

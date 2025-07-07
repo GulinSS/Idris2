@@ -232,6 +232,13 @@ mutual
            else do defs <- get Ctxt
                    nm <- genMVName x
                    empty <- clearDefs defs
+               --     -- Normalise fully, but only if it's cheap enough.
+               --     -- We have to get the normal form eventually anyway, but
+               --     -- it might be too early to do it now if something is
+               --     -- blocking it and we're not yet ready to search.
+               --     metaty <- catch (quoteOpts (MkQuoteOpts False False (Just 10))
+               --                                defs env aty)
+               --                     (\err => quote empty env aty)
                    metaty <- quote env aty
                    est <- get EST
                    lim <- getAutoImplicitLimit
@@ -615,39 +622,6 @@ mutual
                                -- out the types of arguments before elaborating them
                   (expected : Maybe (Glued vars)) ->
                   Core (Term vars, Glued vars)
-  -- Invent a function type if we have extra explicit arguments but type is further unknown
-  checkAppNotFnType {vars} rig elabinfo nest env fc tm ty (n, argpos) (arg :: expargs) autoargs namedargs kr expty
-      = -- Invent a function type,  and hope that we'll know enough to solve it
-        -- later when we unify with expty
-        do logNF "elab.with" 10 "Function type" env ty
-           logTerm "elab.with" 10 "Function " tm
-           argn <- genName "argTy"
-           retn <- genName "retTy"
-           u <- uniVar fc
-           argTy <- metaVar fc erased env argn (TType fc u)
-           argTyG <- nf env argTy
-           retTy <- metaVar -- {vars = argn :: vars}
-                            fc erased env -- (Pi RigW Explicit argTy :: env)
-                            retn (TType fc u)
-           (argv, argt) <- check rig elabinfo
-                                 nest env arg (Just argTyG)
-           let fntm = App fc tm top argv
-           fnty <- nf env retTy
-           expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
-           logNF "elab.with" 10 "Expected function type" env expfnty
-           -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
-           res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
-           cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
-           let [] = constraints cres
-              | cs => do cty <- quote env expfnty
-                         ctm <- newConstant fc rig env (fst res) cty cs
-                         pure (ctm, !(nf env retTy))
-           pure res
-  -- Only non-user implicit `as` bindings are allowed to be present as arguments at this stage
-  checkAppNotFnType rig elabinfo nest env fc tm ty argdata [] autoargs namedargs kr expty
-      = if all isImplicitAs (autoargs ++ map snd (filter (not . isBindAllExpPattern . fst) namedargs))
-           then checkExp rig elabinfo env fc tm (asGlued ty) expty
-           else throw (InvalidArgs fc env (map (const (UN $ Basic "<auto>")) autoargs ++ map fst namedargs) tm)
 
   -- Check an application of 'fntm', with type 'fnty' to the given list
   -- of explicit and implicit arguments.
@@ -710,9 +684,15 @@ mutual
   checkAppWith' rig elabinfo nest env fc tm dty@(VDelayed dfc r ty) argdata expargs autoargs namedargs kr expty
       = do ty' <- expand ty
            case ty' of
-                VBind _ _ (Pi _ _ _ _) sc =>
-                  checkAppWith' rig elabinfo nest env fc (TForce dfc r tm) !(expand ty)
-                        argdata expargs autoargs namedargs kr expty
+                VBind _ _ (Pi _ _ i _) sc =>
+                  if onLHS (elabMode elabinfo)
+                    then do when (isImplicit i) $ throw (LazyImplicitFunction fc)
+                            let ([], [], []) = (expargs, autoargs, namedargs)
+                                | _ => throw (LazyPatternVar fc)
+                            (tm, gfty) <- checkAppWith' rig elabinfo nest env fc tm !(expand ty) argdata expargs autoargs namedargs kr expty
+                            fty <- quote env gfty
+                            pure (tm, !(nf env (TDelayed dfc r fty)))
+                    else checkAppWith' rig elabinfo nest env fc (TForce dfc r tm) !(expand ty) argdata expargs autoargs namedargs kr expty
                 _ => checkAppNotFnType rig elabinfo nest env fc tm dty argdata expargs autoargs namedargs kr expty
   -- If there's no more arguments given, and the plicities of the type and
   -- the expected type line up, stop
@@ -790,9 +770,42 @@ mutual
                      checkRestApp rig argRig elabinfo nest env fc
                                   tm x rigb aty sc argdata arg expargs autoargs namedargs' kr expty
   -- Invent a function type if we have extra explicit arguments but type is further unknown
-  -- Invent a function type if we have extra explicit arguments but type is further unknown
   checkAppWith' rig elabinfo nest env fc tm ty argdata expargs autoargs namedargs kr expty
       = checkAppNotFnType rig elabinfo nest env fc tm ty argdata expargs autoargs namedargs kr expty
+
+  -- Invent a function type if we have extra explicit arguments but type is further unknown
+  checkAppNotFnType {vars} rig elabinfo nest env fc tm ty (n, argpos) (arg :: expargs) autoargs namedargs kr expty
+      = -- Invent a function type,  and hope that we'll know enough to solve it
+        -- later when we unify with expty
+        do logNF "elab.with" 10 "Function type" env ty
+           logTerm "elab.with" 10 "Function " tm
+           argn <- genName "argTy"
+           retn <- genName "retTy"
+           u <- uniVar fc
+           argTy <- metaVar fc erased env argn (TType fc u)
+           argTyG <- nf env argTy
+           retTy <- metaVar -- {vars = argn :: vars}
+                            fc erased env -- (Pi RigW Explicit argTy :: env)
+                            retn (TType fc u)
+           (argv, argt) <- check rig elabinfo
+                                 nest env arg (Just argTyG)
+           let fntm = App fc tm top argv
+           fnty <- nf env retTy
+           expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
+           logNF "elab.with" 10 "Expected function type" env expfnty
+           -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
+           res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
+           cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
+           let [] = constraints cres
+              | cs => do cty <- quote env expfnty
+                         ctm <- newConstant fc rig env (fst res) cty cs
+                         pure (ctm, !(nf env retTy))
+           pure res
+  -- Only non-user implicit `as` bindings are allowed to be present as arguments at this stage
+  checkAppNotFnType rig elabinfo nest env fc tm ty argdata [] autoargs namedargs kr expty
+      = if all isImplicitAs (autoargs ++ map snd (filter (not . isBindAllExpPattern . fst) namedargs))
+           then checkExp rig elabinfo env fc tm (asGlued ty) expty
+           else throw (InvalidArgs fc env (map (const (UN $ Basic "<auto>")) autoargs ++ map fst namedargs) tm)
 
   ||| Entrypoint for checkAppWith: run the elaboration first and, if we're
   ||| on the LHS and the result is an under-applied constructor then insist

@@ -59,10 +59,11 @@ parameters
         | _ => pure Nothing
       let nargs = lengthExplicitPi $ fst $ snd $ underPis (-1) ScopeEmpty (type gdef)
       new_hole_names <- uniqueHoleNames defs nargs (nameRoot hole)
-      let new_holes = IHole replFC <$> new_hole_names
-      let icons = apply (IVar replFC cons) new_holes
+      let new_holes = PHole replFC True <$> new_hole_names
+      let pcons = papply replFC (PRef replFC cons) new_holes
       res <- catch
         (do -- We're desugaring it to the corresponding TTImp
+            icons <- desugar AnyExpr (toList lhsCtxt) pcons
             ccons <- checkTerm hidx {-is this correct?-} InExpr [] (MkNested []) env icons gty
             ncons <- normaliseHoles env ccons
             icons <- unelab env ncons

@@ -370,14 +370,13 @@ allVarsNoLet (vs :< Let _ _ _ _) = map weaken (allVars vs)
 allVarsNoLet (vs :< v) = MkVar First :: map weaken (allVars vs)
 
 export
-close : FC -> String -> Env Term vars -> Term vars -> ClosedTerm
-close fc nm env tm
-  = let (s, env) = mkSubstEnv 0 env in
-    substs s env (rewrite appendLinLeftNeutral vars in tm)
-
+close : {vars : _} -> FC ->
+        Env Term vars -> String -> Term vars -> ClosedTerm
+close {vars} fc env pname tm
+    = substs (mkSizeOf vars) (mkSubstEnv 0 pname env)
+                             (rewrite appendLinLeftNeutral vars in tm)
   where
-    mkSubstEnv : Int -> Env Term vs -> (SizeOf vs, SubstEnv vs ScopeEmpty)
-    mkSubstEnv i [<] = (zero, ScopeEmpty)
-    mkSubstEnv i (vs :< v)
-       = let (s, env) = mkSubstEnv (i + 1) vs in
-         (suc s, env :< Ref fc Bound (MN nm i))
+    mkSubstEnv : {vars : _} -> Int -> String -> Env Term vars -> SubstEnv vars [<]
+    mkSubstEnv i pname [<] = Lin
+    mkSubstEnv i pname (vs :< v)
+        = mkSubstEnv (i + 1) pname vs :< Ref fc Bound (MN pname i)

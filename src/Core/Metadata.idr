@@ -361,7 +361,7 @@ normaliseTypes
              Core (NonEmptyFC, (Name, Nat, ClosedTerm))
     nfType defs (loc, (n, len, ty))
       -- See nfKeepLet at elabTermSub of TTImp.Elab
-       = pure (loc, (n, len, !(quote ScopeEmpty !(nfKeepLet ScopeEmpty ty))))
+       = pure (loc, (n, len, !(quote ScopeEmpty !(nfHoles ScopeEmpty ty))))
 
 record TTMFile where
   constructor MkTTMFile

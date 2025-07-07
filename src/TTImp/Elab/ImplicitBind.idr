@@ -116,6 +116,9 @@ export
 normaliseType : {auto c : Ref Ctxt Defs} ->
                 {free : _} ->
                 Env Term free -> Term free -> Core (Term free)
+    -- = catch (do tm' <- nfOpts withHoles defs env tm
+    --             quoteOpts (MkQuoteOpts False False (Just 5)) defs env tm')
+    --         (\err => normalise defs env tm)
 normaliseType = normaliseHoles
 
 -- For any of the 'bindIfUnsolved' - these were added as holes during

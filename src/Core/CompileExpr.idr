@@ -375,7 +375,7 @@ mutual
   forgetConAlt locs (MkConAlt n ci t sc)
       = let (args ** exp) = getConScope sc
             args' = addLocs args locs in
-            MkNConAlt n ci t (cast (conArgs args args')) (forgetExp args' exp)
+            MkNConAlt n ci t (toList (conArgs args args')) (forgetExp args' exp)
 
   forgetConstAlt : Names vars -> CConstAlt vars -> NamedConstAlt
   forgetConstAlt locs (MkConstAlt c exp)
@@ -390,7 +390,7 @@ forgetDef : CDef -> NamedDef
 forgetDef (MkFun args def)
     = let ns = addLocz args [<]
           args' = conArgs {vars = ScopeEmpty} args ns in
-          MkNmFun (cast args') (forget def)
+          MkNmFun (toList args') (forget def)
 forgetDef (MkCon t a nt) = MkNmCon t a nt
 forgetDef (MkForeign ccs fargs ty) = MkNmForeign ccs fargs ty
 forgetDef (MkError err) = MkNmError (forget err)

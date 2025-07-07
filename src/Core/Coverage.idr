@@ -395,8 +395,18 @@ getNonCoveringRefs fc n
         Just d <- lookupCtxtExact n (gamma defs)
            | Nothing => undefinedName fc n
         let ds = mapMaybe noAssert (toList (refersTo d))
-        filterM (notCovering defs) ds
+        let cases = filter isCase !(traverse toFullNames ds)
+
+        -- Case blocks aren't recursive, so we're safe!
+        cbad <- traverse (getNonCoveringRefs fc) cases
+        topbad <- filterM (notCovering defs) ds
+        pure (topbad ++ concat cbad)
   where
+    isCase : Name -> Bool
+    isCase (NS _ n) = isCase n
+    isCase (CaseBlock _ _) = True
+    isCase _ = False
+
     noAssert : (Name, Bool) -> Maybe Name
     noAssert (n, True) = Nothing
     noAssert (n, False) = Just n
@@ -464,7 +474,7 @@ clauseMatches : {vars : _} ->
                 Env Term vars -> Term vars ->
                 ClosedTerm -> Core Bool
 clauseMatches env tm trylhs
-    = let lhs = !(eraseApps (close (getLoc tm) "cov" env tm)) in
+    = let lhs = !(eraseApps (close (getLoc tm) env "cov" tm)) in
           pure $ match !(toResolvedNames lhs) !(toResolvedNames trylhs)
 
 export

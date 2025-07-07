@@ -26,26 +26,31 @@ checkIfGuarded fc n
          defs <- get Ctxt
          Just (Function _ tm _ _) <- lookupDefExact n (gamma defs)
               | _ => pure ()
-         tmnf <- nf [<] tm
          -- Just work from 'Glued', don't do any actual normalisation
-         t <- guardedDef tmnf
+         t <- allGuarded !(nf [<] tm)
          log "totality.termination.guarded" 6 (show t)
-         if t then do Just gdef <- lookupCtxtExact n (gamma defs)
-                           | Nothing => pure ()
-                      g <- allM (checkNotFn defs) (keys (refersTo gdef))
-                      log "totality.termination.guarded" 6
-                            $ "Refers to " ++ show !(toFullNames (keys (refersTo gdef)))
-                      when g $ setFlag fc n AllGuarded
-              else pure ()
+         when t $ setFlag fc n AllGuarded
   where
+    checkNotFn : Defs -> Name -> Core Bool
+
     guardedNF : {vars : _} -> Glued vars -> Core Bool
-    guardedNF (VDCon{}) = pure True
+    guardedNF (VDCon _ _ _ _ args) = pure True
+
     guardedNF (VApp _ _ n _ _)
         = do defs <- get Ctxt
              Just gdef <- lookupCtxtExact n (gamma defs)
                   | Nothing => pure False
-             pure (AllGuarded `elem` flags gdef)
+             depsOk <- allM (checkNotFn defs) (keys (refersTo gdef))
+             pure (depsOk && (AllGuarded `elem` flags gdef))
     guardedNF _ = pure False
+
+    checkNotFn defs n
+        = do Just gdef <- lookupCtxtExact n (gamma defs)
+                  | Nothing => pure False
+             case definition gdef of
+                  DCon _ _ _ => pure True
+                  _ => pure (multiplicity gdef == erased
+                              || (AllGuarded `elem` flags gdef))
 
     guardedScope : {vars : _} -> (args : _) -> VCaseScope args vars -> Core Bool
     guardedScope [<] sc = guardedNF (snd !sc)
@@ -63,21 +68,12 @@ checkIfGuarded fc n
     guardedAlts (x :: xs)
         = if !(guardedAlt x) then guardedAlts xs else pure False
 
-    guardedDef : {vars : _} ->  Glued vars -> Core Bool
-    guardedDef (VBind fc _ (Lam _ _ _ _) sc)
-        = guardedDef !(sc $ pure $ VErased fc Placeholder)
-    guardedDef (VCase fc ct c _ _ alts)
+    allGuarded : {vars : _} ->  Glued vars -> Core Bool
+    allGuarded (VBind fc _ (Lam _ _ _ _) sc)
+        = allGuarded !(sc $ pure $ VErased fc Placeholder)
+    allGuarded (VCase fc ct c _ _ alts)
         = guardedAlts alts
-    guardedDef nf = guardedNF nf
-
-    checkNotFn : Defs -> Name -> Core Bool
-    checkNotFn defs n
-        = do Just gdef <- lookupCtxtExact n (gamma defs)
-                  | Nothing => pure False
-             case definition gdef of
-                  DCon _ _ _ => pure True
-                  _ => pure (multiplicity gdef == erased
-                              || (AllGuarded `elem` flags gdef))
+    allGuarded nf = guardedNF nf
 
 -- Check whether a function is terminating, and record in the context
 export
