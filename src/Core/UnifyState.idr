@@ -33,15 +33,6 @@ data Constraint : Type where
                     (env : Env Term vars) ->
                     (x : Term vars) -> (y : Term vars) ->
                     Constraint
-     -- An unsolved sequence of constraints, arising from arguments in an
-     -- application where solving later constraints relies on solving earlier
-     -- ones
-     MkSeqConstraint : {vars : _} ->
-                       FC ->
-                       (env : Env Term vars) ->
-                       (xs : List (Term vars)) ->
-                       (ys : List (Term vars)) ->
-                       Constraint
      -- A resolved constraint
      Resolved : Constraint
 
@@ -551,9 +542,6 @@ checkValidHole base (idx, (fc, n))
                           MkConstraint fc l env x y =>
                             do put UST ({ guesses := empty } ust)
                                throw (CantSolveEq fc (gamma defs) env x y)
-                          MkSeqConstraint fc env (x :: _) (y :: _) =>
-                            do put UST ({ guesses := empty } ust)
-                               throw (CantSolveEq fc (gamma defs) env x y)
                           _ => pure ()
               _ => traverse_ checkRef !(traverse getFullName
                                         ((keys (getRefs (Resolved (-1)) (type gdef)))))
@@ -659,8 +647,6 @@ dumpHole s n hole
                     do logString depth s.topic n $
                          "\t  " ++ show !(toFullNames x)
                               ++ " =?= " ++ show !(toFullNames y)
-               Just (MkSeqConstraint _ _ xs ys) =>
-                    logString depth s.topic n $ "\t\t" ++ show xs ++ " =?= " ++ show ys
 
 export
 dumpConstraints : {auto u : Ref UST UState} ->
