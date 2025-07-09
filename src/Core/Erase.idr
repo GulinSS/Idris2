@@ -121,11 +121,10 @@ parameters {auto c : Ref Ctxt Defs}
       = do sc' <- echeck (rigMult scrig rig) env sc
            alts' <- echeckAlts (presence rig) (restrictEnv env rig) scrig alts
            pure (Case fc ct scrig sc' ty alts')
+  echeck rig env (TDelayed fc r tm) = pure (TDelayed fc r !(echeck rig env tm))
   echeck rig env (TDelay fc r ty arg)
       = pure (TDelay fc r ty !(echeck rig env arg))
   echeck rig env (TForce fc r tm) = pure (TForce fc r !(echeck rig env tm))
-  echeck rig env (Erased fc (Dotted t))
-     = pure (Erased fc (Dotted !(echeck rig env t)))
   echeck rig env tm = pure tm
 
   export

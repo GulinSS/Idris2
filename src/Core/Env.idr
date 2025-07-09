@@ -58,6 +58,26 @@ namesNoLet [<] = [<]
 namesNoLet (xs :< Let _ _ _ _) = namesNoLet xs
 namesNoLet {xs = _ :< x} (env :< _) = namesNoLet env :< x
 
+-- For the local definitions, don't allow access to linear things
+-- unless they're explicitly passed.
+-- This is because, at the moment, we don't have any mechanism of
+-- ensuring the nested definition is used exactly once
+export
+dropLinear : Env Term vs -> Env Term vs
+dropLinear [<] = ScopeEmpty
+dropLinear (bs :< b)
+    = if isLinear (multiplicity b)
+            then dropLinear bs :< setMultiplicity b erased
+            else dropLinear bs :< b
+
+export
+getErased : {vs : _} -> Env tm vs -> List (Var vs)
+getErased [<] = []
+getErased {vs = _ :< _} (bs :< b)
+    = if isErased (multiplicity b)
+         then MkVar First :: map weaken (getErased bs)
+         else map weaken (getErased bs)
+
 public export
 data IsDefined : Name -> Scope -> Type where
   MkIsDefined : {idx : Nat} -> RigCount -> (0 p : IsVar n idx vars) ->

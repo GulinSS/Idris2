@@ -200,7 +200,7 @@ parameters {auto c : Ref Ctxt Defs}
       = do defs <- get Ctxt
            let i = resolvedName hole
            Just gdef <- lookupCtxtExact (Resolved i) (gamma defs)
-                | Nothing => pure ()
+                | Nothing => pure () --updateHoleUsageArgs?
            case definition gdef of
                 Hole _ _ =>
                   do let ty = type gdef
@@ -383,14 +383,16 @@ parameters {auto c : Ref Ctxt Defs}
   lcheck rig env (Ref fc nt n)
       = hdone fc -- No quantity to check, and the name's quantity was checked
               -- when type checking
+              -- lcheckDef?
+
+  -- If the metavariable is defined, check as normal (we assume that
+  -- quantities cached in the arguments have been set appropriately when
+  -- the metavariable was resolved).
+  -- Otherwise, don't count any usage in the 'args' - we'll update the
+  -- type of the hole
+  -- when we updateHoleUsage based on usages elsewhere, because we don't
+  -- know if it's used until the hole is defined.
   lcheck {vars} rig env (Meta fc n i args)
-      -- If the metavariable is defined, check as normal (we assume that
-      -- quantities cached in the arguments have been set appropriately when
-      -- the metavariable was resolved).
-      -- Otherwise, don't count any usage in the 'args' - we'll update the
-      -- type of the hole
-      -- when we updateHoleUsage based on usages elsewhere, because we don't
-      -- know if it's used until the hole is defined.
       = if isErased rig
            then hdone fc
            else
@@ -405,7 +407,7 @@ parameters {auto c : Ref Ctxt Defs}
                 let newHoleApp : HoleApp vars
                     = MkHoleApp i (map (Just . snd) args)
                 if defined
-                   then pure (concat fc us)
+                   then pure (concat fc us) --expandMeta?
                    else pure ({ used := [<],
                                 holeApps $= (newHoleApp ::) } (concat fc us))
   lcheck rig_in env (Bind fc nm b sc)
@@ -414,6 +416,7 @@ parameters {auto c : Ref Ctxt Defs}
            -- Anything linear can't be used in the scope of a let/lambda, if
            -- we're checking in general context
            let (env', rig') = case b of
+                                   --Lam?
                                    Pi _ _ _ _ => (env, rig)
                                    _ => (restrictEnv env rig, presence rig)
 
@@ -470,7 +473,6 @@ parameters {auto c : Ref Ctxt Defs}
   lcheck rig env (PrimOp fc fn args)
      = do us <- traverseVect (lcheck rig env) args
           pure (concat fc (toList us))
-  lcheck rig env (Erased _ (Dotted t)) = lcheck rig env t
   lcheck rig env (Erased fc _) = hdone fc
   lcheck rig env (Unmatched fc _) = hdone fc
   lcheck rig env (TType fc _) = hdone fc

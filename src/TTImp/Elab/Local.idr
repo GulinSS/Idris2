@@ -79,17 +79,6 @@ localHelper {vars} nest env nestdecls_in func
          update Ctxt { localHints := oldhints }
          pure res
   where
-    -- For the local definitions, don't allow access to linear things
-    -- unless they're explicitly passed.
-    -- This is because, at the moment, we don't have any mechanism of
-    -- ensuring the nested definition is used exactly once
-    dropLinear : Env Term vs -> Env Term vs
-    dropLinear [<] = ScopeEmpty
-    dropLinear (bs :< b)
-        = if isLinear (multiplicity b)
-             then dropLinear bs :< setMultiplicity b erased
-             else dropLinear bs :< b
-
     applyEnv : Int -> Name ->
                Core (Name, (Maybe Name, List (Var vars), FC -> NameType -> Term vars))
     applyEnv outer inner

@@ -878,7 +878,8 @@ mkRunTime fc (ct, n)
                Clause ->
                Core Clause
     toErased fc spec (MkClause env lhs rhs)
-        = do lhs_erased <- erase linear env lhs
+        = do -- linearCheck fc linear env lhs. No need for LHS
+             lhs_erased <- erase linear env lhs
              -- Partially evaluate RHS here, where appropriate
              rhs' <- applyTransforms env rhs
              -- Yaffle has no it but it
