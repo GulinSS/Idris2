@@ -277,10 +277,6 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
          nty <- nf env ty
          findPos defs prf id !(expand nty) target
   where
-    ambig : Error -> Bool
-    ambig (AmbiguousSearch _ _ _ _) = True
-    ambig _ = False
-
     clearEnvType : {idx : Nat} -> (0 p : IsVar nm idx vs) ->
                    FC -> Env Term vs -> Env Term vs
     clearEnvType First fc (env :< b)
@@ -302,7 +298,8 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
         = do (args, appTy) <- mkArgs fc rigc env ty
              -- log "auto" 10 $ "findDirect args" ++ show args
              logNF "auto" 10 "findDirect appTy" env appTy
-             logTermNF "auto" 10 "Trying" env (f prf)
+             let fprf = f prf
+             logTermNF "auto" 10 "Trying" env fprf
              logNF "auto" 10 "Type" env ty
              logNF "auto" 10 "For target" env target
              ures <- unify inTerm fc env target appTy
@@ -312,7 +309,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
              -- We can only use the local if its type is not an unsolved hole
              if !(usableLocal fc defaults env ty)
                 then do
-                   let candidate = apply fc (f prf) (map metaApp args)
+                   let candidate = apply fc fprf (map metaApp args)
                    logTermNF "auto" 10 "Local var candidate " env candidate
                    -- Clear the local from the environment to avoid getting
                    -- into a loop repeatedly applying it
@@ -332,10 +329,8 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
               (target : NF vars) ->
               Core (Term vars)
     findPos defs p f nty@(VTCon pfc pn _ [< MkSpineEntry _ xc xty, MkSpineEntry _ yc yty]) target
-        = handleUnify (findDirect defs prf f nty target) (\e =>
-           if ambig e then throw e else
-             do defs <- get Ctxt
-                fname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
+        = tryUnifyUnambig (findDirect defs prf f nty target) $
+             do fname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
                                pure
                                !fstName
                 sname <- maybe (throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
@@ -361,7 +356,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                                                          (erased, ytytm),
                                                          (Preorder.top, f arg)])
                                      ytynf target)]
-                   else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing))
+                   else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
     findPos defs p f nty target
         = findDirect defs p f nty target
 
@@ -579,21 +574,15 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                                                    (VTCon tfc tyn a args)
                              if defaults && checkdets
                                 then tryGroups Nothing nty (hintGroups sd)
-                                else handleUnify
+                                else tryUnifyUnambig
                                        (searchLocalVars fc rigc defaults trying' depth def top env nty)
-                                       (\e => if ambig e
-                                                 then throw e
-                                                 else tryGroups Nothing nty (hintGroups sd))
+                                       (tryGroups Nothing nty (hintGroups sd))
                      else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
               _ => do logNF "auto" 10 "Next target other: " env nty
                       result <- searchLocalVars fc rigc defaults trying' depth def top env nty
                       logTerm "auto" 10 "Next target other result" result
                       pure result
   where
-    ambig : Error -> Bool
-    ambig (AmbiguousSearch _ _ _ _) = True
-    ambig _ = False
-
     -- Take the earliest error message (that's when we look inside pairs,
     -- typically, and it's best to be more precise)
     tryGroups : Maybe Error ->
