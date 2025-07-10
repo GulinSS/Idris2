@@ -601,8 +601,8 @@ mutual
                 else
                  do scs <- traverse (findSC g eqs pats) args
                     pure ([MkSCCall fn
-                             (expandToArity arity
-                                  !(traverse (mkChange eqs aSmaller pats) args))
+                             (fromSparseList (expandToArity arity
+                                  !(traverse (mkChange eqs aSmaller pats) args)))
                              fc]
                              ++ concat scs)
 
