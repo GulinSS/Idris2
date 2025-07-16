@@ -278,6 +278,9 @@ canonicalise eqs (VType fc _)
     = pure $ (VTCon fc (UN (Basic "Type")) 0 [<])
 canonicalise eqs val = pure val
 
+isAssertTotal : Name -> Bool
+isAssertTotal = (== NS builtinNS (UN $ Basic "assert_total"))
+
 mutual
   findSC : {auto c : Ref Ctxt Defs} ->
            {auto v : Ref SCVar Int} ->
@@ -330,8 +333,10 @@ mutual
       = do args <- traverseSnocList value sp
            scs <- traverseSnocList (findSC g eqs pats) args
            pure (concat scs)
-  findSCapp g eqs pats (VApp fc Func fn sp _)
-      = do defs <- get Ctxt
+  findSCapp g eqs pats gl@(VApp fc Func fn sp _)
+      = do False <- isAssertTotal <$> toFullNames fn
+             | _ => pure []
+           defs <- get Ctxt
            args <- traverseSnocList value sp
            Just ty <- lookupTyExact fn (gamma defs)
               | Nothing => do
@@ -593,10 +598,10 @@ mutual
              aSmaller <- resolved (gamma defs) (NS builtinNS (UN $ Basic "assert_smaller"))
              logC "totality.termination.sizechange" 10 $
                  do under <- traverse (\ (n, t) =>
-                                pure (n, !(toFullNames !(quoteNF [<] t)))) pats
-                    targs <- traverse (\t => toFullNames !(quoteNF [<] t)) args
+                                pure (n, !(toFullNames !(quote [<] t)))) pats
+                    targs <- traverse (\t => toFullNames !(quote [<] t)) args
                     pure ("Under " ++ show under ++ "\n" ++ "Args " ++ show targs)
-             if fn == NS builtinNS (UN $ Basic "assert_total")
+             if isAssertTotal fn
                 then pure []
                 else
                  do scs <- traverse (findSC g eqs pats) args
