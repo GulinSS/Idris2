@@ -26,7 +26,7 @@ checkIfGuarded fc n
          defs <- get Ctxt
          Just (Function _ tm _ _) <- lookupDefExact n (gamma defs)
               | _ => pure ()
-         tmnf <- nf [<] tm
+         tmnf <- nfTotality [<] tm
          -- Just work from 'Glued', don't do any actual normalisation
          t <- guardedDef tmnf
          log "totality.termination.guarded" 6 (show t)

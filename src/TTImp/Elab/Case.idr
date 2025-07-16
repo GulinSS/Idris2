@@ -204,7 +204,10 @@ caseBlock {vars} rigc elabinfo fc nest env opts scr scrtm scrty caseRig alts exp
 
          let applyEnv = applyToFull fc caseRef env
          let appTm : Term vars
-                   = maybe (App fc applyEnv caseRig scrtm)
+                   = maybe (Bind fc (MN "sc" 0)
+                                 (Let fc caseRig scrtm scrty)
+                                 (App fc (weaken applyEnv) caseRig
+                                         (Local fc Nothing _ First)))
                            (const applyEnv)
                            splitOn
 
