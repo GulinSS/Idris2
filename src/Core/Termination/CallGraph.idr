@@ -19,76 +19,6 @@ import Data.String
 
 %default covering
 
--- Drop any non-inf top level laziness annotations
-dropLazy : Value f vars -> Core (Glued vars)
-dropLazy val@(VDelayed _ r t)
-    = case r of
-           LInf => pure (asGlued val)
-           _ => pure t
-dropLazy val@(VDelay _ r t v)
-    = case r of
-           LInf => pure (asGlued val)
-           _ => pure v
-dropLazy val@(VForce fc r v sp)
-    = case r of
-           LInf => pure (asGlued val)
-           _ => applyAll fc v (cast (map (\ e => (multiplicity e, value e)) sp))
-dropLazy val = pure (asGlued val)
-
--- Equal for the purposes of size change means, ignoring as patterns, all
--- non-metavariable positions are equal
-scEq : Value f vars -> Value f' vars -> Core Bool
-
-scEqSpine : Spine vars -> Spine vars -> Core Bool
-scEqSpine [<] [<] = pure True
-scEqSpine (sp :< x) (sp' :< y)
-    = do x' <- value x
-         y' <- value y
-         if !(scEq x' y')
-            then scEqSpine sp sp'
-            else pure False
-scEqSpine _ _ = pure False
-
--- Approximate equality between values. We don't go under binders - we're
--- only checking for size change equality so expect to just see type and
--- data constructors
--- TODO: size change for pattern matching on types
-scEq' : Value f vars -> Value f' vars -> Core Bool
-scEq' (VApp _ _ n sp _) (VApp _ _ n' sp' _)
-    = if n == n'
-         then scEqSpine sp sp'
-         else pure False
--- Should never see this since we always call with vars = [<], but it is
--- technically possible
-scEq' (VLocal _ idx _ sp) (VLocal _ idx' _ sp')
-    = if idx == idx'
-         then scEqSpine sp sp'
-         else pure False
-scEq' (VDCon _ _ t a sp) (VDCon _ _ t' a' sp')
-    = if t == t'
-         then scEqSpine sp sp'
-         else pure False
-scEq' (VTCon _ n a sp) (VTCon _ n' a' sp')
-    = if n == n'
-         then scEqSpine sp sp'
-         else pure False
-scEq' (VMeta{}) _ = pure True
-scEq' _ (VMeta{}) = pure True
-scEq' (VAs _ _ a p) p' = scEq p p'
-scEq' p (VAs _ _ a p') = scEq p p'
-scEq' (VDelayed _ _ t) (VDelayed _ _ t') = scEq t t'
-scEq' (VDelay _ _ t x) (VDelay _ _ t' x')
-     = if !(scEq t t') then scEq x x'
-          else pure False
-scEq' (VForce _ _ t [<]) (VForce _ _ t' [<]) = scEq t t'
-scEq' (VPrimVal _ c) (VPrimVal _ c') = pure $ c == c'
-scEq' (VErased _ _) (VErased _ _) = pure True
-scEq' (VUnmatched _ _) (VUnmatched _ _) = pure True
-scEq' (VType _ _) (VType _ _) = pure True
-scEq' _ _ = pure False -- other cases not checkable
-
-scEq x y = scEq' !(dropLazy x) !(dropLazy y)
-
 data Guardedness = Toplevel | Unguarded | Guarded | InDelay
 
 Show Guardedness where
@@ -97,96 +27,9 @@ Show Guardedness where
   show Guarded = "Guarded"
   show InDelay = "InDelay"
 
-assertedSmaller : Maybe (Glued [<]) -> Glued [<] -> Core Bool
-assertedSmaller (Just b) a = scEq b a
-assertedSmaller _ _ = pure False
-
--- Return whether first argument is structurally smaller than the second.
-smaller : Bool -> -- Have we gone under a constructor yet?
-          Maybe (Glued [<]) -> -- Asserted bigger thing
-          Glued [<] -> -- Term we're checking
-          Glued [<] -> -- Argument it might be smaller than
-          Core Bool
-
-smallerArg : Bool ->
-             Maybe (Glued [<]) -> Glued [<] -> Glued [<] -> Core Bool
-smallerArg inc big (VAs _ _ _ s) tm = smallerArg inc big s tm
-smallerArg inc big s tm
-      -- If we hit a pattern that is equal to a thing we've asserted_smaller,
-      -- the argument must be smaller
-    = if !(assertedSmaller big tm)
-         then pure True
-         else case tm of
-                   VDCon _ _ _ _ sp
-                       => Core.Core.anyM (smaller True big s)
-                                (cast !(traverseSnocList value sp))
-                   _ => case s of
-                             VApp fc nt n sp@(_ :< _) _ =>
-                                -- Higher order recursive argument
-                                  smaller inc big
-                                      (VApp fc nt n [<] (pure Nothing))
-                                      tm
-                             _ => pure False
-
-smaller inc big _ (VErased _ _) = pure False -- Never smaller than an erased thing!
--- for an as pattern, it's smaller if it's smaller than the pattern
--- or if we've gone under a constructor and it's smaller than the variable
-smaller True big s (VAs _ _ a t)
-    = if !(smaller True big s a)
-         then pure True
-         else smaller True big s t
-smaller True big s t
-    = if !(scEq s t)
-         then pure True
-         else smallerArg True big s t
-smaller inc big s t = smallerArg inc big s t
-
-sizeEq : {auto 0 cv : CompatibleVars rhsVars lhsVars} ->
-         Term rhsVars -> -- RHS
-         Term lhsVars -> -- LHS: may contain dot-patterns, try both sides of as patterns
-         Bool
-sizeEq (Local _ _ idx _) (Local _ _ idx' _) = idx == idx'
-sizeEq (Ref _ _ n) (Ref _ _ n') = n == n'
-sizeEq (Meta _ _ i args) (Meta _ _ i' args')
-    -- = i == i' && assert_total (all (uncurry sizeEq) (zip args args'))
-    = i == i' && assert_total (all (uncurry sizeEq) (zip (map snd args) (map snd args')))
-sizeEq (Bind _ _ b sc) (Bind _ _ b' sc') = eqBinderBy sizeEq b b' && sizeEq sc sc'
-sizeEq (App _ f _ a) (App _ f' _ a') = sizeEq f f' && sizeEq a a'
-sizeEq (As _ _ a p) p' = sizeEq p p'
-sizeEq p (As _ _ a p') = sizeEq p a || sizeEq p p'
-sizeEq (TDelayed _ _ t) (TDelayed _ _ t') = sizeEq t t'
-sizeEq (TDelay _ _ t x) (TDelay _ _ t' x') = sizeEq t t' && sizeEq x x'
-sizeEq (TForce _ _ t) (TForce _ _ t') = sizeEq t t'
-sizeEq (PrimVal _ c) (PrimVal _ c') = c == c'
--- traverse dotted LHS terms
-sizeEq t (Erased _ (Dotted t')) = eqTerm t t' -- t' is no longer a pattern
-sizeEq (TType _ _) (TType _ _) = True
-sizeEq _ _ = False
-
--- Remove all force and delay annotations which are nothing to do with
--- coinduction meaning that all Delays left guard coinductive calls.
-delazy : Defs -> Term vars -> Term vars
-delazy defs (TDelayed fc r tm)
-    = let tm' = delazy defs tm in
-          case r of
-               LInf => TDelayed fc r tm'
-               _ => tm'
-delazy defs (TDelay fc r ty tm)
-    = let ty' = delazy defs ty
-          tm' = delazy defs tm in
-          case r of
-               LInf => TDelay fc r ty' tm'
-               _ => tm'
-delazy defs (TForce fc r t)
-    = case r of
-           LInf => TForce fc r (delazy defs t)
-           _ => delazy defs t
-delazy defs (Meta fc n i args) = Meta fc n i (map @{Compose} (delazy defs) args)
-delazy defs (Bind fc x b sc)
-    = Bind fc x (map (delazy defs) b) (delazy defs sc)
-delazy defs (App fc f c a) = App fc (delazy defs f) c (delazy defs a)
-delazy defs (As fc s a p) = As fc s (delazy defs a) (delazy defs p)
-delazy defs tm = tm
+sizeEq : Value f vars -> -- RHS
+       Value f' vars -> -- LHS: may contain dot-patterns, try both sides of as patterns
+       Core Bool
 
 -- Substitute a name with what we know about it.
 -- We assume that the name has come from a case pattern, which means we're
@@ -210,18 +53,25 @@ substNameInVal n rep (VDelay fc r t v)
     = pure $ VDelay fc r !(substNameInVal n rep t) !(substNameInVal n rep v)
 substNameInVal n rep tm = pure tm
 
-replaceInArgs : Name -> Glued [<] ->
-                List (Nat, Glued [<]) -> Core (List (Nat, Glued [<]))
+replaceInArgs : {auto c : Ref Ctxt Defs} -> Name -> Glued [<] ->
+                List (Glued [<]) -> Core (List (Glued [<]))
 replaceInArgs v tm [] = pure []
 -- -- Don't copy if there's no substitution done!
-replaceInArgs v tm ((n, arg) :: args)
+replaceInArgs v tm (arg :: args)
     = do arg' <- substNameInVal v tm arg
-         if !(scEq arg arg')
-            then pure $ (n, arg) :: !(replaceInArgs v tm args)
-            else pure $ (n, arg) :: (n, arg') :: !(replaceInArgs v tm args)
+         logC "totality.termination.sizechange" 10 $
+             do v' <- toFullNames v
+                tm' <- toFullNames !(quote [<] tm)
+                arg'' <- toFullNames !(quote [<] arg)
+                arg''' <- toFullNames !(quote [<] arg')
+                pure ("replaceInArgs v: \{show v'}, tm: \{show tm'}, arg: \{show arg''} |=> arg': \{show arg'''}")
 
-expandForced : List (Glued [<], Glued [<]) ->
-               List (Nat, Glued [<]) -> Core (List (Nat, Glued [<]))
+         if !(sizeEq arg arg')
+            then pure $ arg :: !(replaceInArgs v tm args)
+            else pure $ arg' :: !(replaceInArgs v tm args)
+
+expandForced : {auto c : Ref Ctxt Defs} -> List (Glued [<], Glued [<]) ->
+               List (Glued [<]) -> Core (List (Glued [<]))
 expandForced [] args = pure args
 -- Only useful if the equality evaluated to a bound name that we know about
 expandForced ((VApp _ Bound n _ _, tm) :: fs) args
@@ -241,16 +91,6 @@ nextVar
 
 ForcedEqs : Type
 ForcedEqs = List (Glued [<], Glued [<])
-
--- Expand the size change argument list with 'Nothing' to match the given
--- arity (i.e. the arity of the function we're calling) to ensure that
--- it's noted that we don't know the size change relationship with the
--- extra arguments.
-expandToArity : Nat -> List (Maybe (Nat, SizeChange)) ->
-                List (Maybe (Nat, SizeChange))
-expandToArity Z xs = xs
-expandToArity (S k) (x :: xs) = x :: expandToArity k xs
-expandToArity (S k) [] = Nothing :: expandToArity k []
 
 findVar : Int -> List (Glued vars, Glued vars) -> Maybe (Glued vars)
 findVar i [] = Nothing
@@ -278,27 +118,105 @@ canonicalise eqs (VType fc _)
     = pure $ (VTCon fc (UN (Basic "Type")) 0 [<])
 canonicalise eqs val = pure val
 
+scEqSpine : Spine vars -> Spine vars -> Core Bool
+scEqSpine [<] [<] = pure True
+scEqSpine (sp :< x) (sp' :< y)
+    = do x' <- value x
+         y' <- value y
+         if !(sizeEq x' y')
+            then scEqSpine sp sp'
+            else pure False
+scEqSpine _ _ = pure False
+
+-- Approximate equality between values. We don't go under binders - we're
+-- only checking for size change equality so expect to just see type and
+-- data constructors
+-- TODO: size change for pattern matching on types
+sizeEq' : Value f vars -> Value f' vars -> Core Bool
+-- Should never see this since we always call with vars = [<], but it is
+-- technically possible
+sizeEq' (VLocal _ idx _ sp) (VLocal _ idx' _ sp')
+    = if idx == idx'
+         then scEqSpine sp sp'
+         else pure False
+sizeEq' (VMeta{}) _ = pure True
+sizeEq' _ (VMeta{}) = pure True
+-- sizeEq' (VMeta _ _ i _ args _) (VMeta _ _ i' _ args' _)
+--    -- = i == i' && assert_total (all (uncurry sizeEq) (zip args args'))
+--    = if i /= i' then pure False
+--      else pure $ assert_total
+--        !(allM (uncurry sizeEq) !paired_values)
+--    where
+--      paired_values : Core (SnocList (Value Glue vars, Value Glue vars))
+--      paired_values = traverse (\(a, a') => pure (!a, !a')) (zip (map value args) (map value args'))
+sizeEq' (VApp _ _ n sp _) (VApp _ _ n' sp' _)
+    = if n == n'
+         then scEqSpine sp sp'
+         else pure False
+sizeEq' (VDCon _ _ t a sp) (VDCon _ _ t' a' sp')
+    = if t == t'
+         then scEqSpine sp sp'
+         else pure False
+sizeEq' (VTCon _ n a sp) (VTCon _ n' a' sp')
+    = if n == n'
+         then scEqSpine sp sp'
+         else pure False
+sizeEq' (VAs _ _ a p) p' = sizeEq p p'
+sizeEq' p (VAs _ _ a p') = pure $ !(sizeEq p a) || !(sizeEq p p')
+sizeEq' (VDelayed _ _ t) (VDelayed _ _ t') = sizeEq t t'
+sizeEq' (VDelay _ _ t x) (VDelay _ _ t' x')
+     = if !(sizeEq t t') then sizeEq x x'
+          else pure False
+sizeEq' (VForce _ _ t [<]) (VForce _ _ t' [<]) = sizeEq t t'
+sizeEq' (VPrimVal _ c) (VPrimVal _ c') = pure $ c == c'
+-- -- traverse dotted LHS terms
+-- sizeEq' t (VErased _ (Dotted t')) =
+--   -- eqTerm t t'
+--   sizeEq t t' -- t' is no longer a pattern
+sizeEq' (VErased _ _) (VErased _ _) = pure True
+sizeEq' (VUnmatched _ _) (VUnmatched _ _) = pure True
+sizeEq' (VType _ _) (VType _ _) = pure True
+sizeEq' _ _ = pure False -- other cases not checkable
+
+-- Drop any non-inf top level laziness annotations
+-- Remove all force and delay annotations which are nothing to do with
+-- coinduction meaning that all Delays left guard coinductive calls.
+delazy : Value f vars -> Core (Glued vars)
+delazy val@(VDelayed _ r t)
+    = case r of
+           LInf => pure (asGlued val)
+           _ => pure t
+delazy val@(VDelay _ r t v)
+    = case r of
+           LInf => pure (asGlued val)
+           _ => pure v
+delazy val@(VForce fc r v sp)
+    = case r of
+           LInf => pure (asGlued val)
+           _ => applyAll fc v (cast (map (\ e => (multiplicity e, value e)) sp))
+delazy val = pure (asGlued val)
+
+sizeEq x y = sizeEq' !(delazy x) !(delazy y)
+
 mutual
   findSC : {auto c : Ref Ctxt Defs} ->
            {auto v : Ref SCVar Int} ->
            Guardedness ->
            ForcedEqs ->
-           List (Nat, Glued [<]) -> -- LHS args and their position
+           List (Glued [<]) -> -- LHS args and their position
            Glued [<] -> -- definition. No expanding to NF, we want to check
                         -- the program as written (plus tcinlines)
            Core (List SCCall)
-  -- If we're Guarded and find a Delay, continue with the argument as InDelay
-  findSC Guarded eqs pats (VDelay _ LInf _ tm)
-      = findSC InDelay eqs pats tm
-  findSC g eqs args (VBind _ _ (Lam _ _ _ _) sc)
-      = findSC g eqs args !(sc nextVar)
   findSC g eqs args (VBind fc n b sc)
       = do v <- nextVar
            pure $ !(findSCbinder b) ++ !(findSC g eqs args !(sc (pure v)))
     where
         findSCbinder : Binder (Glued [<]) -> Core (List SCCall)
-        findSCbinder (Let _ c val ty) = findSC Unguarded eqs args val
-        findSCbinder _ = pure []
+        findSCbinder (Let _ c val ty) = findSC g eqs args val
+        findSCbinder _ = pure [] -- only types, no need to look
+  -- If we're Guarded and find a Delay, continue with the argument as InDelay
+  findSC Guarded eqs pats (VDelay _ LInf _ tm)
+      = findSC InDelay eqs pats tm
   findSC g eqs pats (VDelay _ _ _ tm)
       = findSC g eqs pats tm
   findSC g eqs pats (VForce _ _ v sp)
@@ -318,7 +236,7 @@ mutual
               {auto v : Ref SCVar Int} ->
               Guardedness ->
               ForcedEqs ->
-              List (Nat, Glued [<]) -> -- LHS args and their position
+              List (Glued [<]) -> -- LHS args and their position
               Glued [<] -> -- dealing with cases where this is an application
                            -- of some sort
               Core (List SCCall)
@@ -336,7 +254,7 @@ mutual
            Just ty <- lookupTyExact fn (gamma defs)
               | Nothing => do
                   log "totality" 50 $ "Lookup failed"
-                  findSCcall Unguarded eqs pats fc fn 0 (cast args)
+                  findSCcall Unguarded eqs pats fc fn (cast args)
            allg <- allGuarded fn
            -- If it has the all guarded flag, pretend it's a data constructor
            -- Otherwise just carry on as normal
@@ -346,8 +264,7 @@ mutual
                       -- constructor guarded and delayed, so just check the
                       -- arguments
                       InDelay => findSCspine Unguarded eqs pats sp
-                      _ => do arity <- getArity [<] ty
-                              findSCcall Unguarded eqs pats fc fn arity (cast args)
+                      _ => findSCcall Unguarded eqs pats fc fn (cast args)
     where
       allGuarded : Name -> Core Bool
       allGuarded n
@@ -355,6 +272,8 @@ mutual
                Just gdef <- lookupCtxtExact n (gamma defs)
                     | Nothing => pure False
                pure (AllGuarded `elem` flags gdef)
+    -- If we're InDelay and find a constructor (or a function call which is
+    -- guaranteed to return a constructor; AllGuarded set), continue as InDelay
   findSCapp InDelay eqs pats (VDCon fc n t a sp)
       = findSCspine InDelay eqs pats sp
   findSCapp Guarded eqs pats (VDCon fc n t a sp)
@@ -362,25 +281,22 @@ mutual
            Just ty <- lookupTyExact n (gamma defs)
                 | Nothing => do
                      log "totality" 50 $ "Lookup failed"
-                     findSCcall Guarded eqs pats fc n 0 (cast !(traverseSnocList value sp))
-           arity <- getArity [<] ty
-           findSCcall Guarded eqs pats fc n arity (cast !(traverseSnocList value sp))
+                     findSCcall Guarded eqs pats fc n (toList !(traverseSnocList value sp))
+           findSCcall Guarded eqs pats fc n (toList !(traverseSnocList value sp))
   findSCapp Toplevel eqs pats (VDCon fc n t a sp)
       = do defs <- get Ctxt
-           Just ty <- lookupTyExact n (gamma defs)
+           Just ty <- lookupDefExact n (gamma defs)
                 | Nothing => do
                      log "totality" 50 $ "Lookup failed"
-                     findSCcall Guarded eqs pats fc n 0 (cast !(traverseSnocList value sp))
-           arity <- getArity [<] ty
-           findSCcall Guarded eqs pats fc n arity (cast !(traverseSnocList value sp))
+                     findSCcall Guarded eqs pats fc n (toList !(traverseSnocList value sp))
+           findSCcall Guarded eqs pats fc n (toList !(traverseSnocList value sp))
   findSCapp g eqs pats tm = pure [] -- not an application (TODO: VTCon)
-
 
   findSCscope : {auto c : Ref Ctxt Defs} ->
                 {auto v : Ref SCVar Int} ->
                 Guardedness ->
                 ForcedEqs ->
-                List (Nat, Glued [<]) -> -- LHS args and their position
+                List (Glued [<]) -> -- LHS args and their position
                 Maybe Name -> -- variable we're splitting on (if it is a variable)
                 FC -> Glued [<] ->
                 (args : _) -> VCaseScope args [<] -> -- case alternative
@@ -394,9 +310,15 @@ mutual
                   pure ("Force equalities " ++ show tms))
           let eqs' = eqsc ++ eqs
           args' <- maybe (pure args) (\v => replaceInArgs v pat args) var
-          logNF "totality.termination.sizechange" 10 "RHS" [<] rhs
+          logNF "totality.termination.sizechange" 10 "RHS for \{show !(toFullNames var)}" [<] rhs
+          logC "totality.termination.sizechange" 10 $
+              do pat' <- toFullNames !(quote [<] pat)
+                 targs <- traverse (\t => toFullNames !(quote [<] t)) args
+                 targs' <- traverse (\t => toFullNames !(quote [<] t)) args'
+                 pure ("Pat \{show pat'}, args: \{show targs}, args': \{show targs'}")
+
           findSC g eqs'
-                 !(traverse (\ (n, arg) => pure (n, !(canonicalise eqs' arg))) args')
+                 !(traverse (\ arg => pure !(canonicalise eqs' arg)) args')
                  rhs
   findSCscope g eqs args var fc pat (cargs :< (c, xn)) sc
      = do varg <- nextVar
@@ -411,7 +333,7 @@ mutual
               {auto v : Ref SCVar Int} ->
               Guardedness ->
               ForcedEqs ->
-              List (Nat, Glued [<]) -> -- LHS args and their position
+              List (Glued [<]) -> -- LHS args and their position
               Maybe Name -> -- variable we're splitting on (if it is a variable)
               VCaseAlt [<] -> -- case alternative
               Core (List SCCall)
@@ -437,7 +359,7 @@ mutual
            {auto v : Ref SCVar Int} ->
            Guardedness ->
            ForcedEqs ->
-           List (Nat, Glued [<]) -> -- LHS args and their position
+           List (Glued [<]) -> -- LHS args and their position
            Spine [<] ->
            Core (List SCCall)
   findSCspine g eqs pats [<] = pure []
@@ -446,7 +368,6 @@ mutual
            spCalls <- findSCspine g eqs pats sp
            pure (vCalls ++ spCalls)
 
-
   knownOr : Core SizeChange -> Core SizeChange -> Core SizeChange
   knownOr x y = case !x of Unknown => y; _ => x
 
@@ -454,51 +375,59 @@ mutual
   plusLazy x y = case !x of Smaller => pure Smaller; x => pure $ x |+| !y
 
   -- Return whether first argument is structurally smaller than the second.
-  sizeCompare : {auto defs : Defs} ->
+  sizeCompare : {auto c : Ref Ctxt Defs} ->
+                {auto defs : Defs} ->
                 Nat -> -- backtracking fuel
-                Term vars -> -- RHS: term we're checking
-                Term vars -> -- LHS: argument it might be smaller than
+                Glued [<] -> -- RHS: term we're checking
+                Glued [<] -> -- LHS: argument it might be smaller than
                 Core SizeChange
 
-  sizeCompareCon : {auto defs : Defs} -> Nat -> Term vars -> Term vars -> Core Bool
-  sizeCompareTyCon : {auto defs : Defs} -> Nat -> Term vars -> Term vars -> Core Bool
-  sizeCompareConArgs : {auto defs : Defs} -> Nat -> Term vars -> List (Term vars) -> Core Bool
-  sizeCompareApp : {auto defs : Defs} -> Nat -> Term vars -> Term vars -> Core SizeChange
+  sizeCompareCon : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> Glued [<] -> Glued [<] -> Core Bool
+  sizeCompareTyCon : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> Glued [<] -> Glued [<] -> Core Bool
+  sizeCompareConArgs : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> Glued [<] -> List (Glued [<]) -> Core Bool
+  sizeCompareApp : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> Glued [<] -> Glued [<] -> Core SizeChange
 
-  sizeCompare fuel s (Erased _ (Dotted t)) = sizeCompare fuel s t
-  sizeCompare fuel _ (Erased _ _) = pure Unknown -- incomparable!
+--   sizeCompare fuel s (VErased _ (Dotted t)) = sizeCompare fuel s t
+  sizeCompare fuel _ (VErased _ _) = pure Unknown -- incomparable!
   -- for an as pattern, it's smaller if it's smaller than either part
-  sizeCompare fuel s (As _ _ p t)
+  sizeCompare fuel s (VAs _ _ p t)
       = knownOr (sizeCompare fuel s p) (sizeCompare fuel s t)
-  sizeCompare fuel (As _ _ p s) t
+  sizeCompare fuel (VAs _ _ p s) t
       = knownOr (sizeCompare fuel p t) (sizeCompare fuel s t)
-  -- if they're both metas, let sizeEq check if they're the same
-  sizeCompare fuel s@(Meta _ _ _ _) t@(Meta _ _ _ _) = pure (if sizeEq s t then Same else Unknown)
-  -- otherwise try to expand RHS meta
-  sizeCompare fuel s@(Meta n _ i args) t = do
-    Just gdef <- lookupCtxtExact (Resolved i) (gamma defs) | _ => pure Unknown
-    let (Function _ tm _ _) = definition gdef | _ => pure Unknown
-    tm <- substMeta (embed tm) (map snd args) zero ScopeEmpty
-    sizeCompare fuel tm t
-    where
-      substMeta : {0 drop, vs : _} ->
-                  Term (vs ++ drop) -> List (Term vs) ->
-                  SizeOf drop -> SubstEnv drop vs ->
-                  Core (Term vs)
-      substMeta (Bind bfc n (Lam _ c e ty) sc) (a :: as) drop env
-          = substMeta sc as (suc drop) (env :< a)
-      substMeta (Bind bfc n (Let _ c val ty) sc) as drop env
-          = substMeta (subst val sc) as drop env
-      substMeta rhs [] drop env = pure (substs drop env rhs)
-      substMeta rhs _ _ _ = throw (InternalError ("Badly formed metavar solution \{show n}"))
+--   -- if they're both metas, let sizeEq check if they're the same
+--   sizeCompare fuel s@(VMeta _ _ _ _ _ _) t@(VMeta _ _ _ _ _ _) = pure (if !(sizeEq s t) then Same else Unknown)
+--   -- otherwise try to expand RHS meta
+--   sizeCompare fuel s@(VMeta _ n i args _ _) t = do
+--     Just gdef <- lookupCtxtExact (Resolved i) (gamma defs) | _ => pure Unknown
+--     let (Function _ tm _ _) = definition gdef | _ => pure Unknown
+--     tm <- substMeta tm !(traverse snd args) zero [<]
+--     sizeCompare fuel tm t
+--     where
+--       substMeta : {0 drop : _} ->
+--                   Term ([<] ++ drop) -> List (Glued [<]) ->
+--                   SizeOf drop -> Subst Glued drop [<] ->
+--                   Core (Glued [<])
+--       substMeta (Bind bfc n (Lam _ c e ty) sc) (a :: as) drop env
+--           = substMeta sc as (suc drop) (env :< a)
+--       substMeta (Bind bfc n (Let _ c val ty) sc) as drop env
+--           = substMeta (subst val sc) as drop env
+--       substMeta rhs [] drop env = (nf [<] (substs drop !(to_env env) rhs))
+--         where
+--           to_env : {0 drop : _} -> Subst Glued drop [<] -> Core (Subst Term drop [<])
+--           to_env [<] = pure [<]
+--           to_env (as :< a) = pure $ !(to_env as) :< !(quote [<] a)
+--       substMeta rhs _ _ _ = throw (InternalError ("Badly formed metavar solution \{show n}"))
 
   sizeCompare fuel s t
-     = if !(sizeCompareTyCon fuel s t) then pure Same
-       else if !(sizeCompareCon fuel s t)
-          then pure Smaller
-          else knownOr (sizeCompareApp fuel s t) (pure $ if sizeEq s t then Same else Unknown)
+        = if !(sizeCompareCon fuel s t)
+            then pure Smaller
+            else knownOr (sizeCompareApp fuel s t) (pure $ if !(sizeEq s t) then Same else Unknown)
+    --  = if !(sizeCompareTyCon fuel s t) then pure Same
+    --    else if !(sizeCompareCon fuel s t)
+    --       then pure Smaller
+    --       else knownOr (sizeCompareApp fuel s t) (pure $ if !(sizeEq s t) then Same else Unknown)
 
-  sizeCompareProdConArgs : {auto defs : Defs} -> Nat -> List (Term vars) -> List (Term vars) -> Core SizeChange
+  sizeCompareProdConArgs : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> List (Glued [<]) -> List (Glued [<]) -> Core SizeChange
   sizeCompareProdConArgs _ [] [] = pure Same
   sizeCompareProdConArgs fuel (x :: xs) (y :: ys) =
     case !(sizeCompare fuel x y) of
@@ -507,32 +436,36 @@ mutual
   sizeCompareProdConArgs _ _ _ = pure Unknown
 
   sizeCompareTyCon fuel s t =
-    let (f, args) = getFnArgs t in
-    let (g, args') = getFnArgs s in
-    case f of
-      Ref _ (TyCon _) cn => case g of
-        Ref _ (TyCon _) cn' => if cn == cn'
-            then (Unknown /=) <$> sizeCompareProdConArgs fuel args' args
+    case t of
+      VTCon _ cn _ args => case s of
+        VTCon _ cn' _ args' => if cn == cn'
+            then (Unknown /=) <$> sizeCompareProdConArgs fuel (toList !(traverseSnocList value args')) (toList !(traverseSnocList value args))
             else pure False
         _ => pure False
       _ => pure False
 
   sizeCompareCon fuel s t
-      = let (f, args) = getFnArgs t in
-        case f of
-             Ref _ (DataCon t a) cn =>
-                -- if s is smaller or equal to an arg, then it is smaller than t
-                if !(sizeCompareConArgs (minus fuel 1) s args) then pure True
-                else let (g, args') = getFnArgs s in
-                    case (fuel, g) of
-                        (S k, Ref _ (DataCon t' a') cn') => do
-                                -- if s is a matching DataCon, applied to same number of args,
-                                -- no Unknown args, and at least one Smaller
-                                if cn == cn' && length args == length args'
-                                  then (Smaller ==) <$> sizeCompareProdConArgs k args' args
-                                  else pure False
-                        _ => pure $ False
+      = case t of
+             VDCon _ cn _ _ sp =>
+                do
+                    sp_value <- toList <$> traverseSnocList value sp
+                    sizeCompareConArgs (minus fuel 1) s sp_value
              _ => pure False
+
+            --  VDCon _ cn _ _ sp =>
+            --   do
+            --     sp_value <- toList <$> traverseSnocList value sp
+            --     -- if s is smaller or equal to an arg, then it is smaller than t
+            --     if !(sizeCompareConArgs (minus fuel 1) s sp_value) then pure True
+            --      else case (fuel, s) of
+            --             (S k, VDCon _ cn' _ _ sp') => do
+            --                     -- if s is a matching DataCon, applied to same number of args,
+            --                     -- no Unknown args, and at least one Smaller
+            --                     if cn == cn' && length sp == length sp'
+            --                       then (Smaller ==) <$> sizeCompareProdConArgs k (toList !(traverseSnocList value sp')) sp_value
+            --                       else pure False
+            --             _ => pure $ False
+            --  _ => pure False
 
   sizeCompareConArgs _ s [] = pure False
   sizeCompareConArgs fuel s (t :: ts)
@@ -540,10 +473,10 @@ mutual
           Unknown => sizeCompareConArgs fuel s ts
           _ => pure True
 
-  sizeCompareApp fuel (App _ f _ _) t = sizeCompare fuel f t
+  sizeCompareApp fuel (VApp fc nt n sp@(_ :< _) _) tm = sizeCompare fuel (VApp fc nt n [<] (pure Nothing)) tm
   sizeCompareApp _ _ t = pure Unknown
 
-  sizeCompareAsserted : {auto defs : Defs} -> Nat -> Maybe (Term vars) -> Term vars -> Core SizeChange
+  sizeCompareAsserted : {auto c : Ref Ctxt Defs} -> {auto defs : Defs} -> Nat -> Maybe (Glued [<]) -> Glued [<] -> Core SizeChange
   sizeCompareAsserted fuel (Just s) t
       = pure $ case !(sizeCompare fuel s t) of
           Unknown => Unknown
@@ -565,25 +498,23 @@ mutual
   mkChange : {auto c : Ref Ctxt Defs} ->
              ForcedEqs ->
              Name ->
-             (pats : List (Nat, Glued [<])) ->
+             (pats : List (Glued [<])) ->
              (arg : Glued [<]) ->
-             Core (Maybe (Nat, SizeChange))
-  mkChange eqs aSmaller [] arg = pure Nothing
-  mkChange eqs aSmaller ((i, parg) :: pats) arg
-      = if !(scEq arg parg)
-           then pure (Just (i, Same))
-           else do s <- smaller False !(asserted eqs aSmaller arg) arg parg
-                   if s then pure (Just (i, Smaller))
-                        else mkChange eqs aSmaller pats arg
+             Core (List SizeChange)
+  mkChange eqs aSmaller pats arg
+    = do defs <- get Ctxt
+         -- logC "totality.termination.sizechange" 10 $ do pure "mkChange pats: \{show pats}"
+         let fuel = defs.options.elabDirectives.totalLimit
+         traverse (\p => plusLazy (sizeCompareAsserted fuel !(asserted eqs aSmaller arg) p) (sizeCompare fuel arg p)) pats
 
   findSCcall : {auto c : Ref Ctxt Defs} ->
                {auto v : Ref SCVar Int} ->
                Guardedness ->
                ForcedEqs ->
-               List (Nat, Glued [<]) ->
-               FC -> Name -> Nat -> List (Glued [<]) ->
+               List (Glued [<]) ->
+               FC -> Name -> List (Glued [<]) ->
                Core (List SCCall)
-  findSCcall g eqs pats fc fn_in arity args
+  findSCcall g eqs pats fc fn_in args
           -- Under 'assert_total' we assume that all calls are fine, so leave
           -- the size change list empty
         = do args <- traverse (canonicalise eqs) args
@@ -592,27 +523,30 @@ mutual
              logC "totality.termination.sizechange" 10 $ do pure "Looking under \{show fn}"
              aSmaller <- resolved (gamma defs) (NS builtinNS (UN $ Basic "assert_smaller"))
              logC "totality.termination.sizechange" 10 $
-                 do under <- traverse (\ (n, t) =>
-                                pure (n, !(toFullNames !(quoteNF [<] t)))) pats
-                    targs <- traverse (\t => toFullNames !(quoteNF [<] t)) args
+                 do under <- traverse (\t => toFullNames !(quote [<] t)) pats -- hang at quoteNF
+                    targs <- traverse (\t => toFullNames !(quote [<] t)) args -- hang at quoteNF
                     pure ("Under " ++ show under ++ "\n" ++ "Args " ++ show targs)
              if fn == NS builtinNS (UN $ Basic "assert_total")
                 then pure []
                 else
                  do scs <- traverse (findSC g eqs pats) args
                     pure ([MkSCCall fn
-                             (fromSparseList (expandToArity arity
-                                  !(traverse (mkChange eqs aSmaller pats) args)))
+                             (fromListList
+                                  !(traverse (mkChange eqs aSmaller pats) args))
                              fc]
                              ++ concat scs)
 
 findSCTop : {auto c : Ref Ctxt Defs} ->
             {auto v : Ref SCVar Int} ->
-            Nat -> List (Nat, Glued [<]) -> Glued [<] -> Core (List SCCall)
-findSCTop i args (VBind _ _ (Lam _ _ _ _) sc)
+            List (Glued [<]) -> Glued [<] -> Core (List SCCall)
+findSCTop args (VBind _ _ (Lam _ _ _ _) sc)
     = do arg <- nextVar
-         findSCTop (i + 1) ((i, arg) :: args) !(sc $ pure arg)
-findSCTop i args def = findSC Toplevel [] (reverse args) def
+         findSCTop (arg :: args) !(sc $ pure arg)
+findSCTop args def
+    = do for_ args $ \arg => do
+            logNF "totality.termination.sizechange" 10 "From tree arg: " [<] arg
+
+         findSC Toplevel [] (reverse args) def
 
 getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
@@ -620,7 +554,7 @@ getSC defs (Function _ tm _ _)
    = do ntm <- nfTotality [<] tm
         logNF "totality.termination.sizechange" 5 "From tree" [<] ntm
         v <- newRef SCVar 0
-        sc <- findSCTop 0 [] ntm
+        sc <- findSCTop [] ntm
         pure $ nub sc
 getSC defs _ = pure []
 

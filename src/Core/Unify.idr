@@ -1521,7 +1521,7 @@ retryGuess mode smode (hid, (loc, hname))
                             pure False -- progress not made yet!
                        err =>
                          do logTermNF "unify.retry" 5
-                                      ("Search failed at " ++ show rig ++ " for " ++ show hname)
+                                      ("Search failed at " ++ show rig ++ " for " ++ show hname ++ " err: " ++ show err)
                                       ScopeEmpty (type def)
                             case smode of
                                  LastChance => throw err
