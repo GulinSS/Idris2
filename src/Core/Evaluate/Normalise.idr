@@ -19,6 +19,13 @@ data EvalFlags
     | Totality
     | HolesOnly -- expand all defined holes, and nothing else
 
+Show EvalFlags where
+  show KeepAs = "KeepAs"
+  show Full = "Full"
+  show KeepLet = "KeepLet"
+  show Totality = "Totality"
+  show HolesOnly = "HolesOnly"
+
 export
 apply : FC -> Value f vars -> RigCount -> Core (Glued vars) -> Core (Glued vars)
 apply fc (VBind _ _ (Lam _ _ _ _) sc) _ arg = sc arg
@@ -333,7 +340,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                  | Nothing => pure (VMeta fc n i scope' [<] (pure Nothing))
             let Function fi fn _ _ = definition def
                  | _ => pure (VMeta fc n i scope' [<] (pure Nothing))
-            log "declare.record" 5 (show n ++ ", " ++ show (alwaysReduce fi))
+            log "declare.record" 5 (show n ++ ", " ++ show (alwaysReduce fi) ++ " eflags: " ++ show eflags)
             let exph = case eflags of
                             HolesOnly => True
                             _ => False
