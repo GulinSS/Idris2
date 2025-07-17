@@ -367,13 +367,23 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
   evalRef locs env fc nt n
       = do defs <- get Ctxt
            Just def <- lookupCtxtExact n (gamma defs)
-                | Nothing => pure (VApp fc nt n [<] (pure Nothing))
+                | Nothing => do logC "eval.stuck.outofscope" 5 $ do
+                                  n' <- toFullNames n
+                                  pure $ "Stuck function: " ++ show n'
+                                pure (VApp fc nt n [<] (pure Nothing))
            let Function fi fn _ _ = definition def
-                | _ => pure (VApp fc nt n [<] (pure Nothing))
+                | res => do logC "eval.def.stuck" 50 $ do
+                              n <- toFullNames n
+                              pure "Cannot reduce def \{show n}: it is a \{show res}"
+                            pure (VApp fc nt n [<] (pure Nothing))
            if alwaysReduce fi || (reduceForTC eflags (flags def))
-              then eval locs env (embed fn)
+              then do logC "eval.def.stuck" 50 $ do
+                        def <- toFullNames def
+                        pure "Refusing to reduce \{show $ definition def}"
+                      eval locs env (embed fn)
               else pure $ VApp fc nt n [<] $
-                          do res <- eval locs env (embed fn)
+                          do logC "eval.def.stuck" 50 $ pure "pre-evalTree args: n: \{show !(toFullNames n)}, tree: \{show fn}"
+                             res <- eval locs env (embed fn)
                              pure (Just res)
     where
       reduceForTC : EvalFlags -> List DefFlag -> Bool
@@ -431,7 +441,10 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
 --          Env Term vars ->
 --          Term (vars ++ free) -> Core (Glued vars)
   eval locs env (Local fc _ idx p) = evalLocal env fc p locs
-  eval locs env (Ref fc nt n) = evalRef locs env fc nt n
+  eval locs env (Ref fc nt n) =
+    do logC "eval.ref" 50 $ do fn' <- toFullNames n
+                               pure "Ref \{show nt} \{show fn'}"
+       evalRef locs env fc nt n
   eval locs env (Meta fc n i scope)
        = evalMeta locs env fc n i scope
   eval locs env (Bind fc x b sc) = evalBind locs env fc x b sc
