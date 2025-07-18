@@ -1039,18 +1039,20 @@ mutual
            then unifySpine mode fc env spx spy
            else postpone fc mode "Postponing application (match)" env x y
   -- Now the cases where we're decomposing into smaller problems
+  unifyNotMetavar mode fc env x@(VLocal fcx idx _ [<]) y@(VLocal fcy idy _ [<])
+      = if idx == idy
+           then pure success
+           else convertError fc env x y
   unifyNotMetavar mode@(MkUnifyInfo p InTerm) fc env x@(VLocal fcx idx _ spx)
-                                                y@(VLocal fcy idy _ spy)
+                                                     y@(VLocal fcy idy _ spy)
       = if idx == idy
            then unifySpine mode fc env spx spy
-           else postpone fc mode "Postponing local app"
-                         env x y
+           else postpone fc mode "Postponing local app" env x y
   unifyNotMetavar mode@(MkUnifyInfo p InMatch) fc env x@(VLocal fcx idx _ spx)
-                                                 y@(VLocal fcy idy _ spy)
+                                                      y@(VLocal fcy idy _ spy)
       = if idx == idy
            then unifySpine mode fc env spx spy
-           else postpone fc mode "Postponing local app"
-                         env x y
+           else postpone fc mode "Postponing local app" env x y
   unifyNotMetavar mode fc env x@(VDCon fcx nx tx ax spx) y@(VDCon fcy ny ty ay spy)
       = if tx == ty
            then unifySpine mode fc env spx spy
