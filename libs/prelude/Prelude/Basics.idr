@@ -132,14 +132,13 @@ export
 cong2 : (0 f : t1 -> t2 -> u) -> (0 p1 : a = b) -> (0 p2 : c = d) -> f a c = f b d
 cong2 f Refl Refl = Refl
 
--- TODO: Yaffle can't typecheck this with `=`
 ||| Dependent version of `cong`.
 public export
 depCong : {0 p : a -> Type} ->
           (0 f : (x : a) -> p x) ->
           {0 x1, x2 : a} ->
           (prf : x1 = x2) ->
-          f x1 ~=~ f x2
+          f x1 = f x2
 depCong f Refl = Refl
 
 ||| Dependent version of `cong2`.
@@ -149,7 +148,7 @@ depCong2 : {0 p : a -> Type} ->
            (0 f : (x : a) -> (y : p x) -> q x y) ->
            {0 x1, x2 : a} -> (prfX : x1 = x2) ->
            {0 y1 : p x1} -> {y2 : p x2} ->
-           (prfY : y1 ~=~ y2) -> f x1 y1 ~=~ f x2 y2
+           (prfY : y1 = y2) -> f x1 y1 = f x2 y2
 depCong2 f Refl Refl = Refl
 
 ||| Irrelevant equalities can always be made relevant
