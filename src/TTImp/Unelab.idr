@@ -126,15 +126,19 @@ mutual
            pure (term, !(nf env (embed ty)))
 
   unelabTy' umode nest env (Bind fc x b sc)
-      = do let env' = env :< b
-           (sc', scty) <- unelabTy umode nest env' sc
-           case umode of
-                NoSugar True =>
-                   let x' = uniqueLocal vars x in
-                       unelabBinder umode nest fc env x' b
-                                    (renameVars (Ext Pre) sc) sc'
-                                    (renameVars (Ext Pre) !(quote env' scty))
-                _ => unelabBinder umode nest fc env x b sc sc' !(quote env' scty)
+      = case umode of
+          NoSugar True => do
+            let x' = uniqueLocal vars x
+            let sc : Term (vars :< x') = compat sc
+            let env' = env :< b
+            (sc', scty) <- unelabTy umode nest env' sc
+            unelabBinder umode nest fc env x' b
+                         (compat sc) sc'
+                         (compat !(quote env' scty))
+          _ => do
+            let env' = env :< b
+            (sc', scty) <- unelabTy umode nest env' sc
+            unelabBinder umode nest fc env x b sc sc' !(quote env' scty)
     where
       next : Name -> Name
       next (MN n i) = MN n (i + 1)
