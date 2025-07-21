@@ -275,7 +275,7 @@ searchLocalWith : {vars : _} ->
 searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) target
     = do defs <- get Ctxt
          nty <- nf env ty
-         findPos defs prf id !(expand nty) target
+         findPos defs prf pure !(expand nty) target
   where
     clearEnvType : {idx : Nat} -> (0 p : IsVar nm idx vs) ->
                    FC -> Env Term vs -> Env Term vs
@@ -290,7 +290,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
 
     findDirect : Defs ->
                  Term vars ->
-                 (Term vars -> Term vars) ->
+                 (Term vars -> Core (Term vars)) ->
                  NF vars ->  -- local's type
                  (target : NF vars) ->
                  Core (Term vars)
@@ -298,7 +298,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
         = do (args, appTy) <- mkArgs fc rigc env ty
              log "auto" 10 $ "findDirect args" ++ show args
              logNF "auto" 10 "findDirect appTy" env appTy
-             let fprf = f prf
+             fprf <- f prf
              logTermNF "auto" 10 "Trying" env fprf
              logNF "auto" 10 "Type" env ty
              logNF "auto" 10 "For target" env target
@@ -324,7 +324,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
 
     findPos : Defs ->
               Term vars ->
-              (Term vars -> Term vars) ->
+              (Term vars -> Core (Term vars)) ->
               NF vars ->  -- local's type
               (target : NF vars) ->
               Core (Term vars)
@@ -344,17 +344,19 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                            exactlyOne fc env top target
                             [(do xtynf <- expand xty'
                                  findPos defs p
-                                     (\arg => apply fc (Ref fc Func fname)
-                                                        [(erased, xtytm),
-                                                         (erased, ytytm),
-                                                         (Preorder.top, f arg)])
+                                     (\arg => normalise env $
+                                                apply fc (Ref fc Func fname)
+                                                         [(erased, xtytm),
+                                                          (erased, ytytm),
+                                                          (Preorder.top, !(f arg))])
                                      xtynf target),
                              (do ytynf <- expand yty'
                                  findPos defs p
-                                     (\arg => apply fc (Ref fc Func sname)
-                                                        [(erased, xtytm),
-                                                         (erased, ytytm),
-                                                         (Preorder.top, f arg)])
+                                     (\arg => normalise env $
+                                                apply fc (Ref fc Func sname)
+                                                         [(erased, xtytm),
+                                                          (erased, ytytm),
+                                                          (Preorder.top, !(f arg))])
                                      ytynf target)]
                    else throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
     findPos defs p f nty target
