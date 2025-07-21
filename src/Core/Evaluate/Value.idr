@@ -142,6 +142,14 @@ vRef : FC -> NameType -> Name -> Value f vars
 vRef fc nt n = VApp fc nt n [<] (pure Nothing)
 
 export
+vtCon : FC -> Name -> Nat -> Spine vars -> Value f vars
+vtCon fc (UN (Basic "Type")) Z [<] = VType fc (MN "top" 0)
+vtCon fc n Z [<] = case isConstantType n of
+  Just c => VPrimVal fc $ PrT c
+  Nothing => VTCon fc n Z [<]
+vtCon fc n arity args = VTCon fc n arity args
+
+export
 getLoc : Value f vars -> FC
 getLoc (VBind fc x y sc) = fc
 getLoc (VApp fc x y sx z) = fc

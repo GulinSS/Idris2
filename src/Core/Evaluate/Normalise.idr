@@ -366,7 +366,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
   evalRef locs env fc (DataCon t a) n
       = pure $ VDCon fc n t a [<]
   evalRef locs env fc (TyCon a) n
-      = pure $ VTCon fc n a [<]
+      = pure $ vtCon fc n a [<]
   evalRef locs env fc nt n
       = do defs <- get Ctxt
            Just def <- lookupCtxtExact n (gamma defs)
