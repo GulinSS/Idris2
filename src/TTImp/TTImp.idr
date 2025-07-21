@@ -755,7 +755,7 @@ implicitsAs n defs ns tm
         -- Parameter blocks also introduce additional telescope of implicit, auto,
         -- and explicit variables. So we first peel off all of the quantifiers
         -- corresponding to these variables.
-        findImps ns es (_ :: locals) (VBind fc x (Pi _ _ Explicit _) sc)
+        findImps ns es (_ :: locals) (VBind fc x (Pi _ _ _ _) sc)
           = do body <- sc (pure (VErased fc Placeholder))
                body <- expand body
                findImps ns es locals body
