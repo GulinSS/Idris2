@@ -12,19 +12,23 @@ import Data.List
 import Data.SnocList
 import Data.Vect
 
+data HolesMode
+    = HolesAll -- expand all defined holes, and nothing else
+    | HolesArgs -- expand 'alwaysInline', evaluate holes which are relevant arguments, but don't expand any 'let' at all
+                -- former `KeepLet` but with an addition to deal with argument holes
+
 data EvalFlags
     = Full
     | KeepAs -- keep @ patterns, don't expand any 'let' in the environment
-    | KeepLet -- don't expand any 'let' at all, just expand 'alwaysInline'
     | Totality
-    | HolesOnly -- expand all defined holes, and nothing else
+    | Holes HolesMode
 
 Show EvalFlags where
   show KeepAs = "KeepAs"
   show Full = "Full"
-  show KeepLet = "KeepLet"
   show Totality = "Totality"
-  show HolesOnly = "HolesOnly"
+  show (Holes HolesAll) = "HolesAll"
+  show (Holes HolesArgs) = "HolesArgs"
 
 export
 apply : FC -> Value f vars -> RigCount -> Core (Glued vars) -> Core (Glued vars)
@@ -293,8 +297,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
     where
       keepBinder : EvalFlags -> Bool
       keepBinder KeepAs = True
-      keepBinder KeepLet = True
-      keepBinder HolesOnly = True
+      keepBinder (Holes _) = True
       keepBinder _ = False
   evalLocal env fc First (locs :< x) = x
   evalLocal env fc (Later p) (locs :< x) = evalLocal env fc p locs
@@ -340,11 +343,9 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                  | Nothing => pure (VMeta fc n i scope' [<] (pure Nothing))
             let Function fi fn _ _ = definition def
                  | _ => pure (VMeta fc n i scope' [<] (pure Nothing))
-            log "declare.record" 5 (show n ++ ", " ++ show (alwaysReduce fi) ++ " eflags: " ++ show eflags)
-            let exph = case eflags of
-                            HolesOnly => True
-                            _ => False
-            if exph || alwaysReduce fi || (reduceForTC eflags (multiplicity def))
+            log "declare.record" 5 ("evalMeta n: \{show n}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}")
+            logTerm "declare.record" 50 "evalMeta fn" fn
+            if alwaysReduce fi || (reduceForTC eflags (multiplicity def))
                then do evalfn <- eval locs env (embed fn)
                        applyAll fc evalfn scope'
                else pure $ VMeta fc n i scope' [<] $
@@ -354,6 +355,8 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
     where
       reduceForTC : EvalFlags -> RigCount -> Bool
       reduceForTC Totality c = not (isErased c)
+      reduceForTC (Holes HolesArgs) c = not (isErased c)
+      reduceForTC (Holes HolesAll) _ = True
       reduceForTC _ _ = False
 
   evalRef : LocalEnv free vars ->
@@ -400,10 +403,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                         (\arg => eval (locs :< arg) env sc)
   evalBind locs env fc x b@(Let bfc c val ty) sc
       = case eflags of
-             KeepLet =>
-                  pure $ VBind fc x !(evalBinder locs env b)
-                               (\arg => eval (locs :< arg) env sc)
-             HolesOnly =>
+             Holes _ =>
                   pure $ VBind fc x !(evalBinder locs env b)
                                (\arg => eval (locs :< arg) env sc)
              _ => do val' <- eval locs env val
@@ -454,9 +454,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
       = case eflags of
              KeepAs => pure $ VAs fc use !(eval locs env as)
                                          !(eval locs env pat)
-             KeepLet => pure $ VAs fc use !(eval locs env as)
-                                          !(eval locs env pat)
-             HolesOnly => pure $ VAs fc use !(eval locs env as)
+             Holes _ => pure $ VAs fc use !(eval locs env as)
                                             !(eval locs env pat)
              _ => eval locs env pat
   eval locs env (Case fc t r sc ty alts)
@@ -486,11 +484,11 @@ parameters {auto c : Ref Ctxt Defs}
 
   export
   nfHoles : Env Term vars -> Term vars -> Core (Glued vars)
-  nfHoles = eval HolesOnly [<]
+  nfHoles = eval (Holes HolesAll) [<]
 
   export
-  nfKeepLet : Env Term vars -> Term vars -> Core (Glued vars)
-  nfKeepLet = eval KeepLet [<]
+  nfHolesArgs : Env Term vars -> Term vars -> Core (Glued vars)
+  nfHolesArgs = eval (Holes HolesArgs) [<]
 
   export
   nfTotality : Env Term vars -> Term vars -> Core (Glued vars)
