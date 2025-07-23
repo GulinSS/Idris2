@@ -784,9 +784,9 @@ covering
 export
 covering
 {vars : _} -> Show (Term vars) where
-  show tm = let (fn, args) = getFnArgs tm in showApp fn args
+  show tm = let (fn, args) = getFnArgsWithCounts tm in showApp fn args
     where
-      showApp : {vars : _} -> Term vars -> List (Term vars) -> String
+      showApp : {vars : _} -> Term vars -> List (ZeroOneOmega, Term vars) -> String
       showApp (Local _ c idx p) []
          = show (nameAt p) ++ "[" ++ show idx ++ "]"
 

@@ -38,6 +38,9 @@ record HoleApp vars where
   -- because we're only updating usage of the things we know about
   scope : List (Maybe (Term vars))
 
+{vars: _} -> Show (HoleApp vars) where
+    show (MkHoleApp resolvedName scope) = "HoleApp { resolvedName=\{show resolvedName} scope=\{assert_total $ show scope} }"
+
 -- A tree, built from the term, explaining what is used where.
 -- We need this because of the interaction between case branches and holes.
 -- If a variable is used in one branch, but not in another, then holes in
@@ -50,6 +53,10 @@ record HoleUsage vars where
   used : Usage vars
   caseAlts : List (HoleUsage vars)
   holeApps : List (HoleApp vars)
+
+{vars: _} -> Show (HoleUsage vars) where
+    show (HUsage location used caseAlts holeApps) = "HUsage { location=\{show location} used=\{show used} caseAlts=\{assert_total $ show caseAlts} holeApps=\{show holeApps} }"
+
 
 hdone : FC -> Core (HoleUsage vars)
 hdone fc = pure $ HUsage fc [<] [] []
@@ -364,7 +371,7 @@ parameters {auto c : Ref Ctxt Defs}
   lcheck {vars} rig env (Local fc _ idx prf)
       = let b = getBinder prf env
             rigb = multiplicity b in
-            do log "quantity" 10 $ show rigb ++ " " ++ show (getName vars prf) ++ " in " ++ show rig
+            do log "quantity" 10 $ "lcheck Local " ++ show rigb ++ " " ++ show (getName vars prf) ++ " in " ++ show rig
                rigSafe rigb rig
                pure (HUsage fc (used (rigMult rig rigb)) [] [])
     where
@@ -381,7 +388,8 @@ parameters {auto c : Ref Ctxt Defs}
       used : RigCount -> Usage vars
       used r = if isLinear r then [<MkVar prf] else [<]
   lcheck rig env (Ref fc nt n)
-      = hdone fc -- No quantity to check, and the name's quantity was checked
+      = do logC "quantity" 15 $ do pure "lcheck Ref \{show (nt)} \{show !(toFullNames n)}"
+           hdone fc -- No quantity to check, and the name's quantity was checked
               -- when type checking
   lcheck {vars} rig env (Meta fc n i args)
       -- If the metavariable is defined, check as normal (we assume that
@@ -401,7 +409,7 @@ parameters {auto c : Ref Ctxt Defs}
                              Just def => case definition def of
                                               Function {} => True
                                               _ => False
-                us <- traverse (\ (c, arg) => lcheck (rigMult rig c) env arg) args
+                us <- logDepth $ traverse (\ (c, arg) => logDepth $ lcheck (rigMult rig c) env arg) args
                 let newHoleApp : HoleApp vars
                     = MkHoleApp i (map (Just . snd) args)
                 if defined
@@ -417,7 +425,7 @@ parameters {auto c : Ref Ctxt Defs}
                                    Pi _ _ _ _ => (env, rig)
                                    _ => (restrictEnv env rig, presence rig)
 
-           usc <- lcheck rig' (env' :< b) sc
+           usc <- logDepth $ lcheck rig' (env' :< b) sc
            let used_in = count 0 usc
 
            -- Look for holes in the scope, if the variable is linearly bound.
@@ -454,23 +462,24 @@ parameters {auto c : Ref Ctxt Defs}
                  _ => rig_in
 
   lcheck rig env (App fc fn q arg)
-      = do uf <- lcheck rig env fn
-           ua <- lcheck (rigMult rig q) env arg
+      = do logC "quantity" 15 $ do pure "lcheck App \{show !(toFullNames fn)} \{show !(toFullNames arg)}"
+           uf <- logDepth $ lcheck rig env fn
+           ua <- logDepth $ lcheck (rigMult rig q) env arg
            pure (combine fc uf ua)
   lcheck rig env (As fc s var pat)
       = lcheck rig env pat
   lcheck rig env (Case fc t scrig sc ty alts)
-      = do usc <- lcheck (rigMult scrig rig) env sc
+      = do usc <- logDepth $ lcheck (rigMult scrig rig) env sc
            ualts <- lcheckAlts fc (presence rig) (restrictEnv env rig) scrig alts
            pure (combine fc usc ualts)
-  lcheck rig env (TDelayed fc r tm) = lcheck rig env tm
-  lcheck rig env (TDelay fc r ty arg) = lcheck rig env arg
-  lcheck rig env (TForce fc r tm) = lcheck rig env tm
+  lcheck rig env (TDelayed fc r tm) = logDepth $ lcheck rig env tm
+  lcheck rig env (TDelay fc r ty arg) = logDepth $ lcheck rig env arg
+  lcheck rig env (TForce fc r tm) = logDepth $ lcheck rig env tm
   lcheck rig env (PrimVal fc c) = hdone fc
   lcheck rig env (PrimOp fc fn args)
-     = do us <- traverseVect (lcheck rig env) args
+     = do us <- logDepth $ traverseVect (\a => logDepth $ lcheck rig env a) args
           pure (concat fc (toList us))
-  lcheck rig env (Erased _ (Dotted t)) = lcheck rig env t
+  lcheck rig env (Erased _ (Dotted t)) = logDepth $ lcheck rig env t
   lcheck rig env (Erased fc _) = hdone fc
   lcheck rig env (Unmatched fc _) = hdone fc
   lcheck rig env (TType fc _) = hdone fc
@@ -502,7 +511,8 @@ parameters {auto c : Ref Ctxt Defs}
   linearCheck : {vars : _} ->
                 FC -> RigCount -> Env Term vars -> Term vars -> Core ()
   linearCheck fc rig env tm
-      = do logTerm "quantity" 10 "Checking linearity" tm
-           logEnv "quantity" 10 "In env" env
-           used <- lcheck rig env tm
+      = do logTerm "quantity" 5 "Linearity check on " tm
+           logEnv "quantity" 5 "In env" env
+           used <- logDepth $ lcheck rig env tm
+           log "quantity" 5 $ "Used: " ++ show used
            checkEnvUsage {done = [<]} fc rig env used tm
