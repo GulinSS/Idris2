@@ -436,13 +436,12 @@ checkLHS {vars} trans mult n opts nest env fc lhs_in
          -- so we only need to do the holes. If there's a lot of type level
          -- computation, this is a huge saving!
          lhstm <- normaliseHoles lhsenv lhstm
+         lhsty <- normaliseHoles env lhsty
          linvars_in <- findLinear True 0 linear lhstm
          logTerm "declare.def.lhs" 10 "Checked LHS term after normalise" lhstm
-         linvars_in <- findLinear True 0 linear lhstm
          log "declare.def.lhs" 5 $ "Linearity of names in " ++ show n ++ ": " ++
                  show linvars_in
 
-         lhsty <- normaliseHoles env lhsty
          logTerm "declare.def.lhs" 10 "lhsty" lhsty
 
          linvars <- combineLinear fc linvars_in
