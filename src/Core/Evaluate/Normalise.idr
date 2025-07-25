@@ -343,7 +343,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                  | Nothing => pure (VMeta fc n i scope' [<] (pure Nothing))
             let Function fi fn _ _ = definition def
                  | _ => pure (VMeta fc n i scope' [<] (pure Nothing))
-            log "declare.record" 5 ("evalMeta n: \{show n}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}")
+            log "declare.record" 40 ("evalMeta n: \{show n}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}")
             logTerm "declare.record" 50 "evalMeta fn" fn
             if alwaysReduce fi || (reduceForTC eflags (multiplicity def))
                then do evalfn <- eval locs env (embed fn)

@@ -739,12 +739,12 @@ convertWithLazy withLazy fc elabinfo env x y
                        _ => inTerm in
           catch
             (do let lazy = !isLazyActive && withLazy
-                logNF "elab.unify" 5 ("Unifying " ++ show withLazy ++ " "
-                            ++ show (elabMode elabinfo)) env x
-                vs <- do logNF "elab.unify" 5 "....with lazy=\{show lazy}" env y
-                         if lazy
-                           then logDepth $ unifyWithLazy umode fc env x y
-                           else logDepth $ unify umode fc env x y
+                logNF "elab.unify" 5 ("Unifying " ++ show lazy ++ " "
+                             ++ show (elabMode elabinfo)) env x
+                logNF "elab.unify" 5 "....with" env y
+                vs <- if lazy
+                         then logDepth $ unifyWithLazy umode fc env x y
+                         else logDepth $ unify umode fc env x y
                 when (holesSolved vs) $
                     solveConstraints umode Normal
                 pure vs)

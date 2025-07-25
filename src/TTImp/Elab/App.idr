@@ -860,11 +860,11 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
-        logTerm "elab" 10 "checkApp-IVar ntm" ntm
-        logNF "elab" 10 "checkApp-IVar nty_in NF" env nty
-        logTerm "elab" 10 "checkApp-IVar nty_in Term" !(quote env nty_in)
-        logEnv "elab" 10 "checkApp-IVar Env" env
-        logNF "elab" 10 "checkApp-IVar nty_in NF" env nty
+        logTerm "elab" 50 "checkApp-IVar ntm" ntm
+        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
+        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(quote env nty_in)
+        logEnv "elab" 50 "checkApp-IVar Env" env
+        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
         addNameLoc fc' n
 
         logC "elab" 10

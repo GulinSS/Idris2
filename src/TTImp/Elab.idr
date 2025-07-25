@@ -137,7 +137,7 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
 
          logTerm "elab" 10 "Term before nfHolesArgs" chktm
          chktm <- quote env !(nfHolesArgs env chktm)
-         logTerm "elab" 5 "Term after nfHolesArgs" chktm
+         logTerm "elab" 5 "Term after nfHolesArgs PE:\{show inPE}" chktm
 
          -- Linearity and hole checking.
          -- on the LHS, all holes need to have been solved
