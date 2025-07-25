@@ -75,4 +75,4 @@ checkHole rig elabinfo nest env fc n_in exp
          addNameLoc fc nm
          addUserHole False nm
          saveHole nm
-         pure (metaval, !(nf env ty))
+         pure (metaval, !(nf env' ty))
