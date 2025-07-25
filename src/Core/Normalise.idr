@@ -229,12 +229,12 @@ export
 logEnv : {vars : _} ->
          {auto c : Ref Ctxt Defs} ->
          LogTopic ->
-         Nat -> String -> Env Term vars -> Core ()
+         Nat -> Lazy String -> Env Term vars -> Core ()
 logEnv s n msg env
     = when !(logging s n) $
         do depth <- getDepth
            logString depth s.topic n msg
-           dumpEnv s env
+           dumpEnv env
 
   where
 

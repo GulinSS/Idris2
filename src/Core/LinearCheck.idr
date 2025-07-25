@@ -179,10 +179,14 @@ mutual
       = let b = getBinder prf env
             rigb = multiplicity b
             ty = binderType b in
-            do log "quantity" 15 "lcheck Local"
+            do log "quantity" 15 $ "lcheck Local " ++ show rigb ++ " " ++ show (getName vars prf) ++ " in " ++ show rig
                when (not erase) $ rigSafe rigb rig
                pure (Local fc x idx prf, gnf env ty, used rig)
     where
+      getName : {idx : _} -> (vs : Scope) -> (0 p : IsVar n idx vs) -> Name
+      getName (_ :< x) First = x
+      getName (xs :< x) (Later p) = getName xs p
+
       rigSafe : RigCount -> RigCount -> Core ()
       rigSafe l r = when (l < r)
                          (throw (LinearMisuse fc (nameAt prf) l r))
@@ -255,7 +259,7 @@ mutual
                               (Lam _ _ _ _) => eraseLinear env
                               _ => env
                          else env
-           (sc', sct, usedsc) <- lcheck rig erase (Env.bind env' b') sc
+           (sc', sct, usedsc) <- logDepth $ lcheck rig erase (Env.bind env' b') sc
 
            let used_in = count 0 usedsc
            holeFound <- if not erase && isLinear (multiplicity b)
@@ -294,7 +298,7 @@ mutual
 
   lcheck rig erase env (App fc f a)
       = do logC "quantity" 15 $ do pure "lcheck App \{show !(toFullNames f)} \{show !(toFullNames a)}"
-           (f', gfty, fused) <- lcheck rig erase env f
+           (f', gfty, fused) <- logDepth $ lcheck rig erase env f
            defs <- get Ctxt
            fty <- getNF gfty
            case fty of
@@ -303,7 +307,7 @@ mutual
                      -- unrestricted context, because we'll be out of the
                      -- application without spending it
                    do let checkRig = rigf |*| rig
-                      (a', gaty, aused) <- lcheck checkRig erase env a
+                      (a', gaty, aused) <- logDepth $ lcheck checkRig erase env a
                       sc' <- scdone defs (toClosure defaultOpts env a')
                       let aerased = if erase && isErased rigf then Erased fc Placeholder else a'
                       -- Possibly remove this check, or make it a compiler
@@ -343,21 +347,21 @@ mutual
 
   lcheck rig erase env (As fc s as pat)
       = do log "quantity" 15 "lcheck As"
-           (as', _, _) <- lcheck rig erase env as
-           (pat', pty, u) <- lcheck rig erase env pat
+           (as', _, _) <- logDepth $ lcheck rig erase env as
+           (pat', pty, u) <- logDepth $ lcheck rig erase env pat
            pure (As fc s as' pat', pty, u)
   lcheck rig erase env (TDelayed fc r ty)
       = do log "quantity" 15 "lcheck Delayed"
-           (ty', _, u) <- lcheck rig erase env ty
+           (ty', _, u) <- logDepth $ lcheck rig erase env ty
            pure (TDelayed fc r ty', gType fc (MN "top" 0), u)
   lcheck rig erase env (TDelay fc r ty val)
-      = do (ty', _, _) <- lcheck erased erase env ty
-           (val', gty, u) <- lcheck rig erase env val
+      = do (ty', _, _) <- logDepth $ lcheck erased erase env ty
+           (val', gty, u) <- logDepth $ lcheck rig erase env val
            ty <- getTerm gty
            pure (TDelay fc r ty' val', gnf env (TDelayed fc r ty), u)
   lcheck rig erase env (TForce fc r val)
       = do log "quantity" 15 "lcheck Force"
-           (val', gty, u) <- lcheck rig erase env val
+           (val', gty, u) <- logDepth $ lcheck rig erase env val
            tynf <- getNF gty
            case tynf of
                 NDelayed _ r narg
@@ -720,7 +724,7 @@ linearCheck : {vars : _} ->
 linearCheck fc rig erase env tm
     = do logTerm "quantity" 5 "Linearity check on " tm
          logEnv "quantity" 5 "In env" env
-         (tm', _, used) <- lcheck rig erase env tm
+         (tm', _, used) <- logDepth $ lcheck rig erase env tm
          log "quantity" 5 $ "Used: " ++ show used
          when (not erase) $ checkEnvUsage fc [<] rig env used tm'
          pure tm'

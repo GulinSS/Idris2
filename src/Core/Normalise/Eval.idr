@@ -304,7 +304,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
                         -- when evaluating something recursive, so this is a
                         -- good place to check
              unless redok2 $ logC "eval.stuck" 5 $ do n' <- toFullNames n
-                                                      pure $ "Stuck function: \{show n'}"
+                                                      pure $ "Stuck function: \{show n'}, topopts: \{show topopts}"
              if redok
                 then do
                    Just opts' <- updateLimit nt n topopts

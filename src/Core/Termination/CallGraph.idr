@@ -361,6 +361,11 @@ mutual
       = do fn <- getFullName fn_in
            logC "totality.termination.sizechange" 10 $ do pure $ "Looking under " ++ show !(toFullNames fn)
            aSmaller <- resolved (gamma defs) (NS builtinNS (UN $ Basic "assert_smaller"))
+           logC "totality.termination.sizechange" 10 $
+               do under <- traverse toFullNames pats
+                  targs <- traverse toFullNames args
+                  pure ("Under " ++ show under ++ "\n" ++ "Args " ++ show targs)
+
            cond [(fn == NS builtinNS (UN $ Basic "assert_total"), pure [])
                 ,(caseFn fn,
                     do scs1 <- traverse (findSC defs env g pats) args
@@ -397,8 +402,12 @@ findCalls defs (_ ** (env, lhs, rhs_in))
 
 getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
-getSC defs (PMDef _ args _ _ pats)
-   = do sc <- traverse (findCalls defs) pats
+getSC defs (PMDef _ args ct _ pats)
+   = do log "totality.termination.sizechange" 5 $ "From tree" ++ show ct
+        for_ pats $ \(_ ** (_, pat)) => do
+            log "totality.termination.sizechange" 10 $ "From tree pat: " ++ show pat
+
+        sc <- traverse (findCalls defs) pats
         pure $ nub (concat sc)
 getSC defs _ = pure []
 
@@ -410,4 +419,6 @@ calculateSizeChange loc n
          defs <- get Ctxt
          Just def <- lookupCtxtExact n (gamma defs)
               | Nothing => undefinedName loc n
-         getSC defs (definition def)
+         r <- getSC defs (definition def)
+         log "totality.termination.sizechange" 5 $ "Calculated: " ++ show r
+         pure r

@@ -12,6 +12,11 @@ import Data.SnocList.Quantifiers
 public export
 data EvalOrder = CBV | CBN
 
+export
+Show EvalOrder where
+  show CBV = "CBV"
+  show CBN = "CBN"
+
 public export
 record EvalOpts where
   constructor MkEvalOpts
@@ -24,6 +29,11 @@ record EvalOpts where
   reduceLimit : List (Name, Nat) -- reduction limits for given names. If not
                      -- present, no limit
   strategy : EvalOrder
+
+export
+Show EvalOpts where
+  show (MkEvalOpts holesOnly argHolesOnly removeAs evalAll tcInline fuel reduceLimit strategy) =
+    "MkEvalOpts holesOnly=\{show holesOnly} argHolesOnly=\{show argHolesOnly} removeAs=\{show removeAs} evalAll=\{show evalAll} tcInline=\{show tcInline} fuel=\{show fuel} reduceLimit=\{show reduceLimit} strategy=\{show strategy}"
 
 export
 defaultOpts : EvalOpts

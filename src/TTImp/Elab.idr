@@ -156,10 +156,12 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
 
          dumpConstraints "elab" 4 False
          defs <- get Ctxt
+         logTerm "elab" 10 "Term before normalise*" chktm
          chktm <- if inPE -- Need to fully normalise holes in partial evaluation
                           -- because the holes don't have types saved to ttc
                      then normaliseHoles defs env chktm
                      else normaliseArgHoles defs env chktm
+         logTerm "elab" 5 "Term after normalise* PE:\{show inPE}" chktm
 
          -- Linearity and hole checking.
          -- on the LHS, all holes need to have been solved

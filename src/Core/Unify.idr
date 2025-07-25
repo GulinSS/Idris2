@@ -885,6 +885,7 @@ mutual
               Core UnifyResult
   unifyHole swap mode loc env fc mname mref margs margs' tmnf
       = do defs <- get Ctxt
+           logNF "elab" 10 ("Trying to solve " ++ show mname ++ " with") env tmnf
            empty <- clearDefs defs
            let args = if isLin margs' then cast margs else cast margs ++ margs'
            logC "unify.hole" 10
@@ -1018,7 +1019,8 @@ mutual
                                        (NApp yfc (NLocal yr y yp) yargs)
   -- If they're both holes, solve the one with the bigger context
   unifyBothApps mode loc env xfc (NMeta xn xi xargs) xargs' yfc (NMeta yn yi yargs) yargs'
-      = do invx <- isDefInvertible loc xi
+      = do log "elab" 10 ("Unifying metas " ++ show xn ++ " and " ++ show yn)
+           invx <- isDefInvertible loc xi
            if xi == yi && (invx || umode mode == InSearch)
                                -- Invertible, (from auto implicit search)
                                -- so we can also unify the arguments.

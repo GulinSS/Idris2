@@ -864,11 +864,11 @@ mkRunTime fc n
                (vars ** (Env Term vars, Term vars, Term vars)) ->
                Core (vars ** (Env Term vars, Term vars, Term vars))
     toErased fc spec (_ ** (env, lhs, rhs))
-        = do lhs_erased <- linearCheck fc linear True env lhs
+        = do lhs_erased <- logQuiet $ linearCheck fc linear True env lhs
              -- Partially evaluate RHS here, where appropriate
              rhs' <- applyTransforms env rhs
              rhs' <- applySpecialise env spec rhs'
-             rhs_erased <- linearCheck fc linear True env rhs'
+             rhs_erased <- logQuiet $ linearCheck fc linear True env rhs'
              pure (_ ** (env, lhs_erased, rhs_erased))
 
     toClause : FC -> (vars ** (Env Term vars, Term vars, Term vars)) -> Clause
@@ -989,7 +989,7 @@ processDef opts nest env fc n_in cs_in
 
          -- Dynamically rebind default totality requirement to this function's totality requirement
          -- and use this requirement when processing `with` blocks
-         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult
+         log "declare.def" 5 $ "Traversing clauses of " ++ show n ++ " with mult " ++ show mult ++ " in " ++ show cs_in
          let treq = fromMaybe !getDefaultTotalityOption (findSetTotal (flags gdef))
          cs <- withTotality treq $
                traverse (checkClause mult (collapseDefault $ visibility gdef) treq

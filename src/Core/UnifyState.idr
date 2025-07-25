@@ -728,4 +728,4 @@ dumpConstraints s n all
            unless (isNil hs) $
              do depth <- getDepth
                 logString depth s.topic n "--- CONSTRAINTS AND HOLES ---"
-                traverse_ (dumpHole s n) (map fst hs)
+                logDepth $ traverse_ (dumpHole s n) (map fst hs)
