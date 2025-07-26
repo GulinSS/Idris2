@@ -74,7 +74,7 @@ findTyName : {vars : _} ->
 findTyName defs env n (Bind _ x b@(PVar _ c p ty) sc)
       -- Take the first one, which is the most recently bound
     = if n == x
-         then do tynf <- nf env ty
+         then do tynf <- expand !(nf env ty)
                  case tynf of
                       VTCon _ tyn _ _ => pure $ Just tyn
                       _ => pure Nothing
