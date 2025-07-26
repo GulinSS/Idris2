@@ -241,7 +241,6 @@ recoverableErr (CantSolveEq fc gam env l r)
        put Ctxt defs'
        pure ok
 recoverableErr (BadDotPattern _ _ ErasedArg _ _) = pure True
-recoverableErr (CyclicMeta _ _ _ _) = pure True
 recoverableErr (AllFailed errs)
     = anyM recoverableErr (map snd errs)
 recoverableErr (WhenUnifying _ _ _ _ _ err)
