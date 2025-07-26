@@ -334,7 +334,16 @@ getSplitsLHS fc envlen lhs_in n
 
          let Just idx = getNameID fn (gamma defs)
              | Nothing => undefinedName fc fn
+
+         gdef <- lookupCtxtExact (Resolved idx) (gamma defs)
+         updateDef (Resolved idx)
+            (\d => case d of
+                        Function fi ct rt cs =>
+                          Just (Function ({ alwaysReduce := False } fi) ct rt cs)
+                        _ => Just d)
          cases <- traverse (mkCase idx rawlhs) trycases
+         updateDef (Resolved idx) $ const $ definition <$> gdef
+
          log "interaction.casesplit" 3 $ "Found cases: " ++ show cases
 
          pure (combine cases [])
