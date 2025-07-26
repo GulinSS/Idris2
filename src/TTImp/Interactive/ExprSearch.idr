@@ -504,15 +504,15 @@ searchLocalWith {vars} fc nofn rig opts hints env ((p, pty) :: rest) ty topty
                                   [(do xtynf <- expand xty'
                                        findPos defs prf
                                          (\arg => applyStackWithFC (Ref fc Func fname)
-                                                          [(fc1, xc, xtytm),
-                                                           (fc2, yc, ytytm),
+                                                          [(fc1, erased, xtytm),
+                                                           (fc2, erased, ytytm),
                                                            (fc, top, f arg)])
                                          xtynf target),
                                    (do ytynf <- expand yty'
                                        findPos defs prf
                                            (\arg => applyStackWithFC (Ref fc Func sname)
-                                                          [(fc1, xc, xtytm),
-                                                           (fc2, yc, ytytm),
+                                                          [(fc1, erased, xtytm),
+                                                           (fc2, erased, ytytm),
                                                            (fc, top, f arg)])
                                            ytynf target)]
                          else noResult)]
