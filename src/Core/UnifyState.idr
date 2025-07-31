@@ -604,35 +604,35 @@ dumpHole s n hole
           Just gdef => case (definition gdef, type gdef) of
              (Guess tm envb constraints, ty) =>
                   do logString depth s.topic n $
-                       "!" ++ show !(getFullName (Resolved hole)) ++ " : "
-                           ++ show !(toFullNames !(normaliseHoles ScopeEmpty ty))
+                       "! \{show hole} " ++ show !(getFullName (Resolved hole)) ++ " : "
+                           ++ show !(toFullNames !(logQuiet $ normaliseHoles ScopeEmpty ty))
                        ++ "\n\t  = "
-                           ++ show !(normaliseHoles ScopeEmpty tm)
+                           ++ show !(logQuiet $ normaliseHoles ScopeEmpty tm)
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
                   logString depth s.topic n $
-                    "?" ++ show (fullname gdef) ++ " : "
-                        ++ show !(normaliseHoles ScopeEmpty ty)
+                    "? \{show hole} " ++ show (fullname gdef) ++ " : "
+                        ++ show !(logQuiet $ normaliseHoles ScopeEmpty ty)
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
                   logString depth s.topic n $
                      "Search " ++ show hole ++ " : " ++
-                     show !(toFullNames !(normaliseHoles ScopeEmpty ty))
+                     show !(toFullNames !(logQuiet $ normaliseHoles ScopeEmpty ty))
              (Function _ t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
-                     show !(normalise ScopeEmpty ty) ++
-                     " = " ++ show !(normalise ScopeEmpty (Ref emptyFC Func (Resolved hole)))
+                     show !(logQuiet $ normalise ScopeEmpty ty) ++
+                     " = " ++ show !(logQuiet $ normalise ScopeEmpty (Ref emptyFC Func (Resolved hole)))
              (ImpBind, ty) =>
                   log s 4 $
                       "Bound: " ++ show hole ++ " : " ++
-                      show !(normalise ScopeEmpty ty)
+                      show !(logQuiet $ normalise ScopeEmpty ty)
              (Delayed, ty) =>
                   log s 4 $
                      "Delayed elaborator : " ++
-                     show !(normalise ScopeEmpty ty)
+                     show !(logQuiet $ normalise ScopeEmpty ty)
              _ => pure ()
   where
     dumpConstraint : Int -> Core ()
