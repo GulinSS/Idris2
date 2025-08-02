@@ -94,6 +94,13 @@ record UnifyResult where
   namesSolved : List Int -- which ones did we solve (as name indices)
   addLazy : AddLazy
 
+export
+Show UnifyResult where
+  show a = "constraints: " ++ show a.constraints
+    ++ ", holesSolved: " ++ show a.holesSolved
+    ++ ", namesSolved: " ++ show a.namesSolved
+    ++ ", addLazy: " ++ show a.addLazy
+
 union : UnifyResult -> UnifyResult -> UnifyResult
 union u1 u2 = MkUnifyResult (union (constraints u1) (constraints u2))
                             (holesSolved u1 || holesSolved u2)
@@ -222,8 +229,8 @@ postpone loc mode logstr env x y
     = do defs <- get Ctxt
          empty <- clearDefs defs
          logC "unify.postpone" 10 $
-              do xq <- quote defs env x
-                 yq <- quote defs env y
+              do xq <- logQuiet $ quote defs env x
+                 yq <- logQuiet $ quote defs env y
                  pure (logstr ++ ": " ++ show !(toFullNames xq) ++
                                     " =?= " ++ show !(toFullNames yq))
 
@@ -275,26 +282,17 @@ unifyArgs mode loc env [] [] = pure success
 unifyArgs mode loc env (cx :: cxs) (cy :: cys)
     = do -- Do later arguments first, since they may depend on earlier
          -- arguments and use their solutions.
-         cs <- unifyArgs mode loc env cxs cys
+         cs <- logDepth $ unifyArgs mode loc env cxs cys
          res <- unify (lower mode) loc env cx cy
          pure (union res cs)
 unifyArgs mode loc env _ _ = ufail loc ""
 
-unifySpine : (Unify tm, Quote tm) =>
-             {vars : _} ->
+unifySpine : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto u : Ref UST UState} ->
              UnifyInfo -> FC -> Env Term vars ->
-             SnocList (tm vars) -> SnocList (tm vars) ->
+             SnocList (Closure vars) -> SnocList (Closure vars) ->
              Core UnifyResult
-unifySpine mode loc env [<] [<] = pure success
-unifySpine mode loc env (cxs :< cx) (cys :< cy)
-    = do -- Do later arguments first, since they may depend on earlier
-         -- arguments and use their solutions.
-         res <- unify (lower mode) loc env cx cy
-         cs <- unifySpine mode loc env cxs cys
-         pure (union cs res)
-unifySpine mode loc env _ _ = ufail loc ""
 
 -- Get the variables in an application argument list; fail if any arguments
 -- are not variables, fail if there's any repetition of variables
@@ -473,7 +471,7 @@ tryInstantiate : {auto c : Ref Ctxt Defs} ->
               Term newvars -> -- shrunk environment
               Core Bool -- postpone if the type is yet unknown
 tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
-    = do logTerm "unify.instantiate" 5 ("Instantiating in " ++ show newvars) tm
+    = do logTerm "unify.instantiate" 5 ("Instantiating in " ++ show (asList newvars)) tm
 --          let Hole _ _ = definition mdef
 --              | def => ufail {a=()} loc (show mname ++ " already resolved as " ++ show def)
          case fullname mdef of
@@ -486,7 +484,7 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
          logTerm "unify.instantiate" 5 ("Type: " ++ show mname) (type mdef)
          logTerm "unify.instantiate" 5 ("Type: " ++ show mname) ty
          log "unify.instantiate" 5 ("With locs: " ++ show locs)
-         log "unify.instantiate" 5 ("From vars: " ++ show newvars)
+         log "unify.instantiate" 5 ("From vars: " ++ show (asList newvars))
 
          defs <- get Ctxt
          -- Try to instantiate the hole
@@ -892,8 +890,8 @@ mutual
                    (do args' <- traverse (evalArg empty) args
                        qargs <- traverse (quote empty env) args'
                        qtm <- quote empty env tmnf
-                       pure $ "Unifying: " ++ show mname ++ " " ++ show qargs ++
-                              " with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
+                       pure $ "Unifying: " ++ show mname ++ "\n args " ++ show qargs ++
+                              "\n with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
            case !(patternEnv env args) of
                 Nothing =>
                   do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
@@ -956,8 +954,8 @@ mutual
       = unifyApp swap mode loc env fc hd args t
   -- Postpone if a name application against an application, unless they are
   -- convertible
-  unifyApp swap mode loc env fc (NRef nt n) args tm
-      = do log "unify.application" 10 $ "Name against app, unifyIfEq"
+  unifyApp swap mode loc env fc h@(NRef nt n) args tm
+      = do log "unify.application" 10 $ "Name against app, unifyIfEq h: \{show !(toFullNames h)},\n args: \{show $ !(traverse toFullNames (map snd args))},\n tm: \{show !(toFullNames tm)}"
            if not swap
               then unifyIfEq True loc mode env (NApp fc (NRef nt n) args) tm
               else unifyIfEq True loc mode env tm (NApp fc (NRef nt n) args)
@@ -1108,12 +1106,11 @@ mutual
              else do Just ci <- unifyPiInfo (lower mode) loc env ix iy
                        | Nothing => err
                      empty <- clearDefs defs
-                     tx' <- quote empty env tx
-                     logC "unify.binder" 10 $
-                               (do ty' <- quote empty env ty
-                                   pure ("Unifying arg types " ++ show tx' ++ " and " ++ show ty'))
                      ct <- unify (lower mode) loc env tx ty
                      xn <- genVarName "x"
+                     tx' <- quote empty env tx
+                     logTerm "unify.binder" 10 "Unifying arg" tx'
+                     logNF "unify.binder" 10 "........with" env !(logQuiet $ evalClosure empty ty)
                      let env' : Env Term (_ :< x)
                               = Env.bind env $ Pi fcy cy Explicit tx'
                      case constraints ct of
@@ -1122,6 +1119,8 @@ mutual
                                tscy <- scy defs (toClosure defaultOpts env (Ref loc Bound xn))
                                tmx <- quote empty env tscx
                                tmy <- quote empty env tscy
+                               logTermNF "unify.binder" 10 "Unifying scope" env tmx
+                               logTermNF "unify.binder" 10 "..........with" env tmy
                                cs <- unify (lower mode) loc env'
                                        (refsToLocals (Add x xn None) tmx)
                                        (refsToLocals (Add x xn None) tmy)
@@ -1176,14 +1175,14 @@ mutual
   dumpArg env (MkClosure opts loc lenv tm)
       = do defs <- get Ctxt
            empty <- clearDefs defs
-           logTerm "unify" 20 "Term: " tm
-           nf <- evalClosure empty (MkClosure opts loc lenv tm)
-           logNF "unify" 20 "  " env nf
+           -- logTerm "unify" 20 "Term" tm
+           nf <- logQuiet $ evalClosure empty (MkClosure opts loc lenv tm)
+           logNF "unify" 20 "NF" env nf
   dumpArg env cl
       = do defs <- get Ctxt
            empty <- clearDefs defs
-           nf <- evalClosure empty cl
-           logNF "unify" 20 "  " env nf
+           nf <- logQuiet $ evalClosure empty cl
+           logNF "unify" 20 "NF" env nf
 
   export
   unifyNoEta : {auto c : Ref Ctxt Defs} ->
@@ -1193,7 +1192,11 @@ mutual
                NF vars -> NF vars ->
                Core UnifyResult
   unifyNoEta mode loc env (NDCon xfc x tagx ax xs) (NDCon yfc y tagy ay ys)
-      = do gam <- get Ctxt
+      = do logC "unify" 20 $ do
+             x <- toFullNames x
+             y <- toFullNames y
+             pure $ "Comparing data constructors " ++ show x ++ " and " ++ show y
+           gam <- get Ctxt
            if tagx == tagy
              then
                   do -- Constantly checking the log setting appears to have
@@ -1222,7 +1225,7 @@ mutual
                    let ys = map snd ys
 
                    logC "unify" 20 $
-                     pure $ "Constructor " ++ show x
+                     pure $ "Constructor " ++ show !(toFullNames x)
                    logC "unify" 20 $ map (const "") $ traverse_ (dumpArg env) xs
                    logC "unify" 20 $ map (const "") $ traverse_ (dumpArg env) ys
                    unifySpine mode loc env xs ys
@@ -1396,6 +1399,24 @@ mutual
                                     _ => unify mode loc env xnf ynf
                          _ => unify mode loc env xnf ynf
 
+unifySpine mode loc env [<] [<] = pure success
+unifySpine mode loc env (cxs :< cx) (cys :< cy)
+    = do -- Do later arguments first, since they may depend on earlier
+         -- arguments and use their solutions.
+         res <- unify (lower mode) loc env cx cy
+
+         defs <- get Ctxt
+         empty <- clearDefs defs
+         cx' <- logQuiet $ evalClosureWithOpts empty defaultOpts cx
+         cy' <- logQuiet $ evalClosureWithOpts empty defaultOpts cx
+         logNF "unify.application" 20 "unifySpine cx'" env cx'
+         logNF "unify.application" 20 "unifySpine cy'" env cy'
+         log "unify.application" 20 "unifySpine res \{show res}"
+
+         cs <- logDepth $ unifySpine mode loc env cxs cys
+         pure (union cs res)
+unifySpine mode loc env _ _ = ufail loc ""
+
 export
 setInvertible : {auto c : Ref Ctxt Defs} ->
                 FC -> Name -> Core ()
@@ -1430,15 +1451,18 @@ retry mode c
                => do defs <- get Ctxt
                      x <- continueNF defs env xold
                      y <- continueNF defs env yold
+                     log "unify.retry" 10 (show loc)
+                     logNF "unify.retry" 5 ("Retrying " ++ show c ++ " " ++ show (umode mode)) env x
+                     logNF "unify.retry" 5 "....with" env y
+                     log "unify.retry" 5 $ if withLazy
+                                                then "(lazy allowed)"
+                                                else "(no lazy)"
                      catch
-                       (do logNF "unify.retry" 5 ("Retrying " ++ show c ++ " " ++ show (umode mode)) env x
-                           logNF "unify.retry" 5 "....with" env y
-                           log "unify.retry" 5 $ if withLazy
-                                      then "(lazy allowed)"
-                                      else "(no lazy)"
+                       (do
                            cs <- ifThenElse withLazy
                                     (unifyWithLazy mode loc env x y)
                                     (unify (lower mode) loc env x y)
+                           logC "unify.retry" 5 $ pure "....result: \{show cs}"
                            case constraints cs of
                              [] => do log "unify.retry" 5 $ "Success " ++ show (addLazy cs)
                                       deleteConstraint c

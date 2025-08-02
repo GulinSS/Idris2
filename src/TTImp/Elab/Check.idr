@@ -757,6 +757,7 @@ convertWithLazy withLazy fc elabinfo env x y
                                  if lazy
                                     then logDepth $ unifyWithLazy umode fc env xnf ynf
                                     else logDepth $ unify umode fc env xnf ynf
+                logC "elab.unify" 5 $ pure "....result: \{show vs}"
                 when (holesSolved vs) $
                     solveConstraints umode Normal
                 pure vs)
@@ -796,6 +797,7 @@ checkExp : {vars : _} ->
            Core (Term vars, Glued vars)
 checkExp rig elabinfo env fc tm got (Just exp)
     = do vs <- convertWithLazy True fc elabinfo env got exp
+         logC "elab" 10 $ pure "checkExp vs: \{show vs}"
          case (constraints vs) of
               [] => case addLazy vs of
                          NoLazy => do logTerm "elab" 5 "Solved" tm
@@ -810,7 +812,7 @@ checkExp rig elabinfo env fc tm got (Just exp)
               cs => do logTerm "elab" 5 "Not solved" tm
                        defs <- get Ctxt
                        empty <- clearDefs defs
-                       cty <- getTerm exp
+                       cty <- logQuiet $ getTerm exp
                        ctm <- newConstant fc rig env tm cty cs
                        dumpConstraints "elab" 5 False
                        case addLazy vs of

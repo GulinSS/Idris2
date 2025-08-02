@@ -6,6 +6,7 @@ import Core.Env
 import Core.TT
 
 import Data.SnocList.Quantifiers
+import Data.SnocList
 
 %default covering
 
@@ -145,7 +146,7 @@ ntCon fc n tag arity args = NTCon fc n tag arity args
 export
 cons : LocalEnv free vars -> Closure free -> LocalEnv free ([<v] ++ vars)
 cons [<] p = Lin :< p
-cons (ns :< s) p = cons ns p :< s
+cons (ns :< s) p = Core.Value.cons ns p :< s
 
 export
 getLoc : NF vars -> FC
@@ -160,15 +161,6 @@ getLoc (NForce fc _ _ _) = fc
 getLoc (NPrimVal fc _) = fc
 getLoc (NErased fc i) = fc
 getLoc (NType fc _) = fc
-
-export
-{free : _} -> Show (NHead free) where
-  show (NLocal _ idx p) = show (nameAt p) ++ "[" ++ show idx ++ "]"
-  show (NRef _ n) = show n
-  show (NMeta n _ args) = "?" ++ show n ++ "_[" ++ show (length args) ++ " closures]"
-
-Show (Closure free) where
-  show _ = "[closure]"
 
 export
 HasNames (NHead free) where
@@ -205,33 +197,65 @@ HasNames (NF free) where
   resolved defs (NType fc n) = pure $ NType fc !(resolved defs n)
 
 export
-covering
-{free : _} -> Show (NF free) where
-  show (NBind _ x (Lam _ c info ty) _)
-    = "\\" ++ withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
-      " => [closure]"
-  show (NBind _ x (Let _ c val ty) _)
-    = "let " ++ showCount c ++ show x ++ " : " ++ show ty ++
-      " = " ++ show val ++ " in [closure]"
-  show (NBind _ x (Pi _ c info ty) _)
-    = withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
-      " -> [closure]"
-  show (NBind _ x (PVar _ c info ty) _)
-    = withPiInfo info ("pat " ++ showCount c ++ show x ++ " : " ++ show ty) ++
-      " => [closure]"
-  show (NBind _ x (PLet _ c val ty) _)
-    = "plet " ++ showCount c ++ show x ++ " : " ++ show ty ++
-      " = " ++ show val ++ " in [closure]"
-  show (NBind _ x (PVTy _ c ty) _)
-    = "pty " ++ showCount c ++ show x ++ " : " ++ show ty ++
-      " => [closure]"
-  show (NApp _ hd args) = show hd ++ " [" ++ show (length args) ++ " closures]"
-  show (NDCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
-  show (NTCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
-  show (NAs _ _ n tm) = show n ++ "@" ++ show tm
-  show (NDelayed _ _ tm) = "%Delayed " ++ show tm
-  show (NDelay _ _ _ _) = "%Delay [closure]"
-  show (NForce _ _ tm args) = "%Force " ++ show tm ++ " [" ++ show (length args) ++ " closures]"
-  show (NPrimVal _ c) = show c
-  show (NErased _ _) = "[__]"
-  show (NType _ _) = "Type"
+HasNames (Closure free) where
+  full defs (MkClosure eopts loc env term) = MkClosure eopts loc env <$> full defs term
+  full defs (MkNFClosure eopts env n) = MkNFClosure eopts env <$> full defs n
+
+  resolved defs (MkClosure eopts loc env term) = MkClosure eopts loc env <$> resolved defs term
+  resolved defs (MkNFClosure eopts env n) = MkNFClosure eopts env <$> resolved defs n
+
+mutual
+  export
+  covering
+  {free : _} -> Show (NHead free) where
+    show (NLocal _ idx p) = show (nameAt p) ++ "[" ++ show idx ++ "]"
+    show (NRef _ n) = show n
+    show (NMeta n _ args) = "?" ++ show n ++ "_[" ++ show (length args) ++ " closures " ++ showClosureList (map (emptyFC,) (toList args)) ++ "]"
+
+  export
+  covering
+  {free : _} -> Show (Closure free) where
+    show (MkClosure _ _ _ tm) = "[closure] MkClosure: " ++ show tm
+    show (MkNFClosure _ _ tm) = "[closure] MkNFClosure: " ++ show tm
+
+  export
+  covering
+  showClosureList : {free : _} -> List (FC, Closure free) -> String
+  showClosureList xs = "[" ++ show' "" xs ++ "]"
+    where
+      show' : String -> List (FC, Closure free) -> String
+      show' acc []             = acc
+      show' acc [(_, x)]       = acc ++ show x
+      show' acc ((_, x) :: xs) = show' (acc ++ show x ++ ", ") xs
+
+  export
+  covering
+  {free : _} -> Show (NF free) where
+    show (NBind _ x (Lam _ c info ty) _)
+      = "\\" ++ withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
+        " => [closure]"
+    show (NBind _ x (Let _ c val ty) _)
+      = "let " ++ showCount c ++ show x ++ " : " ++ show ty ++
+        " = " ++ show val ++ " in [closure]"
+    show (NBind _ x (Pi _ c info ty) _)
+      = withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
+        " -> [closure]"
+    show (NBind _ x (PVar _ c info ty) _)
+      = withPiInfo info ("pat " ++ showCount c ++ show x ++ " : " ++ show ty) ++
+        " => [closure]"
+    show (NBind _ x (PLet _ c val ty) _)
+      = "plet " ++ showCount c ++ show x ++ " : " ++ show ty ++
+        " = " ++ show val ++ " in [closure]"
+    show (NBind _ x (PVTy _ c ty) _)
+      = "pty " ++ showCount c ++ show x ++ " : " ++ show ty ++
+        " => [closure]"
+    show (NApp _ hd args) = show hd ++ " [" ++ show (length args) ++ " closures]"
+    show (NDCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
+    show (NTCon _ n _ _ args) = show n ++ " [" ++ show (length args) ++ " closures]"
+    show (NAs _ _ n tm) = show n ++ "@" ++ show tm
+    show (NDelayed _ _ tm) = "%Delayed " ++ show tm
+    show (NDelay _ _ _ _) = "%Delay [closure]"
+    show (NForce _ _ tm args) = "%Force " ++ show tm ++ " [" ++ show (length args) ++ " closures]"
+    show (NPrimVal _ c) = show c
+    show (NErased _ _) = "[__]"
+    show (NType _ _) = "Type"

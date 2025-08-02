@@ -280,6 +280,9 @@ findLinear top bound rig tm
               => do defs <- get Ctxt
                     Just nty <- lookupTyExact n (gamma defs)
                          | Nothing => pure []
+                    logTerm "declare.def.lhs" 5 ("Type of " ++ show !(toFullNames n)) nty
+                    logTermNF "declare.def.lhs" 5 ("Type NF of " ++ show !(toFullNames n)) Env.empty nty
+                    log "declare.def.lhs" 5 ("Args: " ++ show !(traverse toFullNames args))
                     findLinArg (accessible nt rig) !(nf defs Env.empty nty) args
            _ => pure []
     where
@@ -420,6 +423,8 @@ checkLHS {vars} trans mult n opts nest env fc lhs_in
          logTerm "declare.def.lhs" 10 "Checked LHS term after normalise" lhstm
          log "declare.def.lhs" 5 $ "Linearity of names in " ++ show n ++ ": " ++
                  show linvars_in
+
+         logTerm "declare.def.lhs" 10 "lhsty" lhsty
 
          linvars <- combineLinear fc linvars_in
          let lhstm_lin = setLinear linvars lhstm

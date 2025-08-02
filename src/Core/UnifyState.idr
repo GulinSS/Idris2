@@ -427,8 +427,10 @@ newMetaLets {vars} fc rig env n ty def nocyc lets
          log "unify.meta" 5 $ "Adding new meta " ++ show (n, fc, rig)
          logTerm "unify.meta" 10 ("New meta type " ++ show n) hty
          idx <- addDef n hole
+         let app = Meta fc n idx envArgs
+         logTerm "unify.meta" 10 ("New meta app " ++ show n) app
          addHoleName fc n idx
-         pure (idx, Meta fc n idx envArgs)
+         pure (idx, app)
   where
     envArgs : List (Term vars)
     envArgs = let args = reverse (mkConstantAppArgs {done = Scope.empty} lets fc env [<]) in
@@ -666,35 +668,35 @@ dumpHole s n hole
           Just gdef => case (definition gdef, type gdef) of
              (Guess tm envb constraints, ty) =>
                   do logString depth s.topic n $
-                       "!" ++ show !(getFullName (Resolved hole)) ++ " : "
-                           ++ show !(toFullNames !(normaliseHoles defs Env.empty ty))
+                       "! \{show hole} " ++ show !(getFullName (Resolved hole)) ++ " : "
+                           ++ show !(toFullNames !(logQuiet $ normaliseHoles defs Env.empty ty))
                        ++ "\n\t  = "
-                           ++ show !(normaliseHoles defs Env.empty tm)
+                           ++ show !(logQuiet $ normaliseHoles defs Env.empty tm)
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
                   logString depth s.topic n $
-                    "?" ++ show (fullname gdef) ++ " : "
-                        ++ show !(normaliseHoles defs Env.empty ty)
+                    "? \{show hole} " ++ show (fullname gdef) ++ " : "
+                        ++ show !(logQuiet $ normaliseHoles defs Env.empty ty)
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
                   logString depth s.topic n $
                      "Search " ++ show hole ++ " : " ++
-                     show !(toFullNames !(normaliseHoles defs Env.empty ty))
+                     show !(toFullNames !(logQuiet $ normaliseHoles defs Env.empty ty))
              (PMDef _ args t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
-                     show !(normalise defs Env.empty ty) ++
-                     " = " ++ show !(normalise defs Env.empty (Ref emptyFC Func (Resolved hole)))
+                     show !(logQuiet $ normalise defs Env.empty ty) ++
+                     " = " ++ show !(logQuiet $ normalise defs Env.empty (Ref emptyFC Func (Resolved hole)))
              (ImpBind, ty) =>
                   log s 4 $
                       "Bound: " ++ show hole ++ " : " ++
-                      show !(normalise defs Env.empty ty)
+                      show !(logQuiet $ normalise defs Env.empty ty)
              (Delayed, ty) =>
                   log s 4 $
                      "Delayed elaborator : " ++
-                     show !(normalise defs Env.empty ty)
+                     show !(logQuiet $ normalise defs Env.empty ty)
              _ => pure ()
   where
     dumpConstraint : Int -> Core ()
