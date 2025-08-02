@@ -235,129 +235,87 @@ data VCaseAlt : SnocList Name -> Type where
      ||| Catch-all case
      VDefaultCase : FC -> Glued vars -> VCaseAlt vars
 
--- Show what form a value has, for debugging
 export
-qshow : Value f vars -> String
-qshow (VBind{}) = "Bind"
-qshow (VApp _ _ n _ _) = "App " ++ show n
-qshow (VLocal{}) = "Local"
-qshow (VMeta _ n _ _ _ _) = "Meta " ++ show n
-qshow (VDCon _ n _ _ _) = "DCon " ++ show n
-qshow (VTCon _ n _ _) = "TCon " ++ show n
-qshow (VCase{}) = "Case"
-qshow (VPrimVal _ c) = "Constant " ++ show c
-qshow (VPrimOp _ f args) = "PrimOp " ++ show f ++ " " ++ show (length args)
-qshow _ = "???"
+HasNames (VCaseAlt free) where
+  full defs (VConCase fc n tag args cl) = pure $ VConCase fc !(full defs n) tag args cl
+  full defs (VDelayCase fc n arg cl) = pure $ VDelayCase fc !(full defs n) arg cl
+  full defs (VConstCase fc c cl) = pure $ VConstCase fc c cl
+  full defs (VDefaultCase fc cl) = pure $ VDefaultCase fc cl
 
--- export
--- HasNames (NHead free) where
---   full defs (NRef nt n) = NRef nt <$> full defs n
---   full defs hd = pure hd
+  resolved defs (VConCase fc n tag args cl) = pure $ VConCase fc !(resolved defs n) tag args cl
+  resolved defs (VDelayCase fc n arg cl) = pure $ VDelayCase fc !(resolved defs n) arg cl
+  resolved defs (VConstCase fc c cl) = pure $ VConstCase fc c cl
+  resolved defs (VDefaultCase fc cl) = pure $ VDefaultCase fc cl
 
---   resolved defs (NRef nt n) = NRef nt <$> resolved defs n
---   resolved defs hd = pure hd
+export
+HasNames (Value f vars) where
+  full defs (VBind fc x bd f) = pure $ VBind fc x bd f
+  full defs (VApp fc x y xs z) = pure $ VApp fc x !(full defs y) xs z
+  full defs (VDCon fc n tag arity xs) = pure $ VDCon fc !(full defs n) tag arity xs
+  full defs (VTCon fc n arity xs) = pure $ VTCon fc !(full defs n) arity xs
+  full defs (VAs fc side nf nf1) = pure $ VAs fc side !(full defs nf) !(full defs nf1)
+  full defs (VCase fc ct rc sc scTy alts) = pure $ VCase fc ct rc !(full defs sc) scTy !(traverse (full defs) alts)
+  full defs (VDelayed fc lz nf) = pure $ VDelayed fc lz !(full defs nf)
+  full defs (VDelay fc lz cl cl1) = pure $ VDelay fc lz cl cl1
+  full defs (VForce fc lz nf xs) = pure $ VForce fc lz !(full defs nf) xs
+  full defs (VPrimVal fc cst) = pure $ VPrimVal fc cst
+  full defs (VPrimOp fc op args) = pure $ VPrimOp fc op !(traverseVect (full defs) args)
+  full defs (VErased fc imp) = pure $ VErased fc imp
+  full defs (VUnmatched fc n) = pure $ VUnmatched fc n
+  full defs (VType fc n) = pure $ VType fc !(full defs n)
+  full defs (VLocal fc n v sp) = pure $ VLocal fc n v sp
+  full defs (VMeta fc n i vs sp f) = pure $ VMeta fc !(full defs n) i vs sp f
 
--- export
--- HasNames (NCaseAlt free)
+  resolved defs (VBind fc x bd f) = pure $ VBind fc x bd f
+  resolved defs (VApp fc x y xs z) = pure $ VApp fc x !(resolved defs y) xs z
+  resolved defs (VDCon fc n tag arity xs) = pure $ VDCon fc !(resolved defs n) tag arity xs
+  resolved defs (VTCon fc n arity xs) = pure $ VTCon fc !(resolved defs n) arity xs
+  resolved defs (VAs fc side nf nf1) = pure $ VAs fc side !(resolved defs nf) !(resolved defs nf1)
+  resolved defs (VCase fc ct rc sc scTy alts) = pure $ VCase fc ct rc !(resolved defs sc) scTy !(resolved defs alts)
+  resolved defs (VDelayed fc lz nf) = pure $ VDelayed fc lz !(resolved defs nf)
+  resolved defs (VDelay fc lz cl cl1) = pure $ VDelay fc lz cl cl1
+  resolved defs (VForce fc lz nf xs) = pure $ VForce fc lz !(resolved defs nf) xs
+  resolved defs (VPrimVal fc cst) = pure $ VPrimVal fc cst
+  resolved defs (VPrimOp fc op args) = pure $ VPrimOp fc op !(traverseVect (resolved defs) args)
+  resolved defs (VErased fc imp) = pure $ VErased fc imp
+  resolved defs (VUnmatched fc n) = pure $ VUnmatched fc n
+  resolved defs (VType fc n) = pure $ VType fc !(resolved defs n)
+  resolved defs (VLocal fc n v sp) = pure $ VLocal fc n v sp
+  resolved defs (VMeta fc n i vs sp f) = pure $ VMeta fc !(resolved defs n) i vs sp f
 
--- export
--- HasNames (NF free) where
---   full defs (NBind fc x bd f) = pure $ NBind fc x bd f
---   full defs (NApp fc hd xs) = pure $ NApp fc !(full defs hd) xs
---   full defs (NDCon fc n tag arity xs) = pure $ NDCon fc !(full defs n) tag arity xs
---   full defs (NTCon fc n tag arity xs) = pure $ NTCon fc !(full defs n) tag arity xs
---   full defs (NAs fc side nf nf1) = pure $ NAs fc side !(full defs nf) !(full defs nf1)
---   full defs (NCase fc ct rc sc scTy alts) = pure $ NCase fc ct rc !(full defs sc) scTy !(traverse (full defs) alts)
---   full defs (NDelayed fc lz nf) = pure $ NDelayed fc lz !(full defs nf)
---   full defs (NDelay fc lz cl cl1) = pure $ NDelay fc lz cl cl1
---   full defs (NForce fc lz nf xs) = pure $ NForce fc lz !(full defs nf) xs
---   full defs (NPrimVal fc cst) = pure $ NPrimVal fc cst
---   full defs (NPrimOp fc op args) = pure $ NPrimOp fc op !(traverseVect (full defs) args)
---   full defs (NErased fc imp) = pure $ NErased fc imp
---   full defs (NUnmatched fc n) = pure $ NUnmatched fc n
---   full defs (NType fc n) = pure $ NType fc !(full defs n)
-
---   resolved defs (NBind fc x bd f) = pure $ NBind fc x bd f
---   resolved defs (NApp fc hd xs) = pure $ NApp fc !(resolved defs hd) xs
---   resolved defs (NDCon fc n tag arity xs) = pure $ NDCon fc !(resolved defs n) tag arity xs
---   resolved defs (NTCon fc n tag arity xs) = pure $ NTCon fc !(resolved defs n) tag arity xs
---   resolved defs (NAs fc side nf nf1) = pure $ NAs fc side !(resolved defs nf) !(resolved defs nf1)
---   resolved defs (NCase fc ct rc sc scTy alts) = pure $ NCase fc ct rc !(resolved defs sc) scTy !(resolved defs alts)
---   resolved defs (NDelayed fc lz nf) = pure $ NDelayed fc lz !(resolved defs nf)
---   resolved defs (NDelay fc lz cl cl1) = pure $ NDelay fc lz cl cl1
---   resolved defs (NForce fc lz nf xs) = pure $ NForce fc lz !(resolved defs nf) xs
---   resolved defs (NPrimVal fc cst) = pure $ NPrimVal fc cst
---   resolved defs (NPrimOp fc op args) = pure $ NPrimOp fc op !(traverseVect (resolved defs) args)
---   resolved defs (NErased fc imp) = pure $ NErased fc imp
---   resolved defs (NUnmatched fc n) = pure $ NUnmatched fc n
---   resolved defs (NType fc n) = pure $ NType fc !(resolved defs n)
-
--- export
--- HasNames (NCaseAlt free) where
---   full defs (NConCase fc n tag args cl) = pure $ NConCase fc !(full defs n) tag args cl
---   full defs (NDelayCase fc n arg cl) = pure $ NDelayCase fc !(full defs n) arg cl
---   full defs (NConstCase fc c cl) = pure $ NConstCase fc c cl
---   full defs (NDefaultCase fc cl) = pure $ NDefaultCase fc cl
-
---   resolved defs (NConCase fc n tag args cl) = pure $ NConCase fc !(resolved defs n) tag args cl
---   resolved defs (NDelayCase fc n arg cl) = pure $ NDelayCase fc !(resolved defs n) arg cl
---   resolved defs (NConstCase fc c cl) = pure $ NConstCase fc c cl
---   resolved defs (NDefaultCase fc cl) = pure $ NDefaultCase fc cl
-
--- mutual
---   export
---   covering
---   {free : _} -> Show (NHead free) where
---     show (NLocal _ idx p) = show (nameAt p) ++ "[" ++ show idx ++ "]"
---     show (NRef _ n) = show n
---     show (NMeta n _ args) = "?" ++ show n ++ "_[" ++ show (length args) ++ " closures " ++ showClosureSnocList (map ((emptyFC,) . snd) args) ++ "]"
-
---   export
---   covering
---   {free : _} -> Show (Closure free) where
---     show (MkClosure _ _ _ tm) = "[closure] MkClosure: " ++ show tm
---     show (MkNFClosure _ _ tm) = "[closure] MkNFClosure: " ++ show tm
-
---   export
---   covering
---   showClosureSnocList : {free : _} -> SnocList (FC, Closure free) -> String
---   showClosureSnocList xs = concat ("[" :: intersperse ", " (show' [] xs) ++ ["]"])
---     where
---       show' : List String -> SnocList (FC, Closure free) -> List String
---       show' acc Lin       = acc
---       show' acc (xs :< (_, x)) = show' (show x :: acc) xs
-
---   export
---   covering
---   {free : _} -> Show (NF free) where
---     show (NBind _ x (Lam _ c info ty) _)
---       = "\\" ++ withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
---         " => [closure]"
---     show (NBind _ x (Let _ c val ty) _)
---       = "let " ++ showCount c ++ show x ++ " : " ++ show ty ++
---         " = " ++ show val ++ " in [closure]"
---     show (NBind _ x (Pi _ c info ty) _)
---       = withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
---         " -> [closure]"
---     show (NBind _ x (PVar _ c info ty) _)
---       = withPiInfo info ("pat " ++ showCount c ++ show x ++ " : " ++ show ty) ++
---         " => [closure]"
---     show (NBind _ x (PLet _ c val ty) _)
---       = "plet " ++ showCount c ++ show x ++ " : " ++ show ty ++
---         " = " ++ show val ++ " in [closure]"
---     show (NBind _ x (PVTy _ c ty) _)
---       = "pty " ++ showCount c ++ show x ++ " : " ++ show ty ++
---         " => [closure]"
---     show (NApp _ hd args) = show hd ++ " [" ++ show (length args) ++ " closures " ++ showClosureSnocList (map @{Compose} snd args) ++ "]"
---     show (NDCon _ n _ _ args) = show n ++ " %DCon [" ++ show (length args) ++ " closures " ++ showClosureSnocList (map @{Compose} snd args) ++ "]"
---     show (NTCon _ n _ _ args) = show n ++ " %TCon [" ++ show (length args) ++ " closures " ++ showClosureSnocList (map @{Compose} snd args) ++ "]"
---     show (NAs _ _ n tm) = show n ++ "@" ++ show tm
---     show (NCase {}) = "Case"
---     show (NDelayed _ _ tm) = "%Delayed " ++ show tm
---     show (NDelay _ _ _ _) = "%Delay [closure]"
---     show (NForce _ _ tm args) = "%Force " ++ show tm ++ " [" ++ show (length args) ++ " closures " ++ showClosureSnocList (map @{Compose} snd args) ++ "]"
---     show (NPrimVal _ c) = show c
---     show (NPrimOp _ f args) = "%PrimOp " ++ show f ++ " " ++ show (length args)
---     show (NErased _ _) = "[__]"
---     show (NUnmatched _ str) = "Unmatched: " ++ show str
---     show (NType _ _) = "Type"
+export
+covering
+{free : _} -> Show (Value f free) where
+  show (VBind _ x (Lam _ c info ty) _)
+    = "\\" ++ withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
+      " => [closure]"
+  show (VBind _ x (Let _ c val ty) _)
+    = "let " ++ showCount c ++ show x ++ " : " ++ show ty ++
+      " = " ++ show val ++ " in [closure]"
+  show (VBind _ x (Pi _ c info ty) _)
+    = withPiInfo info (showCount c ++ show x ++ " : " ++ show ty) ++
+      " -> [closure]"
+  show (VBind _ x (PVar _ c info ty) _)
+    = withPiInfo info ("pat " ++ showCount c ++ show x ++ " : " ++ show ty) ++
+      " => [closure]"
+  show (VBind _ x (PLet _ c val ty) _)
+    = "plet " ++ showCount c ++ show x ++ " : " ++ show ty ++
+      " = " ++ show val ++ " in [closure]"
+  show (VBind _ x (PVTy _ c ty) _)
+    = "pty " ++ showCount c ++ show x ++ " : " ++ show ty ++
+      " => [closure]"
+  show (VApp _ _ n sp _) = show n ++ " [" ++ show (length sp) ++ " closures]"
+  show (VLocal{}) = "Local"
+  show (VMeta _ n _ _ _ _) = "Meta " ++ show n
+  show (VDCon _ n _ _ sp) = show n ++ " %DCon [" ++ show (length sp) ++ " closures]"
+  show (VTCon _ n _ sp) = show n ++ " %TCon [" ++ show (length sp) ++ " closures]"
+  show (VCase{}) = "Case"
+  show (VPrimVal _ c) = "Constant " ++ show c
+  show (VPrimOp _ f args) = "PrimOp " ++ show f ++ " " ++ show (length args)
+  show (VAs _ _ n tm) = show n ++ "@" ++ show tm
+  show (VDelayed _ _ tm) = "%Delayed " ++ show tm
+  show (VDelay _ _ _ _) = "%Delay [closure]"
+  show (VForce _ _ tm args) = "%Force " ++ show tm ++ " [" ++ show (length args) ++ " closures]"
+  show (VErased _ w) = "[_\{show w}_]"
+  show (VUnmatched _ str) = "Unmatched: " ++ show str
+  show (VType _ n) = "Type \{show n}"

@@ -67,8 +67,8 @@ record ArgInfo (vars : Scope) where
   metaApp : (RigCount, Term vars)
   argType : Term vars
 
--- {vars: _} -> Show (ArgInfo vars) where
---     show x = "{ArgInfo holeId: \{show $ holeID x}, argRig: \{show $ argRig x}, plicit: \{assert_total $ show $ plicit x}, metaApp: \{assert_total $ show $ metaApp x}, argType: \{assert_total $ show $ argType x}}"
+{vars: _} -> Show (ArgInfo vars) where
+    show x = "{ArgInfo holeId: \{show $ holeID x}, argRig: \{show $ argRig x}, plicit: \{assert_total $ show $ plicit x}, metaApp: \{assert_total $ show $ metaApp x}, argType: \{assert_total $ show $ argType x}}"
 
 export
 mkArgs : {vars : _} ->
@@ -296,7 +296,7 @@ searchLocalWith {vars} fc rigc defaults trying depth def top env (prf, ty) targe
                  Core (Term vars)
     findDirect defs p f ty target
         = do (args, appTy) <- mkArgs fc rigc env ty
-             -- log "auto" 10 $ "findDirect args" ++ show args
+             log "auto" 10 $ "findDirect args" ++ show args
              logNF "auto" 10 "findDirect appTy" env appTy
              let fprf = f prf
              logTermNF "auto" 10 "Trying" env fprf

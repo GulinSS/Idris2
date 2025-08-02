@@ -154,6 +154,16 @@ parameters {auto c : Ref Ctxt Defs}
                 pure tm'
           _ => pure tm
 
+  export
+  logValue : {vars : _} ->
+          LogTopic -> Nat -> Lazy String -> Value f vars -> Core ()
+  logValue s n msg tmnf
+      = when !(logging s n) $
+          do defs <- get Ctxt
+             tmnf' <- toFullNames tmnf
+             depth <- getDepth
+             logString depth s.topic n (msg ++ ": " ++ show tmnf')
+
   -- Log message with a value, translating back to human readable names first
   export
   logNF : {vars : _} ->
