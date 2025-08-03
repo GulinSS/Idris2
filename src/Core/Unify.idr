@@ -292,7 +292,10 @@ unifyArgs mode loc env (cx :: cxs) (cy :: cys)
          cy' <- nf env !(quote env !cy)
          logC "unify" 20 $ pure $ "unifyArgs done: " ++ show cs
          res <- unify (lower mode) loc env cx' cy'
-         logC "unify" 20 $ pure $ "unify done: " ++ show res
+         logNF "unify.application" 20 "unifyArgs cx'" env cx'
+         logNF "unify.application" 20 "unifyArgs cy'" env cy'
+         log "unify.application" 20 "unifyArgs res \{show res}"
+
          pure (union res cs)
 unifyArgs mode loc env _ _ = ufail loc ""
 
@@ -328,9 +331,18 @@ convertSpine : {vars : _} ->
                Core Bool
 convertSpine fc env [<] [<] = pure True
 convertSpine fc env (cxs :< ex) (cys :< ey)
-    = if !(convert env !(value ex) !(value ey))
-         then convertSpine fc env cxs cys
-         else pure False
+    = do cx' <- logQuiet $ value ex
+         cy' <- logQuiet $ value ey
+
+         res <- convert env cx' cy'
+
+         logNF "unify.application" 20 "convertSpine cx'" env cx'
+         logNF "unify.application" 20 "convertSpine cy'" env cy'
+         log "unify.application" 20 "convertSpine res \{show res}"
+
+         if res
+           then convertSpine fc env cxs cys
+           else pure False
 convertSpine fc env _ _ = pure False
 
 -- Get the variables in an application argument list; fail if any arguments
