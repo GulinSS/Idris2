@@ -436,8 +436,7 @@ mutual
                  Core (Term vars, Glued vars)
   checkRestApp rig argRig elabinfo nest env fc tm x rigb aty sc
                (n, argpos) arg_in expargs autoargs namedargs knownret expty
-     = do defs <- get Ctxt
-          log "elab" 10 ("arg_in: " ++ show arg_in)
+     = do log "elab" 10 ("arg_in: " ++ show arg_in)
           arg <- dotErased aty n argpos (elabMode elabinfo) argRig arg_in
           log "elab" 10 ("arg: " ++ show arg)
           kr <- if knownret
@@ -467,9 +466,7 @@ mutual
                   RawImp -> -- argument currently being checked
                   Core (Term vars, Glued vars)
       checkRtoL kr arg
-        = do defs <- get Ctxt
-             nm <- genMVName x
-             empty <- clearDefs defs
+        = do nm <- genMVName x
              metaty <- quote env aty
              logTerm "elab" 10 "metaty: " metaty
              (idx, metaval) <- argVar (getFC arg) argRig env nm metaty
@@ -478,8 +475,8 @@ mutual
              fnty <- expand !(sc (nf env metaval))
              (tm, gty) <- checkAppWith rig elabinfo nest env fc
                                        fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
-             defs <- get Ctxt
              logEnv "elab" 10 "Metaty Env" env
+             defs <- get Ctxt
              logMetatyCtxt defs metaty
              aty' <- nf env metaty
              logNF "elab" 10 ("Now trying " ++ show nm ++ " " ++ show arg) env aty'
@@ -508,7 +505,6 @@ mutual
                  else do let (argv, argt) = res
                          checkValidPattern rig env fc argv argt
 
-             defs <- get Ctxt
              -- If we're on the LHS, reinstantiate it with 'argv' because it
              -- *may* have as patterns in it and we need to retain them.
              -- (As patterns are a bit of a hack but I don't yet see a
@@ -553,9 +549,8 @@ mutual
                   RawImp -> -- argument currently being checked
                   Core (Term vars, Glued vars)
       checkLtoR kr arg
-        = do defs <- get Ctxt
-             logNF "elab" 10 ("Full function type") env
-                     (VBind {f=Normal} fc x (Pi fc argRig Explicit aty) sc)
+        = do logNF "elab" 10 ("Full function type") env
+                   (VBind {f=Normal} fc x (Pi fc argRig Explicit aty) sc)
              logC "elab" 10
                      (do ety <- maybe (pure Nothing)
                                      (\t => pure (Just !(toFullNames !(quote env t))))
@@ -570,7 +565,6 @@ mutual
                          checkValidPattern rig env fc argv argt
 
              logNF "elab" 10 "Got arg type" env argt
-             defs <- get Ctxt
              let fntm = App fc tm rigb argv
              fnty <- expand !(sc (nf env argv))
              checkAppWith rig elabinfo nest env fc
