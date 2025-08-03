@@ -106,6 +106,8 @@ parameters {auto c : Ref Ctxt Defs}
         if n == n'
            -- Otherwise, convert the values (val and val')
            then do False <- convSpine BlockApp env args args'
+                            -- Check without reducing first since it might save a lot of work
+                            -- on success
                        | True => pure True
                    convertAppsNF s env !(expand x) !(expand y)
            else convertAppsNF s env !(expand x) !(expand y)
