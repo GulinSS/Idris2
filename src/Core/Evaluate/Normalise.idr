@@ -343,8 +343,8 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                  | Nothing => pure (VMeta fc n i scope' [<] (pure Nothing))
             let Function fi fn _ _ = definition def
                  | _ => pure (VMeta fc n i scope' [<] (pure Nothing))
-            log "declare.record" 40 ("evalMeta n: \{show n}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}")
-            logTerm "declare.record" 50 "evalMeta fn" fn
+            log "eval.def.stuck" 40 ("evalMeta n: \{show n}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}, dflags: \{show $ flags def}")
+            logTerm "eval.def.stuck" 50 "evalMeta fn" fn
             if alwaysReduce fi || (reduceForTC eflags (multiplicity def))
                then do evalfn <- eval locs env (embed fn)
                        applyAll fc evalfn scope'
@@ -379,13 +379,15 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                               n <- toFullNames n
                               pure "Cannot reduce def \{show n}: it is a \{show res}"
                             pure (VApp fc nt n [<] (pure Nothing))
+           log "eval.def.stuck" 40 ("evalRef n: \{show $ !(toFullNames n)}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}, dflags: \{show $ flags def}")
+           logTerm "eval.def.stuck" 50 "evalRef fn" !(toFullNames fn)
            if alwaysReduce fi || (reduceForTC eflags (flags def))
-              then do logC "eval.def.stuck" 50 $ do
+              then do eval locs env (embed fn)
+              else do logC "eval.def.stuck" 50 $ do
                         def <- toFullNames def
                         pure "Refusing to reduce \{show $ definition def}"
-                      eval locs env (embed fn)
-              else pure $ VApp fc nt n [<] $
-                          do logC "eval.def.stuck" 50 $ pure "pre-evalTree args: n: \{show !(toFullNames n)}, tree: \{show fn}"
+                      pure $ VApp fc nt n [<] $
+                          do logC "eval.def.stuck" 50 $ pure "Attempt to reduce refused previously args: n: \{show !(toFullNames n)}, tree: \{show fn}"
                              res <- eval locs env (embed fn)
                              pure (Just res)
     where
@@ -440,7 +442,7 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
 --   eval : LocalEnv free vars ->
 --          Env Term vars ->
 --          Term (vars ++ free) -> Core (Glued vars)
-  eval locs env (Local fc _ idx p) = evalLocal env fc p locs
+  eval locs env (Local fc _ idx p) = logDepth $ evalLocal env fc p locs
   eval locs env (Ref fc nt n) =
     do logC "eval.ref" 50 $ do fn' <- toFullNames n
                                pure "Ref \{show nt} \{show fn'}"
@@ -476,20 +478,20 @@ parameters {auto c : Ref Ctxt Defs}
 
   export
   nf : Env Term vars -> Term vars -> Core (Glued vars)
-  nf = eval Full [<]
+  nf env tm = logDepth $ eval Full [<] env tm
 
   export
   nfLHS : Env Term vars -> Term vars -> Core (Glued vars)
-  nfLHS = eval KeepAs [<]
+  nfLHS env tm = logDepth $ eval KeepAs [<] env tm
 
   export
   nfHoles : Env Term vars -> Term vars -> Core (Glued vars)
-  nfHoles = eval (Holes HolesAll) [<]
+  nfHoles env tm = logDepth $ eval (Holes HolesAll) [<] env tm
 
   export
   nfHolesArgs : Env Term vars -> Term vars -> Core (Glued vars)
-  nfHolesArgs = eval (Holes HolesArgs) [<]
+  nfHolesArgs env tm = logDepth $ eval (Holes HolesArgs) [<] env tm
 
   export
   nfTotality : Env Term vars -> Term vars -> Core (Glued vars)
-  nfTotality = eval Totality [<]
+  nfTotality env tm = logDepth $ eval Totality [<] env tm

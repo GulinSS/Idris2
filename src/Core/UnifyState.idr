@@ -643,15 +643,11 @@ dumpHole s n hole
              case lookup cid (constraints ust) of
                Nothing => pure ()
                Just Resolved => logString depth s.topic n "\tResolved"
-               Just (MkConstraint _ lazy env x y) => do
+               Just (MkConstraint _ lazy env x y) =>
                     logString depth s.topic n $
                          "\t  " ++ show !(toFullNames x)
                                 ++ " =?= " ++ show !(toFullNames y)
-                    empty <- clearDefs defs
-                    log s 5 $
-                         "\t    from " ++ show !(full (gamma empty) x)
-                                       ++ " =?= " ++ show !(full (gamma empty) y)
-                                       ++ if lazy then "\n\t(lazy allowed)" else ""
+                                ++ if lazy then "\n\t(lazy allowed)" else ""
 
 export
 dumpConstraints : {auto u : Ref UST UState} ->
