@@ -288,12 +288,14 @@ unifyArgs mode loc env (cx :: cxs) (cy :: cys)
          cs <- logDepth $ unifyArgs mode loc env cxs cys
          -- We might know more about cx and cy now, so normalise again to
          -- reduce any newly solved holes
-         cx' <- nf env !(quote env !cx)
-         cy' <- nf env !(quote env !cy)
          logC "unify" 20 $ pure $ "unifyArgs done: " ++ show cs
-         res <- unify (lower mode) loc env cx' cy'
+
+         cx' <- logQuiet $ do nf env !(quote env !cx)
+         cy' <- logQuiet $ do nf env !(quote env !cy)
          logNF "unify.application" 20 "unifyArgs cx'" env cx'
          logNF "unify.application" 20 "unifyArgs cy'" env cy'
+
+         res <- unify (lower mode) loc env cx' cy'
          log "unify.application" 20 "unifyArgs res \{show res}"
 
          pure (union res cs)
@@ -309,13 +311,12 @@ unifySpine mode fc env [<] [<] = pure success
 unifySpine mode fc env (cxs :< ex) (cys :< ey)
     = do -- We might know more about cx and cy now, so normalise again to
          -- reduce any newly solved holes
-         cx' <- logQuiet $ nf env !(quote env !(value ex))
-         cy' <- logQuiet $ nf env !(quote env !(value ey))
-         res <- unify (lower mode) fc env cx' cy'
-         logC "unify" 20 $ pure $ "unify done: " ++ show res
-
+         cx' <- logQuiet $ do nf env !(quote env !(value ex))
+         cy' <- logQuiet $ do nf env !(quote env !(value ey))
          logNF "unify.application" 20 "unifySpine cx'" env cx'
          logNF "unify.application" 20 "unifySpine cy'" env cy'
+
+         res <- unify (lower mode) fc env cx' cy'
          log "unify.application" 20 "unifySpine res \{show res}"
 
          cs <- logDepth $ unifySpine mode fc env cxs cys
@@ -333,15 +334,14 @@ convertSpine fc env [<] [<] = pure True
 convertSpine fc env (cxs :< ex) (cys :< ey)
     = do cx' <- logQuiet $ value ex
          cy' <- logQuiet $ value ey
-
-         res <- convert env cx' cy'
-
          logNF "unify.application" 20 "convertSpine cx'" env cx'
          logNF "unify.application" 20 "convertSpine cy'" env cy'
+
+         res <- convert env cx' cy'
          log "unify.application" 20 "convertSpine res \{show res}"
 
          if res
-           then convertSpine fc env cxs cys
+           then logDepth $ convertSpine fc env cxs cys
            else pure False
 convertSpine fc env _ _ = pure False
 
@@ -989,8 +989,8 @@ mutual
            defs <- get Ctxt
            logNF "elab" 10 ("Trying to solve " ++ show mname ++ " with") env tmnf
            logC "unify.hole" 10
-                   (do qargs <- traverse (quote env) margs
-                       qtm <- quote env tmnf
+                   (do qargs <- logQuiet $ traverse (quote env) margs
+                       qtm <- logQuiet $ quote env tmnf
                        pure $ "Unifying: " ++ show mname ++ "\n args " ++ show qargs ++
                               "\n with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
            case !(patternEnv env pargs) of
@@ -1059,10 +1059,10 @@ mutual
   unifyNotMetavar mode@(MkUnifyInfo p InMatch) fc env x@(VApp _ _ nx spx _) y@(VApp _ _ ny spy _)
       = if nx == ny
            then do logC "unify.application" 5
-                          (do xs' <- traverse value spx
-                              xs <- traverse (quote env) xs'
-                              yx' <- traverse value spy
-                              ys <- traverse (quote env) yx'
+                          (do xs' <- logQuiet $ traverse value spx
+                              xs <- logQuiet $ traverse (quote env) xs'
+                              yx' <- logQuiet $ traverse value spy
+                              ys <- logQuiet $ traverse (quote env) yx'
                               pure ("Matching args " ++ show xs ++ " " ++ show ys))
                    unifySpine mode fc env spx spy
            else postpone fc mode "Postponing application (match)" env x y
@@ -1096,13 +1096,18 @@ mutual
              pure $ "Comparing type constructors " ++ show x ++ " and " ++ show y
            if nx == ny
              then do logC "unify" 20 $
-                       pure $ "Constructor " ++ show !(toFullNames x)
+                       pure $ "Constructor " ++ show !(toFullNames nx)
                      logC "unify" 20 $ map (const "") $
-                        traverse_ (\x => logNF "unify" 20 "NF" env !x) (map value spx)
+                        traverse_ dumpArg (map value spx)
                      logC "unify" 20 $ map (const "") $
-                        traverse_ (\y => logNF "unify" 20 "NF" env !y) (map value spy)
+                        traverse_ dumpArg (map value spy)
                      unifySpine mode fc env spx spy
              else convertError fc env x y
+      where
+        dumpArg : Core (Glued vars) -> Core ()
+        dumpArg v = do
+          v' <- logQuiet $ do nf env !(quote env !v)
+          logNF "unify" 20 "NF" env v'
   unifyNotMetavar mode fc env (VDelayed _ _ x) (VDelayed _ _ y)
       = unify (lower mode) fc env x y
   unifyNotMetavar mode fc env (VDelay _ _ tx ax) (VDelay _ _ ty ay)
@@ -1350,10 +1355,10 @@ mutual
            then do logC "unify.equal" 10 $
                                 do x <- toFullNames nx
                                    y <- toFullNames ny
-                                   xs' <- traverse value spx
-                                   xs <- traverse (quote env) xs'
-                                   yx' <- traverse value spy
-                                   ys <- traverse (quote env) yx'
+                                   xs' <- logQuiet $ traverse value spx
+                                   xs <- logQuiet $ traverse (quote env) xs'
+                                   yx' <- logQuiet $ traverse value spy
+                                   ys <- logQuiet $ traverse (quote env) yx'
                                    pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) \n and \{show y} (\{show !(toFullNames ys)})"
                    c <- convertSpine fc env spx spy
                    if c
@@ -1439,13 +1444,13 @@ mutual
      = logDepth $ unifyValLazy mode fc env (asGlued x) (asGlued y)
 
   Core.Unify.Term.unify umode fc env x y
-     = do x' <- nf env x
-          y' <- nf env y
+     = do x' <- logQuiet $ nf env x
+          y' <- logQuiet $ nf env y
           unify umode fc env x' y'
 
   Core.Unify.Term.unifyWithLazy umode fc env x y
-     = do x' <- nf env x
-          y' <- nf env y
+     = do x' <- logQuiet $ nf env x
+          y' <- logQuiet $ nf env y
           unifyWithLazy umode fc env x' y'
 
   export
@@ -1459,12 +1464,12 @@ mutual
   export
   Unify Term where
     unifyD _ _ umode fc env x y
-      = do x' <- nf env x
-           y' <- nf env y
+      = do x' <- logQuiet $ nf env x
+           y' <- logQuiet $ nf env y
            unify umode fc env x' y'
     unifyWithLazyD _ _ umode fc env x y
-      = do x' <- nf env x
-           y' <- nf env y
+      = do x' <- logQuiet $ nf env x
+           y' <- logQuiet $ nf env y
            unifyWithLazy umode fc env x' y'
 
   export
@@ -1507,8 +1512,8 @@ retry mode c
               Just Resolved => pure success
               Just (MkConstraint loc withLazy env xold yold)
                => do defs <- get Ctxt
-                     x <- nf env xold
-                     y <- nf env yold
+                     x <- logQuiet $ nf env xold
+                     y <- logQuiet $ nf env yold
                      log "unify.retry" 10 (show loc)
                      logNF "unify.retry" 5 ("Retrying " ++ show c ++ " " ++ show (umode mode))
                            env x

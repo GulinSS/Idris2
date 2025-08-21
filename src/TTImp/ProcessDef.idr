@@ -579,6 +579,7 @@ checkClause {vars} mult vis totreq hashit n opts nest env
          let bnr = bindNotReq vfc 0 env' withSub [] reqty
          let notreqns = fst bnr
          let notreqty = snd bnr
+         logTerm "declare.def.clause.with" 5 "notreqty" notreqty
 
          let repFn = if Syntactic `elem` flags
                        then replaceSyn
@@ -587,6 +588,8 @@ checkClause {vars} mult vis totreq hashit n opts nest env
                             var
                             !(nf scenv
                                  (weakenNs (mkSizeOf wargs) notreqty))
+         logTerm "declare.def.clause.with" 3 "wtyScope" wtyScope
+
          let bNotReq = binder wtyScope
 
          -- The environment has some implicit and some explcit args, potentially,

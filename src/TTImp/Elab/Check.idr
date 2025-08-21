@@ -754,8 +754,8 @@ convertWithLazy withLazy fc elabinfo env x y
                   -- resolving any more constraints
                   catch (solveConstraints umode Normal)
                         (\err => pure ())
-                  xtm <- quote env x
-                  ytm <- quote env y
+                  xtm <- logQuiet $ quote env x
+                  ytm <- logQuiet $ quote env y
                   -- We need to normalise the known holes before
                   -- throwing because they may no longer be known
                   -- by the time we look at the error

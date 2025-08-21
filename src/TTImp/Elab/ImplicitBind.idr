@@ -601,6 +601,7 @@ checkBindHere rig elabinfo nest env fc bindmode tm exp
          clearToBind dontbind
          update EST $ updateEnv oldenv oldsub oldbif . { boundNames := [] }
          ty <- quote env tmt
+         logTerm "elab.implicits" 5 "Checked" ty
          defs <- get Ctxt
          (bv, bt) <- bindImplicits fc bindmode
                                    defs env argImps
