@@ -494,7 +494,7 @@ mutual
                                   | Nothing => pure ()
                              when (isErased (multiplicity gdef)) $ addNoSolve i
                   _ => pure ()
-             res <- check argRig ({ topLevel := False } elabinfo) nest env arg (Just aty')
+             res <- logDepth $ check argRig ({ topLevel := False } elabinfo) nest env arg (Just aty')
              case atyNF of
                   Just (VMeta _ _ i _ _ _) => removeNoSolve i
                   _ => pure ()
@@ -556,7 +556,7 @@ mutual
                                      (\t => pure (Just !(toFullNames !(quote env t))))
                                      expty
                          pure ("Overall expected type: " ++ show ety))
-             res <- check argRig ({ topLevel := False } elabinfo)
+             res <- logDepth $ check argRig ({ topLevel := False } elabinfo)
                                    nest env arg (Just aty)
              (argv, argt) <-
                if not (onLHS (elabMode elabinfo))
@@ -566,6 +566,7 @@ mutual
 
              logNF "elab" 10 "Got arg type" env argt
              let fntm = App fc tm rigb argv
+             logTerm "elab" 10 "Got fntm" fntm
              fnty <- expand !(sc (nf env argv))
              checkAppWith rig elabinfo nest env fc
                           fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
@@ -623,7 +624,7 @@ mutual
            retTy <- metaVar -- {vars = argn :: vars}
                             fc erased env -- (Pi RigW Explicit argTy :: env)
                             retn (TType fc u)
-           (argv, argt) <- check rig elabinfo
+           (argv, argt) <- logDepth $ check rig elabinfo
                                  nest env arg (Just argTyG)
            let fntm = App fc tm top argv
            fnty <- nf env retTy
@@ -854,16 +855,15 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
-        logTerm "elab" 50 "checkApp-IVar ntm" ntm
+        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
         logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
-        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(quote env nty_in)
+        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(logQuiet $ quote env nty)
         logEnv "elab" 50 "checkApp-IVar Env" env
-        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
         addNameLoc fc' n
 
         logC "elab" 10
                 (do defs <- get Ctxt
-                    fnty <- quote env nty
+                    fnty <- logQuiet $ quote env nty
                     exptyt <- maybe (pure Nothing)
                                        (\t => do ety <- quote env t
                                                  etynf <- normaliseHoles env ety
