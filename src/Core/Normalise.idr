@@ -219,7 +219,7 @@ logGlueNF : {vars : _} ->
 logGlueNF s n msg env gtm
     = when !(logging s n) $
         do defs <- get Ctxt
-           tm <- getTerm gtm
+           tm <- logQuiet $ getTerm gtm
            tmnf <- logQuiet $ normaliseHoles defs env tm
            tm' <- toFullNames tmnf
            depth <- getDepth

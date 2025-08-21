@@ -1013,6 +1013,8 @@ mutual
            let (_ ** (MkNVarL next)) = nextIdxByScore (caseTreeHeuristics !getSession) phase nps
            let prioritizedClauses = shuffleVars next <$> clauses
            (n ** MkNVarL next') <- pickNextViable fc phase fn (getNPs <$> prioritizedClauses)
+           log "compile.casetree" 25 $ "Clauses " ++ show clauses
+           log "compile.casetree" 25 $ "Err " ++ show err
            log "compile.casetree.pick" 25 $ "Picked " ++ show n ++ " as the next split"
            let clauses' = shuffleVars next' <$> prioritizedClauses
            log "compile.casetree.clauses" 25 $
@@ -1229,8 +1231,9 @@ patCompile fc fn phase ty (p :: ps) def
            pats <- traverse toFullNames pats
            pure $ "Pattern clauses:\n"
                 ++ show (indent 2 $ vcat $ pretty <$> pats)
+         log "compile.casetree" 25 $ "Def " ++ show def
          -- higher verbosity: dump the raw data structure
-         log "compile.casetree" 10 $ show pats
+         log "compile.casetree" 10 $ "pats " ++ show pats
          i <- newRef PName (the Int 0)
          cases <- match fc fn phase pats (embed @{MaybeFreelyEmbeddable} def)
          pure (_ ** cases)

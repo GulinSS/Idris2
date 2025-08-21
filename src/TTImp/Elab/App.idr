@@ -91,6 +91,7 @@ getNameType elabMode rigc env fc x
                        $ "getNameType is adding " ++ show decor ++ ": " ++ show def.fullname
                      addSemanticDecorations [(nfc, decor, Just def.fullname)]
 
+                 logTerm "ide-mode.highlight" 8 "def" (embed {outer=vars} (type def))
                  pure (Ref fc nt (Resolved i), gnf env (embed (type def)))
   where
     rigSafe : RigCount -> RigCount -> Core ()
@@ -496,7 +497,7 @@ mutual
                                   | Nothing => pure ()
                              when (isErased (multiplicity gdef)) $ addNoSolve i
                      _ => pure ()
-             res <- check argRig ({ topLevel := False } elabinfo) nest env arg (Just $ glueBack defs env aty')
+             res <- logDepth $ check argRig ({ topLevel := False } elabinfo) nest env arg (Just $ glueBack defs env aty')
              when (onLHS (elabMode elabinfo)) $
                 case aty' of
                      NApp _ (NMeta _ i _) _ => removeNoSolve i
@@ -561,7 +562,7 @@ mutual
                                      (\t => pure (Just !(toFullNames!(getTerm t))))
                                      expty
                          pure ("Overall expected type: " ++ show ety))
-             res <- check argRig ({ topLevel := False } elabinfo)
+             res <- logDepth $ check argRig ({ topLevel := False } elabinfo)
                                    nest env arg (Just (glueClosure defs env aty))
              (argv, argt) <-
                if not (onLHS (elabMode elabinfo))
@@ -570,8 +571,9 @@ mutual
                          checkValidPattern rig env fc argv argt
 
              logGlueNF "elab" 10 "Got arg type" env argt
-             defs <- get Ctxt
              let fntm = App fc tm argv
+             logTerm "elab" 10 "Got fntm" fntm
+             defs <- get Ctxt
              fnty <- sc defs (toClosure defaultOpts env argv)
              checkAppWith rig elabinfo nest env fc
                           fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
@@ -750,7 +752,7 @@ mutual
            retTy <- metaVar -- {vars = argn :: vars}
                             fc erased env -- (Pi RigW Explicit argTy :: env)
                             retn (TType fc u)
-           (argv, argt) <- check rig elabinfo
+           (argv, argt) <- logDepth $ check rig elabinfo
                                  nest env arg (Just argTyG)
            let fntm = App fc tm argv
            defs <- get Ctxt
@@ -838,11 +840,16 @@ checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
+        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
+        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
+        defs <- get Ctxt
+        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(logQuiet $ quote defs env nty)
+        logEnv "elab" 50 "checkApp-IVar Env" env
         addNameLoc fc' n
 
         logC "elab" 10
                 (do defs <- get Ctxt
-                    fnty <- quote defs env nty
+                    fnty <- logQuiet $ quote defs env nty
                     exptyt <- maybe (pure Nothing)
                                        (\t => do ety <- getTerm t
                                                  etynf <- normaliseHoles defs env ety

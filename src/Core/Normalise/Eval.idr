@@ -310,6 +310,16 @@ parameters (defs : Defs) (topopts : EvalOpts)
                    Just opts' <- updateLimit nt n topopts
                         | Nothing => do log "eval.stuck" 10 $ "Function \{show n} past reduction limit"
                                         pure def -- name is past reduction limit
+                   case (definition res) of
+                     fn@(PMDef r args tree _ _) =>
+                        do
+                           let
+                             eval_type : String
+                             eval_type = if meta then "evalMeta" else "evalRef"
+
+                           log "eval.def.stuck" 40 (eval_type ++ " n: \{show $ !(toFullNames n)}, alwaysReduce: \{show $ alwaysReduce r}, multiplicity: \{show $ multiplicity res}, eflags: \{show topopts}, dflags: \{show $ flags res}")
+                           log "eval.def.stuck" 50 (eval_type ++ " tree: \{show !(toFullNames tree)}")
+                     _ => pure ()
                    nf <- evalDef env opts' meta fc
                            (multiplicity res) (definition res) (flags res) stk def
                    -- logC "eval.ref" 50 $ do n' <- toFullNames n
@@ -531,15 +541,16 @@ parameters (defs : Defs) (topopts : EvalOpts)
                                     Just (S k) =>
                                         do let opts' = { fuel := Just k } opts
                                            evalWithOpts defs opts' env newLoc res stk'
-             else do -- logC "eval.def.stuck" 50 $ do
-                     --   def <- toFullNames def
-                     --   pure $ unlines [ "Refusing to reduce \{show def}:"
-                     --                  , "  holesOnly   : \{show $ holesOnly opts}"
-                     --                  , "  argHolesOnly: \{show $ argHolesOnly opts}"
-                     --                  , "  tcInline    : \{show $ tcInline opts}"
-                     --                  , "  meta        : \{show meta}"
-                     --                  , "  rigd        : \{show rigd}"
-                     --                  ]
+             else do logC "eval.def.stuck" 50 $ do
+                       def <- toFullNames def
+                       pure $ "Refusing to reduce \{show def}"
+                    --    pure $ unlines [ "Refusing to reduce \{show def}:"
+                    --                   , "  holesOnly   : \{show $ holesOnly opts}"
+                    --                   , "  argHolesOnly: \{show $ argHolesOnly opts}"
+                    --                   , "  tcInline    : \{show $ tcInline opts}"
+                    --                   , "  meta        : \{show meta}"
+                    --                   , "  rigd        : \{show rigd}"
+                    --                   ]
                      pure def
     evalDef env opts meta fc rigd (Builtin op) flags stk def
         = evalOp (getOp op) stk def

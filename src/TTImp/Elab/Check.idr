@@ -747,13 +747,13 @@ convertWithLazy withLazy fc elabinfo env x y
                              ++ show (elabMode elabinfo)) env x
                 logGlueNF "elab.unify" 5 "....with" env y
                 vs <- if isFromTerm x && isFromTerm y
-                         then do xtm <- getTerm x
-                                 ytm <- getTerm y
+                         then do xtm <- logQuiet $ getTerm x
+                                 ytm <- logQuiet $ getTerm y
                                  if lazy
                                     then logDepth $ unifyWithLazy umode fc env xtm ytm
                                     else logDepth $ unify umode fc env xtm ytm
-                         else do xnf <- getNF x
-                                 ynf <- getNF y
+                         else do xnf <- logQuiet $ getNF x
+                                 ynf <- logQuiet $ getNF y
                                  if lazy
                                     then logDepth $ unifyWithLazy umode fc env xnf ynf
                                     else logDepth $ unify umode fc env xnf ynf
@@ -762,8 +762,8 @@ convertWithLazy withLazy fc elabinfo env x y
                     solveConstraints umode Normal
                 pure vs)
             (\err =>
-               do xtm <- getTerm x
-                  ytm <- getTerm y
+               do xtm <- logQuiet $ getTerm x
+                  ytm <- logQuiet $ getTerm y
                   -- See if we can improve the error message by
                   -- resolving any more constraints
                   catch (solveConstraints umode Normal)
