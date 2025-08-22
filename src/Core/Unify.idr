@@ -1352,15 +1352,25 @@ mutual
   -- If the values convert already, we're done
   unifyExpandApps lazy mode fc env x@(VApp fcx ntx nx spx _) y@(VApp fcy nty ny spy _)
       = if nx == ny
-           then do logC "unify.equal" 10 $
+           then do inf <- getInfPos nx
+                   logC "unify.equal" 10 $
                                 do x <- toFullNames nx
                                    y <- toFullNames ny
                                    xs' <- logQuiet $ traverse value spx
                                    xs <- logQuiet $ traverse (quote env) xs'
                                    yx' <- logQuiet $ traverse value spy
                                    ys <- logQuiet $ traverse (quote env) yx'
-                                   pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) \n and \{show y} (\{show !(toFullNames ys)})"
-                   c <- convertSpine fc env spx spy
+                                   pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) \n and \{show y} (\{show !(toFullNames ys)}) \n with inf: \{show inf}"
+                   let spx' = dropInf (length spx `minus` 1) 0 inf spx
+                   let spy' = dropInf (length spy `minus` 1) 0 inf spy
+                   when (length inf > 0)
+                     $ logC "unify.equal" 10 $
+                                do xs' <- logQuiet $ traverse value spx'
+                                   xs <- logQuiet $ traverse (quote env) xs'
+                                   yx' <- logQuiet $ traverse value spy'
+                                   ys <- logQuiet $ traverse (quote env) yx'
+                                   pure $ "Inferred arguments (\{show inf}) are considered safe to be dropped from convert: (\{show !(toFullNames xs)}) \n and (\{show !(toFullNames ys)})"
+                   c <- convertSpine fc env spx' spy'
                    if c
                       then
                         do logC "unify.equal" 10 $
@@ -1386,6 +1396,22 @@ mutual
                    if lazy
                       then unifyLazy mode fc env valx' valy'
                       else unifyWithEta mode fc env valx' valy'
+      where
+          getInfPos : Name -> Core (List Nat)
+          getInfPos n
+              = do defs <- get Ctxt
+                   Just gdef <- lookupCtxtExact n (gamma defs)
+                       | _ => pure []
+                   pure (inferrable gdef)
+
+          dropInf : Nat -> Nat -> List Nat -> SnocList (SpineEntry a) -> SnocList (SpineEntry a)
+          dropInf _ _ [] xs = xs
+          dropInf _ _ _ [<] = [<]
+          dropInf a i ds (xs :< x)
+              = if (a `minus` i) `elem` ds
+                   then dropInf a (S i) ds xs
+                   else dropInf a (S i) ds xs :< x
+
   -- Same quick check for metavars
   unifyExpandApps {vars} lazy mode fc env x@(VMeta fcx nx ix scx spx _) y@(VMeta fcy ny iy scy spy _)
       = do True <- do let True = ix == iy
