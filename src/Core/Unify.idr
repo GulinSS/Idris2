@@ -230,7 +230,8 @@ postpone : {vars : _} ->
            FC -> UnifyInfo -> String ->
            Env Term vars -> Value f vars -> Value f' vars -> Core UnifyResult
 postpone loc mode logstr env x y
-    = do defs <- get Ctxt
+    = do log "unify.postpone" 10 $ "Begin postponing \"\{logstr}\""
+         defs <- get Ctxt
          xtm <- quote env x
          ytm <- quote env y
          logC "unify.postpone" 10 $
@@ -526,7 +527,9 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
               PV pv pi => throw (PatternVariableUnifies loc (getLoc otm) env (PV pv pi) otm)
               _ => pure ()
          defs <- get Ctxt
-         ty <- quoteBinders [<] !(nf [<] (type mdef))
+         tynf <- nf [<] (type mdef)
+         logNF "unify.instantiate" 5 "tynf" [<] tynf
+         ty <- quoteBinders [<] tynf
                      -- make sure we have all the pi binders we need in the
                      -- type to make the metavariable definition
          logTerm "unify.instantiate" 5 ("Type: " ++ show !(toFullNames mname)) (type mdef)
@@ -1120,13 +1123,25 @@ mutual
       = unifyIfEq True fc mode env (asGlued x) (asGlued y)
   unifyNotMetavar mode fc env x@(VApp{}) y
       -- conversion check first, in case app is a blocked case
-      = if !(convert env x y)
-           then pure success
-           else postpone fc mode "Postponing application (left)" env x y
+      = do logC "unify" 20 $ do
+             x <- logQuiet $ quote env x
+             x <- toFullNames x
+             y <- logQuiet $ quote env y
+             y <- toFullNames y
+             pure $ "Comparing left application to right something: " ++ show x ++ " and " ++ show y
+           if !(convert env x y)
+              then pure success
+              else postpone fc mode "Postponing application (left)" env x y
   unifyNotMetavar mode fc env x y@(VApp{})
-      = if !(convert env x y)
-           then pure success
-           else postpone fc mode "Postponing application (right)" env x y
+      = do logC "unify" 20 $ do
+             x <- logQuiet $ quote env x
+             x <- toFullNames x
+             y <- logQuiet $ quote env y
+             y <- toFullNames y
+             pure $ "Comparing right application to left something: " ++ show y ++ " and " ++ show x
+           if !(convert env x y)
+              then pure success
+              else postpone fc mode "Postponing application (right)" env x y
   unifyNotMetavar mode fc env (VAs _ _ _ x) y = unifyNoEta mode fc env !(expand x) y
   unifyNotMetavar mode fc env x (VAs _ _ _ y) = unifyNoEta mode fc env x !(expand y)
   unifyNotMetavar mode fc env x_in y_in
@@ -1436,8 +1451,20 @@ mutual
   -- Otherwise, make sure the top level thing is expanded (so not a reducible
   -- VApp or VMeta node) then move on
   unifyExpandApps lazy mode fc env x y
-      = do x' <- expand x
+      = do logC "unify.equal" 10 $
+             do x <- logQuiet $ quote env x
+                x <- toFullNames x
+                y <- logQuiet $ quote env y
+                y <- toFullNames y
+                pure $ "Begin unification (non-application) \{show lazy}: \{show x} \n and \{show y}"
+           x' <- expand x
            y' <- expand y
+           logC "unify.equal" 10 $
+             do x <- logQuiet $ quote env x'
+                x <- toFullNames x
+                y <- logQuiet $ quote env y'
+                y <- toFullNames y
+                pure $ "Begin unification (non-application) \{show lazy} expanded: \{show x} \n and \{show y}"
            if lazy
               then unifyLazy mode fc env x' y'
               else unifyWithEta mode fc env x' y'

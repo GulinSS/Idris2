@@ -14,68 +14,67 @@ import Data.SnocList
 
 parameters {auto c : Ref Ctxt Defs}
 
-  recompute : Env Term vars -> NF vars -> Core (NF vars)
+  recompute : {vars: _} -> Env Term vars -> NF vars -> Core (NF vars)
   recompute env val = do
     tm <- quote env val
     expand !(nf env tm)
 
   export
-  touch : Env Term vars -> NF vars -> Core (NF vars)
+  touch : {vars: _} -> Env Term vars -> NF vars -> Core (NF vars)
   touch env val@(VMeta{}) = recompute env val
   touch env val@(VApp{}) = recompute env val
   touch env val = pure val
 
   export
-  normalise : Env Term vars -> Term vars -> Core (Term vars)
+  normalise : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normalise env tm
       = do val <- nf env tm
            quoteNF env val
 
   export
-  normaliseHNF : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseHNF : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseHNF env tm
       = do val <- nf env tm
            quoteHNF env val
 
   export
-  normaliseAll : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseAll : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseAll env tm
       = do val <- nf env tm
            quoteNFall env val
 
   export
-  normaliseHNFall : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseHNFall : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseHNFall env tm
       = do val <- nf env tm
            quoteHNFall env val
 
   export
-  normaliseHoles : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseHoles : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseHoles env tm
       = do val <- nfHoles env tm
            quoteHoles env val
 
   export
-  normaliseLHS : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseLHS : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseLHS env tm
-      = do val <- nfLHS env tm
-           quoteHoles env val
+      = quoteHoles env !(nfLHS env tm)
 
   export
-  normaliseBinders : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseBinders : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseBinders env tm
       = do val <- nf env tm
            quoteBinders env val
 
   -- Normalise, but without normalising the types of binders.
   export
-  normaliseScope : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseScope : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseScope env (Bind fc n b sc)
       = pure $ Bind fc n b !(normaliseScope (env :< b) sc)
   normaliseScope env tm = normalise env tm
 
   export
-  normaliseHolesScope : Env Term vars -> Term vars -> Core (Term vars)
+  normaliseHolesScope : {vars: _} -> Env Term vars -> Term vars -> Core (Term vars)
   normaliseHolesScope env (Bind fc n b sc)
       = pure $ Bind fc n b !(normaliseHolesScope (env :< b) sc)
   normaliseHolesScope env tm = normaliseHoles env tm
@@ -87,7 +86,7 @@ parameters {auto c : Ref Ctxt Defs}
   getArityVal _ = pure 0
 
   export
-  getArity : Env Term vars -> Term vars -> Core Nat
+  getArity : {vars: _} -> Env Term vars -> Term vars -> Core Nat
   getArity env tm = getArityVal !(expand !(nf env tm))
 
 
