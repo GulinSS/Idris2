@@ -103,7 +103,9 @@ parameters (defs : Defs) (topopts : EvalOpts)
     eval env locs (Local fc mrig idx prf) stk
         = logDepth $ evalLocal env fc mrig idx prf stk locs
     eval env locs (Ref fc nt fn) stk
-        = evalRef env False fc nt fn stk (NApp fc (NRef nt fn) (cast stk))
+        = do -- logC "eval.ref" 50 $ do fn' <- toFullNames fn
+             --                         pure "Ref \{show nt} \{show fn'}"
+             evalRef env False fc nt fn stk (NApp fc (NRef nt fn) (cast stk))
     eval {vars} {free} env locs (Meta fc name idx args) stk
         = evalMeta env fc name idx (reverse $ closeArgs args) stk
       where
@@ -523,7 +525,10 @@ parameters (defs : Defs) (topopts : EvalOpts)
              || (meta && not (isErased rigd))
              || (meta && holesOnly opts)
              || (tcInline opts && elem TCInline flags)
-             then case argsFromStack (reverse args) stk of
+             then do logC "eval.def.stuck" 50 $ do
+                       def <- toFullNames def
+                       pure $ "Attempt to reduce \{show def}"
+                     case argsFromStack (reverse args) stk of
                        Nothing => do logC "eval.def.underapplied" 50 $ do
                                        def <- toFullNames def
                                        pure "Cannot reduce under-applied \{show def}"

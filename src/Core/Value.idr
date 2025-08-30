@@ -257,5 +257,5 @@ mutual
     show (NDelay _ _ _ _) = "%Delay [closure]"
     show (NForce _ _ tm args) = "%Force " ++ show tm ++ " [" ++ show (length args) ++ " closures]"
     show (NPrimVal _ c) = show c
-    show (NErased _ _) = "[__]"
+    show (NErased _ w) = "[_\{show w}_]"
     show (NType _ _) = "Type"

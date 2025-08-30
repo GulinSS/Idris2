@@ -403,7 +403,7 @@ findCalls defs (_ ** (env, lhs, rhs_in))
 getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
 getSC defs (PMDef _ args ct _ pats)
-   = do log "totality.termination.sizechange" 5 $ "From tree" ++ show ct
+   = do log "totality.termination.sizechange" 5 $ "From tree " ++ show ct
         for_ pats $ \(_ ** (_, pat)) => do
             log "totality.termination.sizechange" 10 $ "From tree pat: " ++ show pat
 

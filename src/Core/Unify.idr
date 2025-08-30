@@ -951,7 +951,13 @@ mutual
   unifyApp swap mode loc env fc hd args (NApp mfc (NMeta n i margs) margs')
       = unifyHole swap mode loc env mfc n i margs (map snd margs') (NApp fc hd args)
   unifyApp swap mode loc env fc hd args (NErased _ (Dotted t))
-      = unifyApp swap mode loc env fc hd args t
+      = do logC "unify.application" 10 $ do
+            hd <- toFullNames hd
+            t <- toFullNames t
+            pure $ "Dotted against app: " ++ show hd
+           logC "unify.application" 10 $ map (const "") $ traverse_ (dumpArg env) (map snd args)
+           logNF "unify.application" 10 "Dotted against app, t" env t
+           unifyApp swap mode loc env fc hd args t
   -- Postpone if a name application against an application, unless they are
   -- convertible
   unifyApp swap mode loc env fc h@(NRef nt n) args tm
@@ -1258,15 +1264,33 @@ mutual
                else unifyBothApps (lower mode) loc env xfc fx axs yfc fy ays
   unifyNoEta mode loc env (NApp xfc fx axs) (NApp yfc fy ays)
       = unifyBothApps (lower mode) loc env xfc fx axs yfc fy ays
-  unifyNoEta mode loc env x (NErased _ (Dotted y)) = unifyNoEta mode loc env x y
-  unifyNoEta mode loc env (NErased _ (Dotted x)) y = unifyNoEta mode loc env x y
-  unifyNoEta mode loc env (NApp xfc hd args) y
-      = unifyApp False (lower mode) loc env xfc hd args y
-  unifyNoEta mode loc env y (NApp yfc hd args)
-      = if umode mode /= InMatch
-           then unifyApp True mode loc env yfc hd args y
-           else do log "unify.noeta" 10 $ "Unify if Eq due to something with app"
-                   unifyIfEq True loc mode env y (NApp yfc hd args)
+  unifyNoEta mode loc env x (NErased _ (Dotted y))
+    = do logC "unify" 20 $ do
+            x <- toFullNames x
+            y <- toFullNames y
+            pure $ "Extracting dotted (right): " ++ show x ++ " and " ++ show y
+         unifyNoEta mode loc env x y
+  unifyNoEta mode loc env (NErased _ (Dotted x)) y
+    = do logC "unify" 20 $ do
+            x <- toFullNames x
+            y <- toFullNames y
+            pure $ "Extracting dotted (left): " ++ show x ++ " and " ++ show y
+         unifyNoEta mode loc env x y
+  unifyNoEta mode loc env x@(NApp xfc hd args) y
+      = do logC "unify" 20 $ do
+            x <- toFullNames x
+            y <- toFullNames y
+            pure $ "Comparing left application to right something: " ++ show x ++ " and " ++ show y
+           unifyApp False (lower mode) loc env xfc hd args y
+  unifyNoEta mode loc env y x@(NApp yfc hd args)
+      = do logC "unify" 20 $ do
+            x <- toFullNames x
+            y <- toFullNames y
+            pure $ "Comparing right application to left something: " ++ show x ++ " and " ++ show y
+           if umode mode /= InMatch
+              then unifyApp True mode loc env yfc hd args y
+              else do log "unify.noeta" 10 $ "Unify if Eq due to something with app"
+                      unifyIfEq True loc mode env y (NApp yfc hd args)
   -- Only try stripping as patterns as a last resort
   unifyNoEta mode loc env x (NAs _ _ _ y) = unifyNoEta mode loc env x y
   unifyNoEta mode loc env (NAs _ _ _ x) y = unifyNoEta mode loc env x y
@@ -1371,10 +1395,20 @@ mutual
         = do defs <- get Ctxt
              empty <- clearDefs defs
              if !(convert empty env x y)
-                then pure success
+                then do logC "unify" 20 $
+                        do x' <- logQuiet $ evalClosure empty x
+                           x'' <- logQuiet $ quote empty env x'
+                           y' <- logQuiet $ evalClosure empty y
+                           y'' <- logQuiet $ quote empty env y'
+                           pure $ "Closures are convertable: " ++ show x'' ++ "\n and " ++ show y''
+                        pure success
                 else
                   do xnf <- evalClosure defs x
                      ynf <- evalClosure defs y
+                     do logC "unify" 20 $
+                        do xnf <- logQuiet $ quote empty env xnf
+                           ynf <- logQuiet $ quote empty env ynf
+                           pure $ "Closures are not convertable: " ++ show xnf ++ "\n and " ++ show ynf
                      -- If one's a meta and the other isn't, don't reduce at
                      -- all
                      case (xnf, ynf) of
@@ -1382,9 +1416,9 @@ mutual
                          (NApp _ (NMeta _ _ _) _, NApp _ (NMeta _ _ _) _)
                                => unify mode loc env xnf ynf
                          (NApp _ (NMeta _ i _) _, _) =>
-                            do ynf' <- evalClosure empty y
-                               xtm <- quote empty env xnf
-                               ytm <- quote empty env ynf'
+                            do ynf' <- logQuiet $ evalClosure empty y
+                               xtm <- logQuiet $ quote empty env xnf
+                               ytm <- logQuiet $ quote empty env ynf'
                                logC "unify" 20 $
                                  pure $ "Don't reduce at all (left): " ++ show xtm ++ "\n and " ++ show ytm
                                cs <- unify mode loc env !(nf empty env xtm)
@@ -1394,9 +1428,9 @@ mutual
                                     _ => do ynf <- evalClosure defs y
                                             unify mode loc env xnf ynf
                          (_, NApp _ (NMeta _ i _ ) _) =>
-                            do xnf' <- evalClosure empty x
-                               xtm <- quote empty env xnf'
-                               ytm <- quote empty env ynf
+                            do xnf' <- logQuiet $ evalClosure empty x
+                               xtm <- logQuiet $ quote empty env xnf'
+                               ytm <- logQuiet $ quote empty env ynf
                                logC "unify" 20 $
                                  pure $ "Don't reduce at all (right): " ++ show {ty=Term _} ytm ++ "\n and " ++ show xtm
                                cs <- unify mode loc env !(nf empty env ytm)
