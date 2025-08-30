@@ -197,6 +197,9 @@ expand' cases v@(VApp fc nt n sp val)
     blockedApp (VPrimOp{}) = pure True
     blockedApp _ = pure False
 
+expand' cases (VErased why (Dotted t))
+    = do t' <- expand' cases t
+         pure (VErased why (Dotted t'))
 expand' cases v@(VMeta fc n i args sp val)
     = do Just val' <- val
               | Nothing => pure (believe_me v)
