@@ -156,7 +156,7 @@ ambiguous (InRHS _ _ err) = ambiguous err
 ambiguous (WhenUnifying _ _ _ _ _ err) = ambiguous err
 ambiguous _ = False
 
-zipArgs : {auto c : Ref Ctxt Defs} ->
+zipArgs : {vars: _} -> {auto c : Ref Ctxt Defs} ->
           Spine vars -> Spine vars -> Core (List (NF vars, NF vars))
 zipArgs [<] _ = pure []
 zipArgs _ [<] = pure []

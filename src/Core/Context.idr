@@ -1232,6 +1232,15 @@ getVisibilityWeaked fc n
           UndefinedName _ _ => pure defaulted
           x => throw x
 
+export
+getMultiplicityWeaked : {auto c : Ref Ctxt Defs} ->
+                  FC -> Name -> Core (Maybe RigCount)
+getMultiplicityWeaked fc n
+    = do defs <- get Ctxt
+         Just def <- lookupCtxtExact n (gamma defs)
+              | Nothing => pure Nothing
+         pure $ Just $ multiplicity def
+
 maybeMisspelling : {auto c : Ref Ctxt Defs} ->
                    Error -> Name -> Core a
 maybeMisspelling err nm = do

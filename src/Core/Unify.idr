@@ -337,11 +337,11 @@ unifySpineMetaArg mode fc env (cxs :< ex) (cys :< ey)
          -- reduce any newly solved holes
          cx' <- logQuiet $ do nf env !(quote env !(value ex))
          cy' <- logQuiet $ do nf env !(quote env !(value ey))
-         logNF "unify.application" 20 "unifySpineMetaArg cx'" env cx'
-         logNF "unify.application" 20 "unifySpineMetaArg cy'" env cy'
+         logNF "unify.application" 20 "unifySpine cx'" env cx'
+         logNF "unify.application" 20 "unifySpine cy'" env cy'
 
          res <- unifySpineEntry (lower mode) cx' cy'
-         log "unify.application" 20 "unifySpineMetaArg res \{show res}"
+         log "unify.application" 20 "unifySpine res \{show res}"
 
          cs <- logDepth $ unifySpineMetaArg mode fc env cxs cys
          pure (union cs res)
@@ -1050,8 +1050,8 @@ mutual
            logC "unify.hole" 10
                    (do qargs <- logQuiet $ traverse (quote env) margs
                        qtm <- logQuiet $ quote env tmnf
-                       pure $ "Unifying: " ++ show mname ++ "\n args " ++ show qargs ++
-                              "\n with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
+                       pure $ "Unifying: " ++ show mname ++ " args " ++ show qargs ++
+                              " with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
            case !(patternEnv env pargs) of
                 Nothing =>
                   do log "unify.hole" 10 $ "unifyHole patEnv: Nothing"
@@ -1295,14 +1295,20 @@ mutual
                   logNF "unify.binder" 10 "........with" env ty
                   let env' : Env Term (_ :< nx)
                            = env :< Pi fcy cy Explicit tx'
+                  logEnv "unify.binder" 10 "env'" env'
+                  logC "unify.binder" 10 $ pure "Unifying pi \{show ix} and \{show iy}"
                   case constraints csarg of
                       [] => -- No constraints, check the scope
                          do tscx <- scx (mkArg fc x')
+                            logNF "unify.binder" 10 "tscx" env tscx
                             tscy <- scy (mkArg fc x')
+                            logNF "unify.binder" 10 "tscy" env tscy
                             tmx <- quote env tscx
                             tmy <- quote env tscy
                             logTermNF "unify.binder" 10 "Unifying scope" env tmx
                             logTermNF "unify.binder" 10 "..........with" env tmy
+                            logTermNF "unify.binder" 10 "refsToLocals: Unifying scope" env' (refsToLocals (Add nx x' None) tmx)
+                            logTermNF "unify.binder" 10 "refsToLocals: ..........with" env' (refsToLocals (Add nx x' None) tmy)
                             unify (lower mode) fc env'
                               (refsToLocals (Add nx x' None) tmx)
                               (refsToLocals (Add nx x' None) tmy)
@@ -1431,7 +1437,7 @@ mutual
                                    xs <- logQuiet $ traverse (quote env) xs'
                                    yx' <- logQuiet $ traverse value spy
                                    ys <- logQuiet $ traverse (quote env) yx'
-                                   pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) \n and \{show y} (\{show !(toFullNames ys)}) \n with inf: \{show inf}"
+                                   pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) and \{show y} (\{show !(toFullNames ys)}) \n with inf: \{show inf}"
                    let spx' = dropInf (length spx `minus` 1) 0 inf spx
                    let spy' = dropInf (length spy `minus` 1) 0 inf spy
                    when (length inf > 0)
@@ -1440,21 +1446,21 @@ mutual
                                    xs <- logQuiet $ traverse (quote env) xs'
                                    yx' <- logQuiet $ traverse value spy'
                                    ys <- logQuiet $ traverse (quote env) yx'
-                                   pure $ "Inferred arguments (\{show inf}) are considered safe to be dropped from convert: (\{show !(toFullNames xs)}) \n and (\{show !(toFullNames ys)})"
+                                   pure $ "Inferred arguments (\{show inf}) are considered safe to be dropped from convert: (\{show !(toFullNames xs)}) and (\{show !(toFullNames ys)})"
                    c <- convertSpine fc env spx' spy'
                    if c
                       then
                         do logC "unify.equal" 10 $
                                 do x <- toFullNames nx
                                    y <- toFullNames ny
-                                   pure $ "Skipped unification (equal already): \{show x} \n and \{show y}"
+                                   pure $ "Skipped unification (equal already): \{show x} and \{show y}"
                            pure success
                       else do valx' <- expand x
                               valy' <- expand y
                               logC "unify.equal" 10 $
                                 do x <- toFullNames valx'
                                    y <- toFullNames valy'
-                                   pure $ "Begin unification (non-convertable) \{show lazy}: \{show x} \n and \{show y}"
+                                   pure $ "Begin unification (non-convertable) \{show lazy}: \{show x} and \{show y}"
                               if lazy
                                 then unifyLazy mode fc env valx' valy'
                                 else unifyWithEta mode fc env valx' valy'
@@ -1463,7 +1469,7 @@ mutual
                    logC "unify.equal" 10 $
                      do x <- toFullNames valx'
                         y <- toFullNames valy'
-                        pure $ "Begin unification (func non-equal) \{show lazy}: \{show x} \n and \{show y}"
+                        pure $ "Begin unification (func non-equal) \{show lazy}: \{show x} and \{show y}"
                    if lazy
                       then unifyLazy mode fc env valx' valy'
                       else unifyWithEta mode fc env valx' valy'
@@ -1512,7 +1518,7 @@ mutual
                 x <- toFullNames x
                 y <- logQuiet $ quote env y
                 y <- toFullNames y
-                pure $ "Begin unification (non-application) \{show lazy}: \{show x} \n and \{show y}"
+                pure $ "Begin unification (non-application) \{show lazy}: \{show x} and \{show y}"
            x' <- expand x
            y' <- expand y
            logC "unify.equal" 10 $
@@ -1520,7 +1526,7 @@ mutual
                 x <- toFullNames x
                 y <- logQuiet $ quote env y'
                 y <- toFullNames y
-                pure $ "Begin unification (non-application) \{show lazy} expanded: \{show x} \n and \{show y}"
+                pure $ "Begin unification (non-application) \{show lazy} expanded: \{show x} and \{show y}"
            if lazy
               then unifyLazy mode fc env x' y'
               else unifyWithEta mode fc env x' y'
