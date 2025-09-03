@@ -146,7 +146,8 @@ idrisTests = MkTestPool "Misc" [] Nothing
        "unification001",
        "unification002",
        "unification003",
-       "unification004"
+       "unification004",
+       "unification005"
        ]
 
 typeddTests : IO TestPool

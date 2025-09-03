@@ -4,21 +4,14 @@ Error: While processing left hand side of foo. When unifying:
     View W
 and:
     View ?a
-Pattern variable a unifies with: ().
+Pattern variable a unifies with: W.
 
-Bad:3:5--3:11
- 1 | U : Unit
- 2 | 
- 3 | W = MkUnit
-         ^^^^^^
-
-
-Bad:10:7--10:8
- 06 |   X : View W
+Bad:6:12--10:8
+    |
+ 6 |   X : View W
+   |            ^
  07 |   Y : View U
- 08 | 
- 09 | foo : (v : Unit) -> View v -> Unit
  10 | foo a X = MkUnit
-            ^
+    |       ^
 
 Suggestion: Use the same name for both pattern variables, since they unify.
