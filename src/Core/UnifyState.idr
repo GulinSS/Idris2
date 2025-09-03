@@ -607,13 +607,13 @@ dumpHole s n hole
                        "! \{show hole} " ++ show !(getFullName (Resolved hole)) ++ " : "
                            ++ show !(toFullNames !(logQuiet $ normaliseHoles ScopeEmpty ty))
                        ++ "\n\t  = "
-                           ++ show !(logQuiet $ normaliseHoles ScopeEmpty tm)
+                           ++ show !(toFullNames !(logQuiet $ normaliseHoles ScopeEmpty tm))
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
                   logString depth s.topic n $
                     "? \{show hole} " ++ show (fullname gdef) ++ " : "
-                        ++ show !(logQuiet $ normaliseHoles ScopeEmpty ty)
+                        ++ show !(toFullNames !(logQuiet $ normaliseHoles ScopeEmpty ty))
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
@@ -623,16 +623,16 @@ dumpHole s n hole
              (Function _ t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
-                     show !(logQuiet $ normalise ScopeEmpty ty) ++
-                     " = " ++ show !(logQuiet $ normalise ScopeEmpty (Ref emptyFC Func (Resolved hole)))
+                     show !(toFullNames !(logQuiet $ normalise ScopeEmpty ty)) ++
+                     " = " ++ show !(toFullNames !(logQuiet $ normalise ScopeEmpty (Ref emptyFC Func (Resolved hole))))
              (ImpBind, ty) =>
                   log s 4 $
                       "Bound: " ++ show hole ++ " : " ++
-                      show !(logQuiet $ normalise ScopeEmpty ty)
+                      show !(toFullNames !(logQuiet $ normalise ScopeEmpty ty))
              (Delayed, ty) =>
                   log s 4 $
                      "Delayed elaborator : " ++
-                     show !(logQuiet $ normalise ScopeEmpty ty)
+                     show !(toFullNames !(logQuiet $ normalise ScopeEmpty ty))
              _ => pure ()
   where
     dumpConstraint : Int -> Core ()

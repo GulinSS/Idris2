@@ -87,7 +87,7 @@ checkPi rig elabinfo nest env fc rigf info n argTy retTy expTy
     getRig (InLHS _) = rig
     getRig _ = erased
 
-findLamRig : {auto c : Ref Ctxt Defs} ->
+findLamRig : {vars: _} -> {auto c : Ref Ctxt Defs} ->
              Maybe (Glued vars) -> Core RigCount
 findLamRig Nothing = pure top
 findLamRig (Just expty)

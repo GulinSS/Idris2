@@ -524,6 +524,7 @@ mutual
                               ignore $ updateSolution env metaval argv
                               pure tm
                       else pure tm
+             logTerm "elab" 10 "Solved tm ok=\{show ok}" tm
              when (onLHS $ elabMode elabinfo) $
                  -- reset hole and redo it with the unexpanded definition
                  do updateDef (Resolved idx) (const (Just (Hole 0 (holeInit False))))
@@ -631,7 +632,7 @@ mutual
            expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
            logNF "elab.with" 10 "Expected function type" env expfnty
            -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
-           res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
+           res <- logDepth $ checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
            cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
            let [] = constraints cres
               | cs => do cty <- quote env expfnty
@@ -850,15 +851,16 @@ checkApp rig elabinfo nest env fc (IAutoApp fc' fn arg) expargs autoargs namedar
 checkApp rig elabinfo nest env fc (INamedApp fc' fn nm arg) expargs autoargs namedargs exp
    = checkApp rig elabinfo nest env fc' fn expargs autoargs ((nm, arg) :: namedargs) exp
 checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
-   = do (ntm, arglen, nty_in) <- getVarType elabinfo.elabMode rig nest env fc' n
+   = do logEnv "elab" 50 "checkApp-IVar Env for \{show !(getFullName n)}" env
+        (ntm, arglen, nty_in) <- getVarType elabinfo.elabMode rig nest env fc' n
+        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
+        logNF "elab" 50 "checkApp-IVar nty_in" env nty_in
         nty <- expand nty_in
+        logNF "elab" 50 "checkApp-IVar nty" env nty
+
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
-        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
-        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
-        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(logQuiet $ quote env nty)
-        logEnv "elab" 50 "checkApp-IVar Env" env
         addNameLoc fc' n
 
         logC "elab" 10

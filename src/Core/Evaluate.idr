@@ -80,7 +80,7 @@ parameters {auto c : Ref Ctxt Defs}
   normaliseHolesScope env tm = normaliseHoles env tm
 
   export
-  getArityVal : NF vars -> Core Nat
+  getArityVal : {vars: _} -> NF vars -> Core Nat
   getArityVal (VBind fc _ (Pi _ _ _ _) sc)
       = pure $ 1 + !(getArityVal !(expand !(sc (pure (VErased fc Placeholder)))))
   getArityVal _ = pure 0
@@ -221,7 +221,7 @@ parameters {auto c : Ref Ctxt Defs}
   -- made, we should stick with the original term (so no unnecessary expansion)
   -- of App
   replace'
-      : (expandGlued : Bool) -> Int -> Env Term vars ->
+      : {vars: _} -> (expandGlued : Bool) -> Int -> Env Term vars ->
         (orig : Value f vars) -> (parg : Term vars) -> (tm : Value f' vars) ->
         Core (Term vars, Bool)
   replace' {vars} expand tmpi env orig parg tm
@@ -390,7 +390,7 @@ parameters {auto c : Ref Ctxt Defs}
 
   export
   replace
-      : Env Term vars ->
+      : {vars: _} -> Env Term vars ->
         (orig : Value f vars) -> (new : Term vars) -> (tm : Value f' vars) ->
         Core (Term vars)
   replace env orig new tm
@@ -399,7 +399,7 @@ parameters {auto c : Ref Ctxt Defs}
 
   export
   replaceSyn
-      : Env Term vars ->
+      : {vars: _} -> Env Term vars ->
         (orig : Value f vars) -> (new : Term vars) -> (tm : Value f' vars) ->
         Core (Term vars)
   replaceSyn env orig new tm

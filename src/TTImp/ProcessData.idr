@@ -44,6 +44,7 @@ processDataOpt fc ndef NoNewtype
     = pure ()
 
 checkRetType : {auto c : Ref Ctxt Defs} ->
+               {vars: _} ->
                Env Term vars -> NF vars ->
                (NF vars -> Core ()) -> Core ()
 checkRetType env (VBind fc x (Pi _ _ _ ty) sc) chk
@@ -52,6 +53,7 @@ checkRetType env (VBind fc x (Pi _ _ _ ty) sc) chk
 checkRetType env nf chk = chk nf
 
 checkIsType : {auto c : Ref Ctxt Defs} ->
+              {vars: _} ->
               FC -> Name -> Env Term vars -> Glued vars -> Core ()
 checkIsType loc n env nf
     = checkRetType env !(expand nf) $
@@ -60,6 +62,7 @@ checkIsType loc n env nf
            _ => throw $ BadTypeConType loc n
 
 checkFamily : {auto c : Ref Ctxt Defs} ->
+              {vars: _} ->
               FC -> Name -> Name -> Env Term vars -> Glued vars -> Core ()
 checkFamily loc cn tn env nf
     = checkRetType env !(expand nf) $

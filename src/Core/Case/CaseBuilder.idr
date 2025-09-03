@@ -1568,7 +1568,7 @@ makePMDef fc ct phase fn ty clauses
 
     labelPat : Int -> List a -> List (String, a)
     labelPat i [] = []
-    labelPat i (x :: xs) = ("PV" ++ show i ++ ":", x) :: labelPat (i + 1) xs
+    labelPat i (x :: xs) = ("pat" ++ show i ++ ":", x) :: labelPat (i + 1) xs
 
     mkSubstEnv : Int -> String -> Env Term vars -> SubstEnv vars [<]
     mkSubstEnv i pname [<] = Lin

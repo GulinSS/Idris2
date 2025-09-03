@@ -40,6 +40,7 @@ import TTImp.TTImp
 -- implicit lambdas if they aren't there already.
 insertImpLam : {auto c : Ref Ctxt Defs} ->
                {auto u : Ref UST UState} ->
+               {vars: _} ->
                Env Term vars ->
                (term : RawImp) -> (expected : Maybe (Glued vars)) ->
                Core RawImp

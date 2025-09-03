@@ -53,15 +53,15 @@ parameters {auto c : Ref Ctxt Defs}
               then val
               else pure Nothing
 
-  convNF : Ref QVar Int =>
+  convNF : {vars: _} -> Ref QVar Int =>
            Strategy -> Env Term vars ->
            NF vars -> NF vars -> Core Bool
 
-  convGen : Ref QVar Int =>
+  convGen : {vars: _} -> Ref QVar Int =>
             Strategy -> Env Term vars ->
             Value f vars -> Value f' vars -> Core Bool
 
-  convSpine : Ref QVar Int =>
+  convSpine : {vars: _} -> Ref QVar Int =>
               Strategy -> Env Term vars ->
               Spine vars -> Spine vars -> Core Bool
   convSpine s env [<] [<] = pure True
@@ -72,6 +72,7 @@ parameters {auto c : Ref Ctxt Defs}
 
   -- Applications which have been expanded, but not as far as 'case'
   convertAppsNF :
+        {vars: _} ->
         Ref QVar Int =>
         Strategy -> Env Term vars ->
         NF vars -> NF vars ->
@@ -92,6 +93,7 @@ parameters {auto c : Ref Ctxt Defs}
   convertAppsNF s env x y = convGen s env x y
 
   convertApps :
+        {vars: _} ->
         Ref QVar Int =>
         Strategy -> Env Term vars ->
         FC -> NameType -> Name -> Spine vars -> Value f vars ->
@@ -270,7 +272,7 @@ parameters {auto c : Ref Ctxt Defs}
 
   namespace Value
     export
-    convert : Env Term vars -> Value f vars -> Value f' vars -> Core Bool
+    convert : {vars: _} -> Env Term vars -> Value f vars -> Value f' vars -> Core Bool
     convert env x y
         = do q <- newRef QVar 0
              defs <- get Ctxt
