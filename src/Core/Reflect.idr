@@ -27,7 +27,7 @@ interface Reflect a where
             Env Term vars -> a -> Core (Term vars)
 
 export
-spine : {auto c : Ref Ctxt Defs} ->
+spine : {vars: _} -> {auto c : Ref Ctxt Defs} ->
         Spine vars -> Core (List (NF vars))
 spine sp = pure $ cast !(traverseSnocList spineVal sp)
 
