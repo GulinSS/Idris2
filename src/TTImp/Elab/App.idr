@@ -514,7 +514,7 @@ mutual
              -- *may* have as patterns in it and we need to retain them.
              -- (As patterns are a bit of a hack but I don't yet see a
              -- better way that leads to good code...)
-             logTerm "elab" 10 ("Solving " ++ show metaval ++ " with") argv
+             logTerm "elab" 10 ("Solving " ++ show !(toFullNames metaval) ++ " with") !(toFullNames argv)
              logEnv "elab" 10 "In env" env
              ok <- solveIfUndefined env metaval argv
              -- If there's a constraint, make a constant, but otherwise
@@ -529,6 +529,7 @@ mutual
                               ignore $ updateSolution env metaval argv
                               pure tm
                       else pure tm
+             logTerm "elab" 10 "Solved tm ok=\{show ok}" tm
              when (onLHS $ elabMode elabinfo) $
                  -- reset hole and redo it with the unexpanded definition
                  do updateDef (Resolved idx) (const (Just (Hole 0 (holeInit False))))
@@ -760,7 +761,7 @@ mutual
            let expfnty = gnf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
            logGlue "elab.with" 10 "Expected function type" env expfnty
            whenJust expty (logGlue "elab.with" 10 "Expected result type" env)
-           res <- checkAppWith' rig elabinfo nest env fc fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
+           res <- logDepth $ checkAppWith' rig elabinfo nest env fc fntm fnty (n, 1 + argpos) expargs autoargs namedargs kr expty
            cres <- Check.convert fc elabinfo env (glueBack defs env ty) expfnty
            let [] = constraints cres
               | cs => do cty <- getTerm expfnty
@@ -835,16 +836,16 @@ checkApp rig elabinfo nest env fc (IAutoApp fc' fn arg) expargs autoargs namedar
 checkApp rig elabinfo nest env fc (INamedApp fc' fn nm arg) expargs autoargs namedargs exp
    = checkApp rig elabinfo nest env fc' fn expargs autoargs ((nm, arg) :: namedargs) exp
 checkApp rig elabinfo nest env fc (IVar fc' n) expargs autoargs namedargs exp
-   = do (ntm, arglen, nty_in) <- getVarType elabinfo.elabMode rig nest env fc' n
+   = do logEnv "elab" 50 "checkApp-IVar Env for \{show !(getFullName n)}" env
+        (ntm, arglen, nty_in) <- getVarType elabinfo.elabMode rig nest env fc' n
+        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
+        logGlue "elab" 50 "checkApp-IVar nty_in" env nty_in
         nty <- getNF nty_in
+        logNF "elab" 50 "checkApp-IVar nty" env nty
+
         prims <- getPrimitiveNames
         elabinfo <- updateElabInfo prims elabinfo.elabMode n expargs elabinfo
 
-        logTerm "elab" 50 "checkApp-IVar ntm arglen: \{show arglen}" ntm
-        logNF "elab" 50 "checkApp-IVar nty_in NF" env nty
-        defs <- get Ctxt
-        logTerm "elab" 50 "checkApp-IVar nty_in Term" !(logQuiet $ quote defs env nty)
-        logEnv "elab" 50 "checkApp-IVar Env" env
         addNameLoc fc' n
 
         logC "elab" 10

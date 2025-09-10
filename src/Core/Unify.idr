@@ -478,9 +478,11 @@ tryInstantiate {newvars} loc mode env mname mref num mdef locs otm tm
               PV pv pi => throw (PatternVariableUnifies loc (getLoc otm) env (PV pv pi) otm)
               _ => pure ()
          defs <- get Ctxt
+         tynf <- logQuiet $ nf defs Env.empty (type mdef)
          ty <- normalisePis defs Env.empty $ type mdef
                      -- make sure we have all the pi binders we need in the
                      -- type to make the metavariable definition
+         logNF "unify.instantiate" 5 "tynf" [<] tynf
          logTerm "unify.instantiate" 5 ("Type: " ++ show !(toFullNames mname)) (type mdef)
          logTerm "unify.instantiate" 5 ("Type: " ++ show mname) ty
          log "unify.instantiate" 5 ("With locs: " ++ show locs)
@@ -890,8 +892,8 @@ mutual
                    (do args' <- logQuiet $ traverse (evalArg empty) args
                        qargs <- logQuiet $ traverse (quote empty env) args'
                        qtm <- logQuiet $ quote empty env tmnf
-                       pure $ "Unifying: " ++ show mname ++ "\n args " ++ show qargs ++
-                              "\n with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
+                       pure $ "Unifying: " ++ show mname ++ " args " ++ show qargs ++
+                              " with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
            case !(patternEnv env args) of
                 Nothing =>
                   do Just hdef <- lookupCtxtExact (Resolved mref) (gamma defs)
@@ -1105,7 +1107,7 @@ mutual
                     FC -> Name -> Binder (Closure vars) ->
                     (Defs -> Closure vars -> Core (NF vars)) ->
                     Core UnifyResult
-  unifyBothBinders mode loc env xfc x (Pi fcx cx ix tx) scx yfc y (Pi fcy cy iy ty) scy
+  unifyBothBinders mode loc env xfc x bx@(Pi fcx cx ix tx) scx yfc y by@(Pi fcy cy iy ty) scy
       = do defs <- get Ctxt
            let err = convertError loc env
                        (NBind xfc x (Pi fcx cx ix tx) scx)
@@ -1122,14 +1124,20 @@ mutual
                      logNF "unify.binder" 10 "........with" env !(logQuiet $ evalClosure empty ty)
                      let env' : Env Term (_ :< x)
                               = Env.bind env $ Pi fcy cy Explicit tx'
+                     logEnv "unify.binder" 10 "env'" env'
+                     logC "unify.binder" 10 $ pure "Unifying pi \{show ix} and \{show iy}"
                      case constraints ct of
                          [] => -- No constraints, check the scope
                             do tscx <- scx defs (toClosure defaultOpts env (Ref loc Bound xn))
+                               logNF "unify.binder" 10 "tscx" env tscx
                                tscy <- scy defs (toClosure defaultOpts env (Ref loc Bound xn))
+                               logNF "unify.binder" 10 "tscy" env tscy
                                tmx <- quote empty env tscx
                                tmy <- quote empty env tscy
                                logTermNF "unify.binder" 10 "Unifying scope" env tmx
                                logTermNF "unify.binder" 10 "..........with" env tmy
+                               logTermNF "unify.binder" 10 "refsToLocals: Unifying scope" env' (refsToLocals (Add x xn None) tmx)
+                               logTermNF "unify.binder" 10 "refsToLocals: ..........with" env' (refsToLocals (Add x xn None) tmy)
                                cs <- unify (lower mode) loc env'
                                        (refsToLocals (Add x xn None) tmx)
                                        (refsToLocals (Add x xn None) tmy)
@@ -1266,27 +1274,39 @@ mutual
       = unifyBothApps (lower mode) loc env xfc fx axs yfc fy ays
   unifyNoEta mode loc env x (NErased _ (Dotted y))
     = do logC "unify" 20 $ do
+            defs <- get Ctxt
+            x <- logQuiet $ quote defs env x
             x <- toFullNames x
+            y <- logQuiet $ quote defs env y
             y <- toFullNames y
             pure $ "Extracting dotted (right): " ++ show x ++ " and " ++ show y
          unifyNoEta mode loc env x y
   unifyNoEta mode loc env (NErased _ (Dotted x)) y
     = do logC "unify" 20 $ do
+            defs <- get Ctxt
+            x <- logQuiet $ quote defs env x
             x <- toFullNames x
+            y <- logQuiet $ quote defs env y
             y <- toFullNames y
             pure $ "Extracting dotted (left): " ++ show x ++ " and " ++ show y
          unifyNoEta mode loc env x y
   unifyNoEta mode loc env x@(NApp xfc hd args) y
       = do logC "unify" 20 $ do
+            defs <- get Ctxt
+            x <- logQuiet $ quote defs env x
             x <- toFullNames x
+            y <- logQuiet $ quote defs env y
             y <- toFullNames y
             pure $ "Comparing left application to right something: " ++ show x ++ " and " ++ show y
            unifyApp False (lower mode) loc env xfc hd args y
   unifyNoEta mode loc env y x@(NApp yfc hd args)
       = do logC "unify" 20 $ do
+            defs <- get Ctxt
+            x <- logQuiet $ quote defs env x
             x <- toFullNames x
+            y <- logQuiet $ quote defs env y
             y <- toFullNames y
-            pure $ "Comparing right application to left something: " ++ show x ++ " and " ++ show y
+            pure $ "Comparing right application to left something: " ++ show y ++ " and " ++ show x
            if umode mode /= InMatch
               then unifyApp True mode loc env yfc hd args y
               else do log "unify.noeta" 10 $ "Unify if Eq due to something with app"
@@ -1400,7 +1420,7 @@ mutual
                            x'' <- logQuiet $ quote empty env x'
                            y' <- logQuiet $ evalClosure empty y
                            y'' <- logQuiet $ quote empty env y'
-                           pure $ "Closures are convertable: " ++ show x'' ++ "\n and " ++ show y''
+                           pure $ "Closures are convertable: " ++ show !(toFullNames x'') ++ " and " ++ show !(toFullNames y'')
                         pure success
                 else
                   do xnf <- evalClosure defs x
@@ -1408,7 +1428,7 @@ mutual
                      do logC "unify" 20 $
                         do xnf <- logQuiet $ quote empty env xnf
                            ynf <- logQuiet $ quote empty env ynf
-                           pure $ "Closures are not convertable: " ++ show xnf ++ "\n and " ++ show ynf
+                           pure $ "Closures are not convertable: " ++ show !(toFullNames xnf) ++ " and " ++ show !(toFullNames ynf)
                      -- If one's a meta and the other isn't, don't reduce at
                      -- all
                      case (xnf, ynf) of
@@ -1420,7 +1440,7 @@ mutual
                                xtm <- logQuiet $ quote empty env xnf
                                ytm <- logQuiet $ quote empty env ynf'
                                logC "unify" 20 $
-                                 pure $ "Don't reduce at all (left): " ++ show xtm ++ "\n and " ++ show ytm
+                                 pure $ "Don't reduce at all (left): " ++ show !(toFullNames xtm) ++ " and " ++ show !(toFullNames ytm)
                                cs <- unify mode loc env !(nf empty env xtm)
                                                         !(nf empty env ytm)
                                case constraints cs of
@@ -1432,7 +1452,7 @@ mutual
                                xtm <- logQuiet $ quote empty env xnf'
                                ytm <- logQuiet $ quote empty env ynf
                                logC "unify" 20 $
-                                 pure $ "Don't reduce at all (right): " ++ show {ty=Term _} ytm ++ "\n and " ++ show xtm
+                                 pure $ "Don't reduce at all (right): " ++ show {ty=Term _} !(toFullNames ytm) ++ " and " ++ show !(toFullNames xtm)
                                cs <- unify mode loc env !(nf empty env ytm)
                                                         !(nf empty env xtm)
                                case constraints cs of

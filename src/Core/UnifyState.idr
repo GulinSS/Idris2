@@ -671,13 +671,13 @@ dumpHole s n hole
                        "! \{show hole} " ++ show !(getFullName (Resolved hole)) ++ " : "
                            ++ show !(toFullNames !(logQuiet $ normaliseHoles defs Env.empty ty))
                        ++ "\n\t  = "
-                           ++ show !(logQuiet $ normaliseHoles defs Env.empty tm)
+                           ++ show !(toFullNames !(logQuiet $ normaliseHoles defs Env.empty tm))
                            ++ "\n\twhen"
                      traverse_ dumpConstraint constraints
              (Hole _ p, ty) =>
                   logString depth s.topic n $
                     "? \{show hole} " ++ show (fullname gdef) ++ " : "
-                        ++ show !(logQuiet $ normaliseHoles defs Env.empty ty)
+                        ++ show !(toFullNames !(logQuiet $ normaliseHoles defs Env.empty ty))
                         ++ if implbind p then " (ImplBind)" else ""
                         ++ if invertible gdef then " (Invertible)" else ""
              (BySearch _ _ _, ty) =>
@@ -687,16 +687,16 @@ dumpHole s n hole
              (PMDef _ args t _ _, ty) =>
                   log s 4 $
                      "Solved: " ++ show hole ++ " : " ++
-                     show !(logQuiet $ normalise defs Env.empty ty) ++
-                     " = " ++ show !(logQuiet $ normalise defs Env.empty (Ref emptyFC Func (Resolved hole)))
+                     show !(toFullNames !(logQuiet $ normalise defs Env.empty ty)) ++
+                     " = " ++ show !(toFullNames !(logQuiet $ normalise defs Env.empty (Ref emptyFC Func (Resolved hole))))
              (ImpBind, ty) =>
                   log s 4 $
                       "Bound: " ++ show hole ++ " : " ++
-                      show !(logQuiet $ normalise defs Env.empty ty)
+                      show !(toFullNames !(logQuiet $ normalise defs Env.empty ty))
              (Delayed, ty) =>
                   log s 4 $
                      "Delayed elaborator : " ++
-                     show !(logQuiet $ normalise defs Env.empty ty)
+                     show !(toFullNames !(logQuiet $ normalise defs Env.empty ty))
              _ => pure ()
   where
     dumpConstraint : Int -> Core ()

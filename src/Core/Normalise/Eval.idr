@@ -296,7 +296,12 @@ parameters (defs : Defs) (topopts : EvalOpts)
                                                                       pure $ "Stuck function: " ++ show n'
                                   pure def
              let redok1 = evalAll topopts
-             let redok2 = reducibleInAny (currentNS defs :: nestedNS defs)
+             let ns = currentNS defs :: nestedNS defs
+             let
+                expand_suff : String
+                expand_suff = if meta then "Meta" else "App"
+             logC "eval.def.stuck" 50 $ pure "expand \{expand_suff} ns: \{show ns}, n: \{show n}, vis: \{show $ collapseDefault $ visibility res}, mult: \{show $ multiplicity res}, full_name: \{show !(toFullNames n)}"
+             let redok2 = reducibleInAny ns
                                          (fullname res)
                                          (collapseDefault $ visibility res)
              -- want to shortcut that second check, if we're evaluating
@@ -322,7 +327,7 @@ parameters (defs : Defs) (topopts : EvalOpts)
                            log "eval.def.stuck" 40 (eval_type ++ " n: \{show $ !(toFullNames n)}, alwaysReduce: \{show $ alwaysReduce r}, multiplicity: \{show $ multiplicity res}, eflags: \{show topopts}, dflags: \{show $ flags res}")
                            log "eval.def.stuck" 50 (eval_type ++ " tree: \{show !(toFullNames tree)}")
                      _ => pure ()
-                   nf <- evalDef env opts' meta fc
+                   nf <- evalDef n env opts' meta fc
                            (multiplicity res) (definition res) (flags res) stk def
                    -- logC "eval.ref" 50 $ do n' <- toFullNames n
                    --                         nf <- toFullNames nf
@@ -505,12 +510,13 @@ parameters (defs : Defs) (topopts : EvalOpts)
 
     evalDef : {auto c : Ref Ctxt Defs} ->
               {free : _} ->
+              Name ->
               Env Term free -> EvalOpts ->
               (isMeta : Bool) -> FC ->
               RigCount -> Def -> List DefFlag ->
               Stack free -> (def : Lazy (NF free)) ->
               Core (NF free)
-    evalDef env opts meta fc rigd (PMDef r args tree _ _) flags stk def
+    evalDef n env opts meta fc rigd (PMDef r args tree _ _) flags stk def
        -- If evaluating the definition fails (e.g. due to a case being
        -- stuck) return the default.
        -- We can use the definition if one of the following is true:
@@ -540,12 +546,21 @@ parameters (defs : Defs) (topopts : EvalOpts)
                                                 pure "evalTree failed on \{show def}"
                                               pure def
                                case fuel opts of
-                                    Nothing => evalWithOpts defs opts env newLoc res stk'
+                                    Nothing => do
+                                        res <- logDepth $ evalWithOpts defs opts env newLoc res stk'
+                                        logC "eval.ref" 50 $ do n' <- toFullNames n
+                                                                res <- toFullNames res
+                                                                pure "Reduced \{show n'} to \{show res}"
+                                        pure res
                                     Just Z => log "eval.def.stuck" 50 "Recursion depth limit exceeded"
                                               >> pure def
                                     Just (S k) =>
                                         do let opts' = { fuel := Just k } opts
-                                           evalWithOpts defs opts' env newLoc res stk'
+                                           res <- logDepth $ evalWithOpts defs opts' env newLoc res stk'
+                                           logC "eval.ref" 50 $ do n' <- toFullNames n
+                                                                   res <- toFullNames res
+                                                                   pure "Reduced \{show n'} (fuel=\{show k}) to \{show res}"
+                                           pure res
              else do logC "eval.def.stuck" 50 $ do
                        def <- toFullNames def
                        pure $ "Refusing to reduce \{show def}"
@@ -557,14 +572,14 @@ parameters (defs : Defs) (topopts : EvalOpts)
                     --                   , "  rigd        : \{show rigd}"
                     --                   ]
                      pure def
-    evalDef env opts meta fc rigd (Builtin op) flags stk def
+    evalDef _ env opts meta fc rigd (Builtin op) flags stk def
         = evalOp (getOp op) stk def
     -- All other cases, use the default value, which is already applied to
     -- the stack
-    evalDef env opts meta fc rigd def flags stk orig = do
+    evalDef n env opts meta fc rigd def flags stk orig = do
       logC "eval.def.stuck" 50 $ do
         orig <- toFullNames orig
-        pure "Cannot reduce def \{show orig}: it is a \{show def}"
+        pure "Cannot reduce \{show !(toFullNames n)} def \{show orig}: it is a \{show def}"
       pure orig
 
 -- Make sure implicit argument order is right... 'vars' is used so we'll
