@@ -40,19 +40,6 @@ addConstraint c
          put Ctxt ({ uconstraints $= (c ::) } defs)
 
 parameters {auto c : Ref Ctxt Defs}
-
-  -- Try reducing the application, but only if the name is one that's
-  -- reducible in any of the given namespaces
-  tryReduce : Strategy ->
-              FC -> Name -> Core (Maybe (Glued vars)) ->
-              Core (Maybe (Glued vars))
-  tryReduce BlockApp _ _ _ = pure Nothing
-  tryReduce (Reduce ns) fc n val
-      = do v <- getVisibility fc n
-           if reducibleInAny ns n $ collapseDefault v
-              then val
-              else pure Nothing
-
   convNF : {vars: _} -> Ref QVar Int =>
            Strategy -> Env Term vars ->
            NF vars -> NF vars -> Core Bool
