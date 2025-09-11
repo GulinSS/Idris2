@@ -210,8 +210,9 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
       = do -- Reduce if it's visible in the current namespace
            True <- case getNS s of
                         Nothing => pure True
-                        Just ns => do vis <- getVisibility fc n
-                                      pure $ reducibleInAny ns n $ collapseDefault vis
+                        Just ns => do full_name <- toFullNames n
+                                      vis <- getVisibility fc n
+                                      pure $ reducibleInAny ns full_name $ collapseDefault vis
               | False =>
                   do sp' <- quoteSpine s bounds env sp
                      pure $ applySpine (Ref fc nt n) sp'
