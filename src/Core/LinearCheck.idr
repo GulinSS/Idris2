@@ -447,7 +447,7 @@ parameters {auto c : Ref Ctxt Defs}
            -- found above.
            let used = if isLinear (rigMult (multiplicity b) rig') &&
                          holeFound && used_in == 0
-                         then 1
+                         then (S Z)
                          else used_in
 
            checkUsageOK fc used nm (rigMult (multiplicity b) rig')
