@@ -161,13 +161,6 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
 --   quoteGen : {bound, vars : _} ->
 --              Strategy -> Bounds bound -> Env Term vars ->
 --              Value f vars -> Core (Term (vars ++ bound))
-  quoteGen bounds env (VBind fc x (Lam bfc c p ty) sc) s
-      = do var <- genName "qv"
-           p' <- quotePi s bounds env p
-           ty' <- quoteGen bounds env ty s
-           sc' <- quoteGen (Add x var bounds) env
-                             !(sc $ pure $ mkTmp bfc var) s
-           pure (Bind fc x (Lam bfc c p' ty') sc')
   quoteGen bounds env (VBind fc x b sc) s
       = do var <- genName "qv"
            let s' = case s of
