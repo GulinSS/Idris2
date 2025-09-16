@@ -419,9 +419,9 @@ Reify UserName where
              (UN (Basic "Underscore"), [])
                  => pure Underscore
              (NS _ (UN _), _)
-                 => cantReify val "Name, reifying it is unimplemented or intentionally internal"
-             _ => cantReify val "Name, the name was not found in context"
-  reify defs val = cantReify val "Name, value is not an VDCon interally"
+                 => cantReify val "UserName, reifying it is unimplemented or intentionally internal"
+             _ => cantReify val "UserName, the name was not found in context"
+  reify defs val = cantReify val "UserName, value is not an VDCon interally"
 
 export
 Reflect UserName where
