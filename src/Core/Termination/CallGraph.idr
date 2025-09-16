@@ -124,7 +124,7 @@ smallerArg inc big s tm
                              VApp fc nt n sp@(_ :< _) _ =>
                                 -- Higher order recursive argument
                                   smaller inc big
-                                      (VApp fc nt n [<] (pure Nothing))
+                                      (vRef fc nt n)
                                       tm
                              _ => pure False
 
@@ -231,7 +231,7 @@ expandForced (_ :: fs) args = expandForced fs args
 data SCVar : Type where
 
 mkvar : Int -> Value f [<]
-mkvar i = VApp EmptyFC Bound (MN "scv" i) [<] (pure Nothing)
+mkvar i = vRef EmptyFC Bound (MN "scv" i)
 
 nextVar : {auto c : Ref SCVar Int} -> Core (Value f [<])
 nextVar

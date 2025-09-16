@@ -69,7 +69,7 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
                (fc, q, !(quoteGen bounds env !arg s))
 
   mkTmp : FC -> Name -> Glued vars
-  mkTmp fc n = VApp fc Bound n [<] (pure Nothing)
+  mkTmp fc n = vRef fc Bound n
 
   mkTmpVar : FC -> Name -> Core (Glued vars)
   mkTmpVar fc n = pure $ mkTmp fc n

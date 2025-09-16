@@ -387,12 +387,12 @@ parameters {auto c : Ref Ctxt Defs} (eflags : EvalFlags)
                 | Nothing => do logC "eval.stuck.outofscope" 5 $ do
                                   n' <- toFullNames n
                                   pure $ "Stuck function: " ++ show n'
-                                pure (VApp fc nt n [<] (pure Nothing))
+                                pure (vRef fc nt n)
            let Function fi fn _ _ = definition def
                 | res => do logC "eval.def.stuck" 50 $ do
                               n <- toFullNames n
                               pure "Cannot reduce def \{show n}: it is a \{show res}"
-                            pure (VApp fc nt n [<] (pure Nothing))
+                            pure (vRef fc nt n)
            log "eval.def.stuck" 40 ("evalRef n: \{show $ !(toFullNames n)}, alwaysReduce: \{show $ alwaysReduce fi}, multiplicity: \{show $ multiplicity def}, eflags: \{show eflags}, dflags: \{show $ flags def}")
            logTerm "eval.def.stuck" 50 "evalRef fn" !(toFullNames fn)
            if alwaysReduce fi || (reduceForTC eflags (flags def))

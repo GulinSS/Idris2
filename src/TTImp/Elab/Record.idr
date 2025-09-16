@@ -100,7 +100,7 @@ findFieldsAndTypeArgs defs con
              nfty <- expand ty
              let names = !(getNames defs nfty) `union` names
              let expNames = (nameRoot x, imp, getRecordType nfty) :: expNames
-             getExpNames names expNames !(expand !(sc (pure (VApp fc Bound x [<] (pure Nothing)))))
+             getExpNames names expNames !(expand !(sc (pure (vRef fc Bound x))))
     getExpNames names expNames nfty = pure (reverse expNames, (!(getNames defs nfty) `union` names))
 
 genFieldName : {auto u : Ref UST UState} ->
