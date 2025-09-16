@@ -248,7 +248,7 @@ parameters {auto c : Ref Ctxt Defs}
                pure (RHS [] rhs', u) -- Forced equalities thrown away now
       repScope fc tmpi (xs :< (r, x)) scope
           = do let xn = MN "tmpsc" tmpi
-               let xv = VApp fc Bound xn [<] (pure Nothing)
+               let xv = vRef fc Bound xn
                (scope', u) <- repScope fc (tmpi + 1) xs (scope (pure xv))
                pure (Arg r x (refsToLocalsCaseScope (Add x xn None) scope'), u)
 
@@ -259,8 +259,8 @@ parameters {auto c : Ref Ctxt Defs}
       repAlt (VDelayCase fc ty arg scope)
           = do let tyn = MN "tmpd" tmpi
                let argn = MN "tmpd" (tmpi + 1)
-               let tyv = VApp fc Bound tyn [<] (pure Nothing)
-               let argv = VApp fc Bound argn [<] (pure Nothing)
+               let tyv = vRef fc Bound tyn
+               let argv = vRef fc Bound argn
                -- Stop expanding or recursive functions will go forever
                (scope', u) <- replace' False (tmpi + 2) env orig parg
                                        (snd !(scope (pure tyv) (pure argv)))
@@ -311,7 +311,7 @@ parameters {auto c : Ref Ctxt Defs}
       repSub (VBind fc x b scfn)
           = do (b', u) <- repBinder b
                let x' = MN "tmpb" tmpi
-               let var = VApp fc Bound x' [<] (pure Nothing)
+               let var = vRef fc Bound x'
                (sc', u') <- replace' expand (tmpi + 1) env orig parg !(scfn (pure var))
                pure (Bind fc x b' (refsToLocals (Add x x' None) sc'), u || u')
       repSub (VApp fc nt fn args val')

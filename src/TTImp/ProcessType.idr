@@ -120,7 +120,7 @@ findInferrable ty = fi 0 0 [] [] ty
     fi : Nat -> Int -> List (Name, Nat) -> List Nat -> ClosedNF -> Core (List Nat)
     fi pos i args acc (VBind fc x (Pi _ _ _ aty) sc)
         = do let argn = MN "inf" i
-             sc' <- expand !(sc (pure (VApp fc Bound argn [<] (pure Nothing))))
+             sc' <- expand !(sc (pure (vRef fc Bound argn)))
              acc' <- findInf acc args !(expand aty)
              rest <- fi (1 + pos) (1 + i) ((argn, pos) :: args) acc' sc'
              pure rest
