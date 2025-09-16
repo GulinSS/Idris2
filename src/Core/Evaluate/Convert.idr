@@ -31,7 +31,7 @@ genName n
 genVar : Ref QVar Int => FC -> String -> Core (Value f vars)
 genVar fc n
     = do var <- genName n
-         pure (VApp fc Bound var [<] (pure Nothing))
+         pure (vRef fc Bound var)
 
 -- TODO: Move to Core.TT.Universes
 addConstraint : {auto c : Ref Ctxt Defs} -> UConstraint -> Core ()

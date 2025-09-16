@@ -1268,7 +1268,7 @@ mutual
   unifyNoEta mode fc env tm tm' = unifyNotMetavar mode fc env tm tm'
 
   mkArgVar : FC -> Name -> Glued vars
-  mkArgVar fc var = VApp fc Bound var [<] (pure Nothing)
+  mkArgVar fc var = vRef fc Bound var
 
   mkArg : FC -> Name -> Core (Glued vars)
   mkArg fc var = pure $ mkArgVar fc var
