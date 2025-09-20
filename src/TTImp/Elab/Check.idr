@@ -742,6 +742,7 @@ convertWithLazy withLazy fc elabinfo env x y
                 logNF "elab.unify" 5 ("Unifying " ++ show lazy ++ " "
                              ++ show (elabMode elabinfo)) env x
                 logNF "elab.unify" 5 "....with" env y
+                logEnv "elab.unify" 5 "convertWithLazy in Env" env
                 vs <- if lazy
                          then logDepth $ unifyWithLazy umode fc env x y
                          else logDepth $ unify umode fc env x y
