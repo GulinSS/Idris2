@@ -6,6 +6,7 @@ import Core.Core
 import Core.Env
 import Core.Options
 import Core.TT
+import Core.TT.Binder
 import public Core.UnifyState
 
 import Data.List
@@ -75,6 +76,9 @@ Show UnifyMode where
   show InTerm = "InTerm"
   show InMatch = "InMatch"
   show InSearch = "InSearch"
+
+Show UnifyInfo where
+  show (MkUnifyInfo t u) = "{UnifyInfo atTop=\{show t} umode=\{show u}}"
 
 -- If we're unifying a Lazy type with a non-lazy type, we need to add an
 -- explicit force or delay to the first argument to unification. This says
@@ -291,9 +295,9 @@ unifyArgs mode loc env (cx :: cxs) (cy :: cys)
          -- reduce any newly solved holes
          logC "unify" 20 $ pure $ "unifyArgs done: " ++ show cs
 
-         cx' <- logQuiet $ do nf env !(quote env !cx)
-         cy' <- logQuiet $ do nf env !(quote env !cy)
+         cx' <- nf env !(quote env !cx)
          logNF "unify.application" 20 "unifyArgs cx'" env cx'
+         cy' <- nf env !(quote env !cy)
          logNF "unify.application" 20 "unifyArgs cy'" env cy'
 
          res <- unify (lower mode) loc env cx' cy'
@@ -313,8 +317,9 @@ unifySpine mode fc env (cxs :< ex) (cys :< ey)
     = do -- We might know more about cx and cy now, so normalise again to
          -- reduce any newly solved holes
          cx' <- logQuiet $ do nf env !(quote env !(value ex))
-         cy' <- logQuiet $ do nf env !(quote env !(value ey))
          logNF "unify.application" 20 "unifySpine cx'" env cx'
+
+         cy' <- logQuiet $ do nf env !(quote env !(value ey))
          logNF "unify.application" 20 "unifySpine cy'" env cy'
 
          res <- unify (lower mode) fc env cx' cy'
@@ -335,9 +340,22 @@ unifySpineMetaArg mode fc env [<] [<] = pure success
 unifySpineMetaArg mode fc env (cxs :< ex) (cys :< ey)
     = do -- We might know more about cx and cy now, so normalise again to
          -- reduce any newly solved holes
-         cx' <- logQuiet $ do nf env !(quote env !(value ex))
-         cy' <- logQuiet $ do nf env !(quote env !(value ey))
+         cx' <- value ex
+         logC "unify.application" 50 $ pure "unifySpine cx Glue Spine \{show cx'}"
+         cx' <- quote env cx'
+         logC "unify.application" 50 $ pure "unifySpine cx Term \{show cx'}"
+         cx' <- nf env cx'
+         logC "unify.application" 50 $ pure "unifySpine cx Glue NF \{show cx'}"
+
          logNF "unify.application" 20 "unifySpine cx'" env cx'
+
+         cy' <- value ey
+         logC "unify.application" 50 $ pure "unifySpine cy Glue Spine \{show cy'}"
+         cy' <- quote env cy'
+         logC "unify.application" 50 $ pure "unifySpine cy Term \{show cy'}"
+         cy' <- nf env cy'
+         logC "unify.application" 50 $ pure "unifySpine cy Glue NF \{show cy'}"
+
          logNF "unify.application" 20 "unifySpine cy'" env cy'
 
          res <- unifySpineEntry (lower mode) cx' cy'
@@ -1113,7 +1131,13 @@ mutual
   -- if the names match.
   unifyNotMetavar mode@(MkUnifyInfo p InSearch) fc env x@(VApp _ _ nx spx _) y@(VApp _ _ ny spy _)
       = if nx == ny
-           then unifySpine mode fc env spx spy
+           then do logC "unify.application" 5
+                          (do xs' <- logQuiet $ traverse value spx
+                              xs <- logQuiet $ traverse (quote env) xs'
+                              yx' <- logQuiet $ traverse value spy
+                              ys <- logQuiet $ traverse (quote env) yx'
+                              pure ("Searching args " ++ show xs ++ " " ++ show ys))
+                   unifySpine mode fc env spx spy
            else postpone fc mode "Postponing application (search)" env x y
   unifyNotMetavar mode@(MkUnifyInfo p InMatch) fc env x@(VApp _ _ nx spx _) y@(VApp _ _ ny spy _)
       = if nx == ny
@@ -1167,6 +1191,8 @@ mutual
         dumpArg v = do
           v' <- logQuiet $ do nf env !(quote env !v)
           logNF "unify" 20 "NF" env v'
+          logC "unify" 50 $ pure "NF Show: \{show v'}"
+
   unifyNotMetavar mode fc env (VDelayed _ _ x) (VDelayed _ _ y)
       = unify (lower mode) fc env x y
   unifyNotMetavar mode fc env (VDelay _ _ tx ax) (VDelay _ _ ty ay)
@@ -1505,9 +1531,9 @@ mutual
            else do valx' <- expand x
                    valy' <- expand y
                    logC "unify.equal" 10 $
-                     do x <- toFullNames valx'
-                        y <- toFullNames valy'
-                        pure $ "Begin unification (func non-equal) \{show lazy}: \{show x} and \{show y}"
+                     do valx' <- toFullNames valx'
+                        valy' <- toFullNames valy'
+                        pure $ "Begin unification (func non-equal) \{show lazy} \{show mode}: \{show valx'} (from \{show x}) and \{show valy'} (from \{show y})"
                    if lazy
                       then unifyLazy mode fc env valx' valy'
                       else unifyWithEta mode fc env valx' valy'

@@ -47,6 +47,7 @@ expandAmbigName mode nest env orig args (IVar fc x) exp
                        pure orig
           Nothing => do
              defs <- get Ctxt
+             logC "elab.ambiguous" 50 $ pure "expandAmbigName Not-Nested: \{show x} @ \{show args}"
              case defined x env of
                   Just _ =>
                     if isNil args || notLHS mode
@@ -64,6 +65,7 @@ expandAmbigName mode nest env orig args (IVar fc x) exp
                             pure $ mkAlt primApp est xr
                           Nothing => do
                             ns <- lookupCtxtName x (gamma defs)
+                            logC "elab.ambiguous" 50 $ pure "expandAmbigName Not-Nested Not-In-Env Not-PrimName: \{show x} @ \{show $ map fst ns}"
                             ns' <- filterM visible ns
                             case ns' of
                                [] => do log "elab.ambiguous" 50 $ "Failed to find " ++ show orig
@@ -419,7 +421,8 @@ checkAlternative rig elabinfo nest env fc (UniqueDefault def) alts mexpected
 checkAlternative rig elabinfo nest env fc uniq alts mexpected
     = do checkAmbigDepth fc elabinfo
          alts' <- maybe (Core.pure [])
-                        (\exp => pruneByType env !(expand exp) alts) mexpected
+                        (\exp => do logNF "elab.ambiguous" 5 "checkAlternative exp_backtick" env exp
+                                    pruneByType env !(expand exp) alts) mexpected
          case alts' of
            [alt] => checkImp rig elabinfo nest env alt mexpected
            _ =>
@@ -439,6 +442,7 @@ checkAlternative rig elabinfo nest env fc uniq alts mexpected
                                      (do exp <- quote env expected
                                          nf env exp)
                                      (pure expected)
+                          logNF "elab.ambiguous" 5 "checkAlternative delayOnFailure exp_backtick" env exp'
 
                           alts' <- pruneByType env !(expand exp') alts
 
