@@ -99,6 +99,8 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
          let rigc = getRigNeeded mode
 
          (chktm, chkty) <- check {e} rigc (initElabInfo mode) nest env tm ty
+         logNF "elab" 10 "Checked chkty" env chkty
+
          -- Final retry of constraints and delayed elaborations
          -- - Solve any constraints, then retry any delayed elaborations
          -- - Finally, last attempts at solving constraints, but this

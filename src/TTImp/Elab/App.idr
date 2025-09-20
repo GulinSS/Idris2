@@ -86,6 +86,8 @@ getNameType elabMode rigc env fc x
                  log "ide-mode.highlight" 8
                      $ "getNameType is trying to add something for: "
                       ++ show def.fullname ++ " (" ++ show fc ++ ")"
+                 logEnv "ide-mode.highlight" 8 "getNameType Nothing Env" env
+                 logTerm "ide-mode.highlight" 8 "getNameType Nothing type def of \{show x}" (type def)
 
                  when (isSourceName def.fullname) $
                    whenJust (isConcreteFC fc) $ \nfc => do
@@ -494,6 +496,10 @@ mutual
                                   | Nothing => pure ()
                              when (isErased (multiplicity gdef)) $ addNoSolve i
                   _ => pure ()
+             case atyNF of
+                  Just x => logNF "elab" 50 "checkRtoL atyNF" env x
+                  _      => log   "elab" 50 "checkRtoL atyNF Nothing"
+
              res <- logDepth $ check argRig ({ topLevel := False } elabinfo) nest env arg (Just aty')
              case atyNF of
                   Just (VMeta _ _ i _ _ _) => removeNoSolve i

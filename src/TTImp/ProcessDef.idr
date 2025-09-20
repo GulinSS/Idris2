@@ -521,10 +521,14 @@ checkClause {vars} mult vis totreq hashit n opts nest env (PatClause fc lhs_in r
          let rhsMode = if isErased mult then InType else InExpr
          log "declare.def.clause" 5 $ "Checking RHS " ++ show rhs
          logEnv "declare.def.clause" 5 "In env" env'
+         logTerm "declare.def.clause" 5 "lhsty_backtick" lhsty'
+
+         lhsty' <- nf env' lhsty'
+         logNF "declare.def.clause" 5 "lhsty_backtick NF" env' lhsty'
 
          rhstm <- logTime 3 ("Check RHS " ++ show fc) $
                     wrapErrorC opts (InRHS fc !(getFullName (Resolved n))) $
-                       checkTermSub n rhsMode opts nest' env' env sub' rhs !(nf env' lhsty')
+                       checkTermSub n rhsMode opts nest' env' env sub' rhs lhsty'
          clearHoleLHS
 
          logTerm "declare.def.clause" 3 "RHS term" rhstm
@@ -977,6 +981,8 @@ processDef : {vars : _} ->
 processDef opts nest env fc n_in cs_in
   = do n <- inCurrentNS n_in
        withDefStacked n $ do
+         logC "declare.def" 50 $ do pure "For \{show n} NS: \{show $ (!getNS :: !getNestedNS)}"
+
          defs <- get Ctxt
          Just gdef <- lookupOrAddAlias opts nest env fc n cs_in
            | Nothing => noDeclaration fc n

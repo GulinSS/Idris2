@@ -260,10 +260,12 @@ TTImp.Elab.Check.check rigc elabinfo nest env tm@(IUpdate _ _ _) exp
     = checkImp rigc elabinfo nest env tm exp
 TTImp.Elab.Check.check rigc elabinfo nest env tm_in exp
     = do tm <- expandAmbigName (elabMode elabinfo) nest env tm_in [] tm_in exp
+         logC "elab" 50 $ pure "expandAmbigName tm: \{show tm}"
          case elabMode elabinfo of
               InLHS _ => -- Don't expand implicit lambda on lhs
                  checkImp rigc elabinfo nest env tm exp
               _ => do tm' <- insertImpLam env tm exp
+                      logC "elab" 50 $ pure "insertImpLam tm_backtick: \{show tm'}"
                       checkImp rigc elabinfo nest env tm' exp
 
 onLHS : ElabMode -> Bool

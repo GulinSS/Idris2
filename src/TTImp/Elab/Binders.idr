@@ -155,12 +155,18 @@ checkLambda rig_in elabinfo nest env fc rigl info n argTy scope (Just expty_in)
          solveConstraints solvemode Normal
          -- `quoteOnePi` introduction requires to make a weaker version of
          -- visibility checker: `getVisibilityWeaked`
-         expty <- quoteOnePi env !(expand expty_in)
+         expty_in' <- expand expty_in
+         logNF "elab.binder" 50 "checkLambda getTerm expty*" env expty_in'
+         expty <- quoteOnePi env expty_in'
+         logTerm "elab.binder" 50 "checkLambda quoteOnePi expty*" expty
          case expty of
               Bind bfc bn (Pi fc' c _ pty) psc =>
                  do u <- uniVar fc'
                     (tyv, tyt) <- check erased elabinfo nest env
                                         argTy (Just (gType fc u))
+                    logTermNF "elab.binder" 10 "check tyv" env tyv
+                    logNF "elab.binder" 10 "check tyt" env tyt
+
                     info' <- checkPiInfo rigl elabinfo nest env info (Just !(nf env tyv))
                     let rigb = rigl `glb` c
                     let env' : Env Term (_ :< n) = env :< Lam fc rigb info' tyv
