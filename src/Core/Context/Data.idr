@@ -6,6 +6,7 @@ import Core.Context
 import Core.Context.Log
 import Core.Env
 import Core.Evaluate.Value
+import Core.Evaluate.Expand
 import Core.Evaluate
 
 import Data.List

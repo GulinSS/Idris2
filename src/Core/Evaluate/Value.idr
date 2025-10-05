@@ -103,6 +103,11 @@ vtCon fc n Z [<] = case isConstantType n of
   Nothing => VTCon fc n Z [<]
 vtCon fc n arity args = VTCon fc n arity args
 
+-- It's safe to pretend an NF is Glued, if we need it
+export
+asGlued : Value f vars -> Glued vars
+asGlued = believe_me -- justification as above
+
 export
 getLoc : Value f vars -> FC
 getLoc (VBind fc x y sc) = fc
@@ -122,137 +127,12 @@ getLoc (VErased fc imp) = fc
 getLoc (VUnmatched fc x) = fc
 getLoc (VType fc x) = fc
 
--- TODO: dupe, remove me later
-getDepth : {auto c : Ref Ctxt Defs} -> Core Nat
-getDepth
-    = do defs <- get Ctxt
-         let treeLikeOutput = (logTreeEnabled $ session (options defs))
-         pure $ if treeLikeOutput then (logDepth $ session (options defs)) else 0
-
-logC : {auto c : Ref Ctxt Defs} ->
-                 LogTopic -> Nat -> Core String -> Core ()
-logC str n cmsg
-    = when !(logging str n)
-        $ do depth <- getDepth
-             msg <- cmsg
-             logString depth str.topic n msg
-    where
-      padLeft : Nat -> String -> String
-      padLeft pl str =
-          let whitespace = replicate (pl * 2) ' '
-          in joinBy "\n" $ toList $ map (\r => whitespace ++ r) $ split (== '\n') str
-
-      %inline
-      logString : Nat -> String -> Nat -> String -> Core ()
-      logString depth "" n msg = coreLift $
-          do putStrLn $ padLeft depth $ "LOG " ++ show n ++ ": " ++ msg
-      logString depth str n msg = coreLift $
-          do putStrLn $ padLeft depth $ "LOG " ++ str ++ ":" ++ show n ++ ": " ++ msg
-
-      unverifiedLogging : String -> Nat -> Core Bool
-      unverifiedLogging str Z = pure True
-      unverifiedLogging str n = do
-          opts <- getSession
-          pure $ logEnabled opts && keepLog (mkUnverifiedLogLevel str n) (logLevel opts)
-
-      %inline
-      logging : LogTopic -> Nat -> Core Bool
-      logging s n = unverifiedLogging s.topic n
-
-logDepth : {auto c : Ref Ctxt Defs} -> Core a -> Core a
-logDepth r
-    = do logDepthIncrease
-         logDepthDecrease r
-  where
-    logDepthIncrease : Core ()
-    logDepthIncrease
-        = do depth <- getDepth
-             update Ctxt { options->session->logDepth := depth + 1 }
-
-    logDepthDecrease : Core a -> Core a
-    logDepthDecrease r
-        = do r' <- r
-             depth <- getDepth
-             update Ctxt { options->session->logDepth := depth `minus` 1 }
-             pure r'
-
 export
 HasNames (Value f vars)
 
 export
 covering
 {free : _} -> Show (Value f free)
-
--- If a value is an App or Meta node, then it might be reducible. Expand it
--- just enough that we have the right top level node.
--- Don't expand Apps to a blocked top level cases, unless 'cases' is set.
--- The 'believe_me' are there to save us deconstructing and reconstructing
--- just to change a compile-time only index
-expand' : {auto c : Ref Ctxt Defs} ->
-          {vars: _} ->
-          Bool -> Value f vars -> Core (NF vars)
-expand' cases v@(VApp fc nt n sp val)
-    = do vis <- getVisibilityWeaked fc n
-         m_mult <- getMultiplicityWeaked fc n
-         full_name <- toFullNames n
-         defs <- get Ctxt
-         let ns = currentNS defs :: nestedNS defs
-         logC "eval.def.stuck" 50 $ pure "expand App ns: \{show ns}, n: \{show n}, vis: \{show $ collapseDefault vis}, mult: \{show m_mult}, full_name: \{show full_name}"
-         if reducibleInAny ns n (collapseDefault vis)
-            then do
-               Just val' <- logDepth val
-                    | Nothing => pure (believe_me v)
-               logC "eval.def.stuck" 50 $ do val' <- toFullNames val'
-                                             pure "Reduced \{show full_name} to \{show val'}"
-               if cases
-                  then expand' cases val'
-                  else if !(blockedApp val')
-                          then pure (believe_me v)
-                          else expand' cases val'
-            else pure (believe_me v)
-  where
-    blockedApp : forall f . Value f vars -> Core Bool
-    blockedApp (VBind fc _ (Lam {}) sc)
-        = blockedApp !(sc $ pure $ VErased fc Placeholder)
-    blockedApp (VCase _ PatMatch _ _ _ _) = pure True
-    blockedApp (VPrimOp{}) = pure True
-    blockedApp _ = pure False
-
-expand' cases (VErased why (Dotted t))
-    = do t' <- expand' cases t
-         pure (VErased why (Dotted t'))
-expand' cases v@(VMeta fc n i args sp val)
-    = do logC "eval.def.stuck" 50 $ pure "expand Meta n: \{show n}"
-         Just val' <- logDepth val
-              | Nothing => pure (believe_me v)
-         logC "eval.def.stuck" 50 $ do n' <- toFullNames n
-                                       val' <- toFullNames val'
-                                       pure "Reduced \{show n'} to \{show val'}"
-         expand' cases val'
-expand' cases val = pure (believe_me val)
-
-export
-expand : {auto c : Ref Ctxt Defs} ->
-         {vars: _} ->
-         Value f vars -> Core (NF vars)
-expand = expand' False
-
-export
-expandFull : {auto c : Ref Ctxt Defs} ->
-             {vars: _} ->
-             Value f vars -> Core (NF vars)
-expandFull = expand' True
-
--- It's safe to pretend an NF is Glued, if we need it
-export
-asGlued : Value f vars -> Glued vars
-asGlued = believe_me -- justification as above
-
-export
-spineVal : {auto c : Ref Ctxt Defs} ->
-           {vars: _} ->
-           SpineEntry vars -> Core (NF vars)
-spineVal e = expand !(value e)
 
 public export
 0 VCaseScope : SnocList (RigCount, Name) -> SnocList Name -> Type

@@ -7,6 +7,7 @@ import Core.Env
 import Core.Evaluate.Value
 import Core.Primitives
 import Core.TT
+import Core.Evaluate.Expand
 
 import Data.List
 import Data.SnocList

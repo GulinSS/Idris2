@@ -11,6 +11,7 @@ import Core.Metadata
 import Core.UnifyState
 import Core.Evaluate.Value
 import Core.Evaluate.Convert
+import Core.Evaluate.Expand
 import Core.Evaluate
 
 import Idris.REPL.Opts

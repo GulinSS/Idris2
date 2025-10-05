@@ -9,6 +9,7 @@ import Core.TT
 import Core.UnifyState
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import Idris.REPL.Opts
 import Idris.Syntax

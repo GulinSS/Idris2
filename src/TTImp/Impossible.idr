@@ -6,6 +6,7 @@ import Core.TT
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
 import Core.Evaluate.Convert
+import Core.Evaluate.Expand
 
 import TTImp.TTImp
 import TTImp.Elab.App

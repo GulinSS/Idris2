@@ -10,6 +10,7 @@ import Core.Evaluate.Value
 import Core.Evaluate.Quote
 import Core.Evaluate.Normalise
 import Core.Evaluate.Convert
+import Core.Evaluate.Expand
 import Core.Evaluate
 
 import Data.Either

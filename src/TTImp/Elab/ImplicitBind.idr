@@ -13,6 +13,7 @@ import Core.UnifyState
 import Core.TT
 import Core.Evaluate.Value
 import Core.Evaluate.Quote
+import Core.Evaluate.Expand
 import Core.Evaluate
 
 import Idris.REPL.Opts

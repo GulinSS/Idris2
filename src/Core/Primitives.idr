@@ -8,8 +8,6 @@ import Libraries.Utils.String
 import Data.Vect
 import Data.SnocList
 
-import Core.Evaluate.Value
-
 %default covering
 
 public export
