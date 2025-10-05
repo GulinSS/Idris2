@@ -63,6 +63,7 @@ modules =
     Core.Context.TTC,
     Core.Evaluate.Normalize,
     Core.Evaluate.Value,
+    Core.Evaluate.Expand,
     Core.Core,
     Core.Coverage,
     Core.Directory,

@@ -7,6 +7,7 @@ import Core.Metadata
 import Core.TT
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import Parser.Lexer.Source
 import Parser.Unlit

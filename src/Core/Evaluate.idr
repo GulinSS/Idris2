@@ -8,6 +8,7 @@ import public Core.Evaluate.Convert
 import public Core.Evaluate.Normalise
 import public Core.Evaluate.Quote
 import public Core.Evaluate.Value
+import Core.Evaluate.Expand
 import Core.TT
 
 import Data.SnocList

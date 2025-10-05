@@ -6,6 +6,7 @@ import Core.Env
 import Core.Evaluate
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import Core.Termination.References
 
