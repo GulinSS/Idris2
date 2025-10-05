@@ -13,6 +13,7 @@ import Data.Maybe
 
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import Libraries.Data.List.SizeOf
 

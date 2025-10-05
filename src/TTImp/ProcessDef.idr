@@ -17,6 +17,7 @@ import Core.Transform
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
 import Core.Evaluate.Quote
+import Core.Evaluate.Expand
 import Core.Evaluate
 import Core.UnifyState
 

@@ -9,6 +9,7 @@ import Core.Unify
 import Core.TT
 import Core.Evaluate.Value
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 import Core.Evaluate
 
 import TTImp.Elab.Check

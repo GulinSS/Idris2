@@ -5,6 +5,7 @@ import Core.Env
 import Core.Reflect
 import Core.TT
 import Core.Evaluate.Value
+import Core.Evaluate.Expand
 
 import TTImp.TTImp
 import Libraries.Data.WithDefault

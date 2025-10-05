@@ -10,6 +10,7 @@ import Core.TT
 import Core.Evaluate.Value
 import Core.Evaluate.Quote
 import Core.Evaluate.Normalise
+import Core.Evaluate.Expand
 
 import TTImp.Elab.Check
 import TTImp.TTImp

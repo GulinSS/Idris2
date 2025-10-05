@@ -8,9 +8,9 @@ import Core.Env
 import Core.Name
 import Core.Options
 import Core.TT
-import Core.Evaluate.Value
 
 import Core.Evaluate.Value
+import Core.Evaluate.Expand
 import Core.Evaluate.Quote
 import Core.Evaluate.Normalise
 

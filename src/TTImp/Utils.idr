@@ -5,7 +5,7 @@ import Core.Options
 import Core.TT
 import Core.Env
 import Core.Evaluate.Value
-import Core.Evaluate.Value
+import Core.Evaluate.Expand
 
 import TTImp.TTImp
 

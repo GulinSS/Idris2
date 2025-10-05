@@ -8,6 +8,7 @@ import Core.Env
 import Core.Evaluate
 import Core.TT
 import Core.Evaluate.Value
+import Core.Evaluate.Expand
 
 import Libraries.Data.WithDefault
 
