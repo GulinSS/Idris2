@@ -155,6 +155,14 @@ data VCaseAlt : SnocList Name -> Type where
      VDefaultCase : FC -> Glued vars -> VCaseAlt vars
 
 export
+covering
+{vars : _} -> Show (VCaseAlt vars) where
+  show (VConCase _ ty _ args scoped) = "VConCase \{show ty} \{show args}"
+  show (VDelayCase _ ty arg scoped) = "VDelayCase \{show ty} \{show arg}"
+  show (VConstCase _ c vars_glued) = "VConstCase \{show c} \{show vars_glued}"
+  show (VDefaultCase _ vars_glued) = "VDefaultCase \{show vars_glued}"
+
+export
 HasNames (VCaseAlt free) where
   full defs (VConCase fc n tag args cl) = pure $ VConCase fc !(full defs n) tag args cl
   full defs (VDelayCase fc n arg cl) = pure $ VDelayCase fc !(full defs n) arg cl
@@ -228,7 +236,7 @@ covering
   show (VMeta _ n _ _ _ _) = "Meta " ++ show n
   show (VDCon _ n _ _ sp) = show n ++ " %DCon [" ++ show (length sp) ++ " closures]"
   show (VTCon _ n _ sp) = show n ++ " %TCon [" ++ show (length sp) ++ " closures]"
-  show (VCase{}) = "Case"
+  show (VCase _ ct rc vars_nf vars_glued alts) = "Case { \{show ct} \{show vars_nf} \{show vars_glued} \{show alts} }"
   show (VPrimVal _ c) = "Constant " ++ show c
   show (VPrimOp _ f args) = "PrimOp " ++ show f ++ " " ++ show (length args)
   show (VAs _ _ n tm) = show n ++ "@" ++ show tm
