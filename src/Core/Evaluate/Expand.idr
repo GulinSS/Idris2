@@ -10,6 +10,7 @@ import Core.Evaluate.Quote
 import Data.Vect
 import Data.SnocList
 import Libraries.Data.WithDefault
+import Libraries.Data.SnocList.LengthMatch
 
 data ExpandMode
   = OnlyVisible -- expand names to full names with namespaces to respect their visilibity
@@ -83,17 +84,25 @@ expand' mode@Full v@(VCase fc t r sc ty alts)
          logC "eval.def.stuck" 50 $ pure "expand \{show !(toFullNames v)} to \{show !(toFullNames res)}"
          expand' mode res
   where
-    caseScope : {vars: _} -> SnocList (Core (Glued vars)) -> (args : SnocList (RigCount, Name)) -> VCaseScope args vars ->
-                    Core (Glued vars)
-    caseScope [<] [<] scope
+    caseScope' : (vs : SnocList (Core (Glued vars))) ->
+                 (0 _ : LengthMatch vs args) ->
+                 VCaseScope args vars ->
+                 Core (Glued vars)
+    caseScope' [<] LinMatch scope
       = do logC "eval.def.stuck" 50 $ pure "Begin Expand VCaseScope"
            pure $ snd !scope
-    caseScope (vars :< v) (as :< (r, a)) scope
-      = do logC "eval.def.stuck" 50 $ pure "Put arg to Expand VCaseScope \{show a}"
-           caseScope vars as (scope v)
-    caseScope vars _ scope
-      = do vars <- sequence (toList vars)
-           throw (GenericMsg fc "Stuck to expand VCaseScope: \{show vars}")
+    caseScope' (vars :< v) (SnocMatch m) scope
+      = do logC "eval.def.stuck" 50 $ pure "Put arg to Expand VCaseScope"
+           caseScope' vars m (scope v)
+
+    caseScope : SnocList (Core (Glued vars)) ->
+                (args : SnocList (RigCount, Name)) ->
+                VCaseScope args vars ->
+                Core (Glued vars)
+    caseScope vs as scope
+      = case checkLengthMatch vs as of
+             Just m => caseScope' vs m scope
+             Nothing => throw (GenericMsg fc "Stuck to expand VCaseScope: \{show vars}")
 
     tryAlt : NF vars -> VCaseAlt vars -> Core (Maybe (Glued vars))
     tryAlt _ (VDefaultCase _ rhs) = pure $ Just rhs
