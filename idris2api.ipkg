@@ -61,9 +61,12 @@ modules =
     Core.Context.Log,
     Core.Context.Pretty,
     Core.Context.TTC,
-    Core.Evaluate.Normalize,
-    Core.Evaluate.Value,
+    Core.Evaluate,
+    Core.Evaluate.Convert,
     Core.Evaluate.Expand,
+    Core.Evaluate.Normalise,
+    Core.Evaluate.Value,
+    Core.Evaluate.Quote,
     Core.Core,
     Core.Coverage,
     Core.Directory,
@@ -101,7 +104,6 @@ modules =
     Core.TTC,
     Core.Unify,
     Core.UnifyState,
-    Core.Value,
 
     IdrisPaths,
 
