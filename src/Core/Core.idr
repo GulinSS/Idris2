@@ -834,12 +834,7 @@ for_ = flip traverse_
 %inline
 export
 sequence : List (Core a) -> Core (List a)
-sequence (x :: xs)
-   = do
-        x' <- x
-        xs' <- sequence xs
-        pure (x' :: xs')
-sequence [] = pure []
+sequence = traverse id
 
 export
 traverseList1_ : (a -> Core b) -> List1 a -> Core ()
