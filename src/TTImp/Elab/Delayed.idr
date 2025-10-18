@@ -213,13 +213,15 @@ recoverable : {auto c : Ref Ctxt Defs} ->
               Error -> Core Bool
 recoverable (CantConvert _ gam env l r)
    = do defs <- get Ctxt
-        let defs = { gamma := gam } defs
+        let defs_from_err = { gamma := gam } defs
+        put Ctxt defs_from_err
         let res = not !(contra !(expand !(nf env l)) !(expand !(nf env r)))
         put Ctxt defs
         pure res
 recoverable (CantSolveEq _ gam env l r)
    = do defs <- get Ctxt
-        let defs = { gamma := gam } defs
+        let defs_from_err = { gamma := gam } defs
+        put Ctxt defs_from_err
         let res = not !(contra !(expand !(nf env l)) !(expand !(nf env r)))
         put Ctxt defs
         pure res
