@@ -1067,7 +1067,7 @@ mutual
            defs <- get Ctxt
            logNF "elab" 10 ("Trying to solve " ++ show mname ++ " with") env tmnf
            logC "unify.hole" 10
-                   (do qargs <- logQuiet $ traverse (quote env) margs
+                   (do qargs <- logQuiet $ traverse (quote env) pargs
                        qtm <- logQuiet $ quote env tmnf
                        pure $ "Unifying: " ++ show mname ++ " args " ++ show qargs ++
                               " with " ++ show qtm) -- first attempt, try 'empty', only try 'defs' when on 'retry'?
