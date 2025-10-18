@@ -819,6 +819,7 @@ covering
       showApp (TDelay _ _ _ tm) [] = "%Delay " ++ show tm
       showApp (TForce _ _ tm) [] = "%Force " ++ show tm
       showApp (PrimVal _ c) [] = show c
+      showApp (PrimOp _ f ar) [] = "PrimOp " ++ show f ++ " " ++ show (length ar)
       showApp (Erased _ (Dotted t)) [] = ".(" ++ show t ++ ")"
       showApp (Erased _ _) [] = "[__]"
       showApp (TType _ u) [] = "Type"
