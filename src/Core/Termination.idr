@@ -38,6 +38,7 @@ checkIfGuarded fc n
                       when g $ setFlag fc n AllGuarded
               else pure ()
   where
+   mutual
     guardedNF : {vars : _} -> Glued vars -> Core Bool
     guardedNF (VDCon{}) = pure True
     guardedNF (VApp _ _ n _ _)
@@ -45,6 +46,8 @@ checkIfGuarded fc n
              Just gdef <- lookupCtxtExact n (gamma defs)
                   | Nothing => pure False
              pure (AllGuarded `elem` flags gdef)
+    guardedNF (VCase fc ct c _ _ alts)
+        = guardedAlts alts
     guardedNF _ = pure False
 
     guardedScope : {vars : _} -> (args : _) -> VCaseScope args vars -> Core Bool
