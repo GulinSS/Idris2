@@ -566,9 +566,12 @@ toCDef n ty erased (PMDef pi args _ tree _)
          let (args' ** p) = fromNatSet erased args
          comptree <- toCExpTree n tree
          log "compiler.newtype.world" 25 "toCDef PMDef comptree \{show comptree}, p: \{show p}, is_ext: \{show $ (externalDecl pi)}"
-         pure $ toLam (externalDecl pi) $ if isEmpty erased
-            then MkFun args comptree
-            else MkFun (cast args') (shrinkCExp p comptree)
+         let lam = toLam (externalDecl pi) $
+            if isEmpty erased
+                then MkFun args comptree
+                else MkFun (cast args') (shrinkCExp p comptree)
+         log "compiler.newtype.world" 25 "toCDef PMDef is_erased: \{show $ isNil (NatSet.toList erased)}, lam \{show lam}, args': \{show $ Prelude.toList args'}"
+         pure lam
   where
     toLam : Bool -> CDef -> CDef
     toLam True (MkFun args rhs) = MkFun Scope.empty (lamRHS args rhs)
