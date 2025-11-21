@@ -270,7 +270,9 @@ toANF (MkLFun args scope sc)
                rewrite castToList scope
                sc
          log "compile.execute" 40 $ "toANF iargs: \{show iargs}, iargs': \{show iargs'}, lifted: \{show sc'}"
-         pure $ MkAFun (iargs ++ iargs') sc'
+         let res = MkAFun (iargs ++ iargs') sc'
+         log "compile.execute" 40 $ "toANF res: \{show res}"
+         pure res
 toANF (MkLCon t a ns) = pure $ MkACon t a ns
 toANF (MkLForeign ccs fargs t) = pure $ MkAForeign ccs fargs t
 toANF (MkLError err)

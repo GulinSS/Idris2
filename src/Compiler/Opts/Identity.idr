@@ -152,7 +152,9 @@ setIdentity fn = do
     defs <- get Ctxt
     Just (fnIdx, gdef) <- lookupCtxtExactI fn defs.gamma
         | Nothing => pure ()
+    log "compiler.identity" 10 $ "setIdentity gdef.compexpr \{show fn}: \{show gdef.compexpr}"
     let Just idx = the _ $ gdef.compexpr >>= calcIdentity fn
         | Nothing => pure ()
+    log "compiler.identity" 10 $ "set identity flag for: \{show fn}"
     setFlag EmptyFC (Resolved fnIdx) (Identity idx)
     rewriteIdentityFlag (Resolved fnIdx)

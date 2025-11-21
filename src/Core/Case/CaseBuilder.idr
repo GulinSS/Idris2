@@ -474,7 +474,7 @@ getArgTys {vars} env (n :: ns) (Just t@(NBind pfc _ (Pi _ c _ fargc) fsc))
            NErased _ _ => pure Unknown
            farg => Known c <$> quote empty env farg
          scty <- fsc defs (toClosure defaultOpts env (Ref pfc Bound n))
-         rest <- getArgTys env ns (Just scty)
+         rest <- logDepth $ getArgTys env ns (Just scty)
          pure (argty :: rest)
 getArgTys env (_ :: _) (Just t)
     = do empty <- clearDefs =<< get Ctxt
