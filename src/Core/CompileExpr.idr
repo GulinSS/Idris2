@@ -264,7 +264,7 @@ mutual
   Show NamedConAlt where
     show (MkNConAlt x ci tag args exp)
          = "(%concase " ++ showFlag ci ++ show x ++ " " ++ show tag ++ " " ++
-             show args ++ " " ++ show exp ++ ")"
+             show (toList args) ++ " " ++ show exp ++ ")"
       where
         showFlag : ConInfo -> String
         showFlag DATACON = ""

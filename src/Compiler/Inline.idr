@@ -315,8 +315,11 @@ mutual
   extendLoc fc env a@(ns :< n)
       = do log "compiler.inline.io_bind" 50 "Attempting to extendLoc, env: \{show @{CompileExpr} env}, a: \{show a}"
            xn <- genName "cv"
-           (bs', env') <- extendLoc fc env ns
-           pure (Add n xn bs', env' :< CRef fc xn)
+           (bs', env') <- logDepth $ extendLoc fc env ns
+           let bs'' = Add n xn bs'
+           let env'' = env' :< CRef fc xn
+           log "compiler.inline.io_bind" 50 "Attempting to extendLoc, bs'': \{show bs''}, env'': \{show @{CompileExpr} env''}"
+           pure (bs'', env'')
 
   evalAlt : {vars, free : _} ->
             {auto c : Ref Ctxt Defs} ->
@@ -326,12 +329,14 @@ mutual
   evalAlt {free} {vars} fc rec env stk alt@(MkConAlt n ci t args sc)
       = do log "compiler.inline.io_bind" 50 $ "Attempting to evalAlt, env: \{show @{CompileExpr} env}, args: \{show args}"
            (bs, env') <- extendLoc fc env (cast args)
+           log "compiler.inline.io_bind" 50 $ "Attempting to evalAlt, rec: \{show rec}, env': \{show @{CompileExpr} env'}, stk: \{show stk}, sc: \{show sc}"
            scEval <- eval rec env' stk $
                 do rewrite appendAssociative free vars (cast args)
                    rewrite sym $ fishAsSnocAppend (free ++ vars) (args)
                    sc
            log "compiler.inline.io_bind" 50 $ "Attempting to evalAlt, bs: \{show bs}, scEval: \{show scEval}"
            let sc'' = rewrite snocAppendFishAssociative free Scope.empty args in refsToLocals bs scEval
+           log "compiler.inline.io_bind" 50 $ "Attempting to evalAlt, n: \{show n}, args: \{show args}, sc'': \{show sc''}"
            pure $ MkConAlt n ci t args sc''
 
   evalConstAlt : {vars, free : _} ->
