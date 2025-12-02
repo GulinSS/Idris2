@@ -231,7 +231,7 @@ runTest opts testPath = do
   let cg = maybe "" (" --cg " ++) (codegen opts)
   let exe = "\"" ++ exeUnderTest opts ++ cg ++ "\""
   ignore $ system $ "cd " ++ escapeArg testPath ++ " && " ++
-    "timeout 1m sh ./run " ++ exe ++ " | tr -d '\\r' > output"
+    "timeout 120s sh ./run " ++ exe ++ " | tr -d '\\r' > output"
   end <- clockTime UTC
 
   Right out <- readFile $ testPath ++ "/output"

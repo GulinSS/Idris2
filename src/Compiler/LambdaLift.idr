@@ -533,9 +533,11 @@ mutual
                unused = getUnused unusedContracted
                scl' = dropUnused {outer=bound} unused scl
            n <- genName
-           log "compile.execute" 40 $ "LambdaLift.makeLam \{show scl} |=>| \{show scl'}"
+           log "compile.execute" 40 $ "LambdaLift.makeLam \{show $ !(getFullName n)} \{show scl} |=>| \{show scl'}"
            update Lifts { defs $= ((n, MkLFun (dropped vars unused) bound scl') ::) }
-           pure $ LUnderApp fc n (length bound) (allVars fc vars unused)
+           let res = LUnderApp fc n (length bound) (allVars fc vars unused)
+           log "compile.execute" 50 $ "LambdaLift.makeLam \{show $ !(getFullName n)} LUnderApp: \{show res}"
+           pure res
     where
 
         allPrfs : (vs : Scope) -> SizeOf seen ->
