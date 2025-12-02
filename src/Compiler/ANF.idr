@@ -255,14 +255,16 @@ export
 toANF : {auto c : Ref Ctxt Defs} -> LiftedDef -> Core ANFDef
 toANF (MkLFun args scope sc)
     = do v <- newRef Next (the Int 0)
-         log "compile.execute" 40 $ "toANF args: \{show args}, scope: \{show scope}, lifted: \{show sc}"
+         log "compile.execute" 40 $ "toANF args: \{show (toList args)}, scope: \{show scope}, lifted: \{show sc}"
          (iargs, vsNil) <- bindArgs args []
          let vs : AVars args = rewrite sym (appendNilRightNeutral args) in
                                       vsNil
          (iargs', vs) <- bindArgs scope vs
          sc' <- anf vs sc
          log "compile.execute" 40 $ "toANF iargs: \{show iargs}, iargs': \{show iargs'}, lifted: \{show sc'}"
-         pure $ MkAFun (iargs ++ reverse iargs') sc'
+         let res = MkAFun (iargs ++ reverse iargs') sc'
+         log "compile.execute" 40 $ "toANF res: \{show res}"
+         pure res
   where
     bindArgs : {auto v : Ref Next Int} ->
                (args : List Name) -> AVars vars' ->
