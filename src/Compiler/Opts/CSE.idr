@@ -491,6 +491,7 @@ undefinedCount (_, _, C x)  = True
 export
 cse :  Ref Ctxt Defs
     => (definitionNames : List Name)
+    -> {ns: _}
     -> (mainExpr        : CExp ns)
     -> Core (List (Name, FC, CDef), CExp ns)
 cse defs me = do
@@ -513,5 +514,11 @@ cse defs me = do
         ::  map (\(name,(_,cnt)) =>
                       show name ++ ": count " ++ show cnt
                ) filtered
-      let newDefs := newToplevelDefs replaceMap ++ replacedDefs
+      for_ replacedDefs $ \(n, (_, d)) => do
+        logC "compiler.cse" 20 $ do pure "Replaced replacedDefs \{show n}: \{show d}"
+      let replaceMapDefs = newToplevelDefs replaceMap
+      for_ replaceMapDefs $ \(n, (_, d)) => do
+        logC "compiler.cse" 20 $ do pure "Replaced replaceMapDefs \{show n}: \{show d}"
+      let newDefs := replaceMapDefs ++ replacedDefs
+      logC "compiler.cse" 20 $ do pure "Replaced main: \{show replacedMain}"
       pure (newDefs, replacedMain)
