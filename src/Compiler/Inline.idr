@@ -501,7 +501,7 @@ doEval : {args : _} ->
          (n : Name) -> (exp : CExp args) -> Core (CExp args)
 doEval n exp
     = do l <- newRef LVar (the Int 0)
-         log "compiler.inline.eval" 10 ("Origin: " ++ show n ++ " args: " ++ show args ++ " exp: " ++ show exp)
+         log "compiler.inline.eval" 10 ("Origin: " ++ show n ++ " args: " ++ show (toList args) ++ " exp: " ++ show exp)
          exp' <- logDepth $ eval [] EEnv.empty [] exp
          log "compiler.inline.eval" 10 ("Inlined: " ++ show exp')
          pure exp'
