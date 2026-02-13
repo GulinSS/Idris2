@@ -286,7 +286,7 @@ namespace BifunctorFail
     tree' : Functor Tree'
     tree' = %runElab derive
 
-failing "Expected a type constructor, got: Prelude.Basics.id {a = Type}"
+failing "Prelude.Basics.id is a function but not a type synonym"
 
   total
   functor : Functor Prelude.id
@@ -317,3 +317,29 @@ namespace WriterList
 
     wlist : Functor (WList w ())
     wlist = %runElab derive
+
+namespace TypeSynonym
+  data D a b = MkD b
+
+  Functor (D Int) where
+      map f (MkD b) = MkD (f b)
+
+  data C a = MkC a
+
+  Functor C where
+      map f (MkC a) = MkC (f a)
+
+  data A : Type -> Type where
+      A' : (D Int) (C a) -> (A a)
+
+  aaF : Functor A
+  aaF = %runElab derive
+
+  WithD : Type -> Type
+  WithD = D Int
+
+  data A2 : Type -> Type where
+      A2' : WithD (C a) -> (A2 a)
+
+  aa2F : Functor A2
+  aa2F = %runElab derive
