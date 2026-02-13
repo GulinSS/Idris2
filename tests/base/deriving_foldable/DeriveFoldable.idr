@@ -263,7 +263,7 @@ namespace BifoldableFail
     tree' : Foldable Tree'
     tree' = %runElab derive
 
-failing "Expected a type constructor, got: Prelude.Basics.id {a = Type}"
+failing "Prelude.Basics.id is a function but not a type synonym"
 
   total
   foldable : Foldable Prelude.id
