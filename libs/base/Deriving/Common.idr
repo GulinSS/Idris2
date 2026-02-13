@@ -51,6 +51,12 @@ wording (TyCon tag arity) = "a type constructor"
 isTypeCon : Elaboration m => FC -> Name -> m (List (Name, TTImp))
 isTypeCon fc ty = do
     [(_, MkNameInfo (TyCon _ _))] <- getInfo ty
+      | [(_, MkNameInfo Func)] => do
+          [(_, ty')] <- getType ty
+            | _ => failAt fc "\{show ty} is ambiguous"
+          if isTypeSynonym ty'
+            then pure []
+            else failAt fc "\{show ty} is a function but not a type synonym"
       | [] => failAt fc "\{show ty} out of scope"
       | [(_, MkNameInfo nt)] => failAt fc "\{show ty} is \{wording nt} rather than a type constructor"
       | _ => failAt fc "\{show ty} is ambiguous"
@@ -59,6 +65,12 @@ isTypeCon fc ty = do
       [(_, ty)] <- getType n
          | _ => failAt fc "\{show n} is ambiguous"
       pure (n, ty)
+  where
+    isTypeSynonym : TTImp -> Bool
+    isTypeSynonym (IType _) = True
+    isTypeSynonym (IPi _ _ _ _ _ b) = isTypeSynonym b
+    isTypeSynonym (IDelayed _ _ b) = isTypeSynonym b
+    isTypeSynonym _ = False
 
 export
 isType : Elaboration m => TTImp -> m IsType
@@ -66,17 +78,23 @@ isType = go Z [] where
 
   go : Nat -> List (Argument Name, Nat) -> TTImp -> m IsType
   go idx acc (IVar fc n) = MkIsType n (map (map (minus idx . S)) acc) <$> isTypeCon fc n
-  go idx acc (IApp _ t (IVar _ nm)) = case nm of
-    -- Unqualified: that's a local variable
-    UN (Basic _) => go (S idx) ((Arg emptyFC nm, idx) :: acc) t
+  go idx acc (IApp _ t arg) = case arg of
+    IVar _ nm => case nm of
+      -- Unqualified: that's a local variable
+      UN (Basic _) => go (S idx) ((Arg emptyFC nm, idx) :: acc) t
+      _ => go (S idx) acc t
     _ => go (S idx) acc t
-  go idx acc (INamedApp _ t nm (IVar _ nm')) = case nm' of
-    -- Unqualified: that's a local variable
-    UN (Basic _) => go (S idx) ((NamedArg emptyFC nm nm', idx) :: acc) t
+  go idx acc (INamedApp _ t nm arg) = case arg of
+    IVar _ nm' => case nm' of
+      -- Unqualified: that's a local variable
+      UN (Basic _) => go (S idx) ((NamedArg emptyFC nm nm', idx) :: acc) t
+      _ => go (S idx) acc t
     _ => go (S idx) acc t
-  go idx acc (IAutoApp _ t (IVar _ nm)) = case nm of
-    -- Unqualified: that's a local variable
-    UN (Basic _) => go (S idx) ((AutoArg emptyFC nm, idx) :: acc) t
+  go idx acc (IAutoApp _ t arg) = case arg of
+    IVar _ nm' => case nm' of
+      -- Unqualified: that's a local variable
+      UN (Basic _) => go (S idx) ((AutoArg emptyFC nm', idx) :: acc) t
+      _ => go (S idx) acc t
     _ => go (S idx) acc t
   go idx acc t = failAt (getFC t) "Expected a type constructor, got: \{show t}"
 
