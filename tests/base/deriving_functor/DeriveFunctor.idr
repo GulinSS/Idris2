@@ -286,10 +286,16 @@ namespace BifunctorFail
     tree' : Functor Tree'
     tree' = %runElab derive
 
-failing "Prelude.Basics.id is a function but not a type synonym"
+failing "Prelude.Basics.id is not a type constructor name"
 
   total
   functor : Functor Prelude.id
+  functor = %runElab derive
+
+failing "Prelude.Basics.id is not a type constructor name"
+
+  total
+  functor : Functor id
   functor = %runElab derive
 
 namespace Triple
@@ -318,7 +324,7 @@ namespace WriterList
     wlist : Functor (WList w ())
     wlist = %runElab derive
 
-namespace TypeSynonym
+namespace FunctionType
   data D a b = MkD b
 
   Functor (D Int) where
@@ -343,3 +349,15 @@ namespace TypeSynonym
 
   aa2F : Functor A2
   aa2F = %runElab derive
+
+namespace FunctionTypeNonPublic
+  data D a b = MkD b
+
+  namespace ExportNonPublic
+    export
+    WithD : Type -> Type
+    WithD = D Int
+
+  failing "Make sure DeriveFunctor.FunctionTypeNonPublic.ExportNonPublic.WithD has public export visibility"
+    withDF : Functor WithD
+    withDF = %runElab derive
