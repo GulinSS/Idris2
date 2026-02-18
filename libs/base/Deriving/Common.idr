@@ -1,6 +1,7 @@
 module Deriving.Common
 
 import Data.SnocList
+import Data.Maybe
 import Language.Reflection
 
 %default total
@@ -48,29 +49,118 @@ wording Func = "a function name"
 wording (DataCon tag arity) = "a data constructor"
 wording (TyCon tag arity) = "a type constructor"
 
+checkAccessToDefinition : Elaboration m => (given, candidate : TT.Name) -> m Bool
+checkAccessToDefinition g c = do
+  let False = isParentOf (getNS g) (getNS c)
+    | _ => do
+      logMsg "derive.common.checkAccessToDefinition" 100 "\{show g} is parent of \{show c}"
+      pure True
+
+  case !(getVis g) of
+    [(_, Public)] => pure True
+    other => do
+      logMsg "derive.common.checkAccessToDefinition" 100 "\{show g} has not a public visibility: \{show other}"
+      pure False
+  where
+    getNS : TT.Name -> TT.Namespace
+    getNS (NS ns nm) = ns
+    getNS nm = TT.MkNS []
+
+    isParentOf : (given, candidate : TT.Namespace) -> Bool
+    isParentOf (MkNS ms) (MkNS ns)
+      = List.isSuffixOf ms ns
+
+normalizeTypeFunction : Elaboration m => FC -> Name -> m Name
+normalizeTypeFunction fc typeFunName = do
+  [(_, typeFun)] <- getType typeFunName
+    | _ => do
+      logMsg "derive.common.isTypeCon" 100 "failAt: \{show typeFunName} is ambiguous"
+      failAt fc "\{show typeFunName} is ambiguous"
+
+  Just typedFun <- catch $ check {expected = Type} typeFun
+    | _ => do
+      logMsg "derive.common.normalizeTypeFunction" 100 "failAt: \{show typeFunName} (\{show typeFun}) is not a Type declaration"
+      failAt fc "\{show typeFunName} is not a Type declaration"
+
+  quotedTypedFun <- quote typedFun
+  logMsg "derive.common.normalizeTypeFunction" 100 "\{show typeFunName} has detected type: \{show quotedTypedFun}"
+
+  Just checkedTy <- catch $ check {expected = typedFun} $ IVar fc typeFunName
+    | _ => failAt fc "\{show typeFunName} has a different type than checked: \{show quotedTypedFun}"
+
+  normalizedTy <- quote checkedTy
+  logMsg "derive.common.isTypeCon" 100 "\{show typeFunName} (\{show typeFun}) is normalized to: \{show normalizedTy}"
+
+  let tyq@(_, Just typeName) = getHeadName normalizedTy
+    | (broken, _) => do
+      logMsg "derive.common.isTypeCon" 100 "failAt: Failed to extract a type name from normalized form \{show typeFunName} (\{show normalizedTy}) at \{show broken}"
+      failAt fc "Failed to extract a type name from normalized form \{show typeFunName} (\{show normalizedTy}) at \{show broken}"
+
+  logMsg "derive.common.normalizeTypeFunction" 100 "\{show typeFunName} is normalized to a function name \{show typeName}"
+
+  [(_, MkNameInfo (TyCon _ _))] <- getInfo typeName
+    | _ => failAt fc "\{show typeName} is not a type constructor name"
+
+  pure typeName
+  where
+    getHeadName : TTImp -> (TTImp, Maybe Name)
+    getHeadName t@(IVar _ n) = (t, pure n)
+    getHeadName (IApp _ n _) = getHeadName n
+    getHeadName (INamedApp _ n _ _) = getHeadName n
+    getHeadName (IAutoApp _ n _) = getHeadName n
+    getHeadName (IWithApp _ n _) = getHeadName n
+    getHeadName (IPi _ _ _ _ _ retTy) = getHeadName retTy
+    getHeadName (ILam _ _ _ _ _ retTy) = getHeadName retTy
+    getHeadName t = (t, Nothing)
+
 isTypeCon : Elaboration m => FC -> Name -> m (List (Name, TTImp))
 isTypeCon fc ty = do
     [(_, MkNameInfo (TyCon _ _))] <- getInfo ty
-      | [(_, MkNameInfo Func)] => do
-          [(_, ty')] <- getType ty
-            | _ => failAt fc "\{show ty} is ambiguous"
-          if isTypeSynonym ty'
-            then pure []
-            else failAt fc "\{show ty} is a function but not a type synonym"
-      | [] => failAt fc "\{show ty} out of scope"
-      | [(_, MkNameInfo nt)] => failAt fc "\{show ty} is \{wording nt} rather than a type constructor"
-      | _ => failAt fc "\{show ty} is ambiguous"
-    cs <- getCons ty
-    for cs $ \ n => do
-      [(_, ty)] <- getType n
-         | _ => failAt fc "\{show n} is ambiguous"
-      pure (n, ty)
+      | [(fullName, MkNameInfo Func)] => analyzeFunctionName fullName
+      | [] => do
+        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} out of scope"
+        failAt fc "\{show ty} out of scope"
+      | [(_, MkNameInfo nt)] => do
+        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is \{wording nt} rather than a type constructor"
+        failAt fc "\{show ty} is \{wording nt} rather than a type constructor"
+      | _ => do
+        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is ambiguous"
+        failAt fc "\{show ty} is ambiguous"
+
+    getDCons ty
   where
-    isTypeSynonym : TTImp -> Bool
-    isTypeSynonym (IType _) = True
-    isTypeSynonym (IPi _ _ _ _ _ b) = isTypeSynonym b
-    isTypeSynonym (IDelayed _ _ b) = isTypeSynonym b
-    isTypeSynonym _ = False
+    getDCons : Name -> m (List (Name, TTImp))
+    getDCons ty = do
+      logMsg "derive.common.isTypeCon" 100 "Attempt to getCons over \{show ty}"
+      cs <- getCons ty
+      logMsg "derive.common.isTypeCon" 100 "getCons success for \{show ty}: \{show cs}"
+      for cs $ \ n => do
+        [(_, ty')] <- getType n
+          | _ => do
+            logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is ambiguous"
+            failAt fc "\{show n} is ambiguous"
+        pure (n, ty')
+
+    analyzeFunctionName : Name -> m (List (Name, TTImp))
+    analyzeFunctionName fullName = do
+      currentFn <- getCurrentFn
+      let (Just currentName) = first currentFn
+        | _ => failAt fc "Deriving requires a function declaration, not a top level"
+
+      when (not !(checkAccessToDefinition fullName currentName)) $
+        failAt fc "Make sure \{show fullName} has public export visibility"
+
+      normalizedTypeName <- normalizeTypeFunction fc fullName
+
+      when (not !(checkAccessToDefinition normalizedTypeName fullName)) $
+        failAt fc "Make sure \{show normalizedTypeName} has public export visibility"
+
+      getDCons normalizedTypeName
+      where
+        first : SnocList Name -> Maybe Name
+        first [<]       = Nothing
+        first [<x]      = Just x
+        first (xs :< _) = first xs
 
 export
 isType : Elaboration m => TTImp -> m IsType
@@ -197,14 +287,14 @@ hasImplementation : Elaboration m => (intf : a -> Type) -> (t : TTImp) ->
 hasImplementation c t = do
   Just prf <- catch $ isType t
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
-                         "\{show t} is not a Type"
+                         "\{show t} is derived as not a Type"
   Just intf <- catch $ quote c
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
                          "Could not quote constraint"
   Just ty <- catch $ check {expected = Type} $
                withParams emptyFC (const Nothing) prf.parameterNames `(~(intf) ~(t))
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
-                         "\{show (`(~(intf) ~(t)))} is not a Type"
+                         "\{show (`(~(intf) ~(t)))} is checked as not a Type"
 
   Just _ <- catch $ check {expected = ty} `(%search)
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100

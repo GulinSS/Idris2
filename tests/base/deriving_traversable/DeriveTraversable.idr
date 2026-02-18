@@ -390,7 +390,7 @@ namespace BitraversableFail
     tree' : Traversable Tree'
     tree' = %runElab derive
 
-failing "Prelude.Basics.id is a function but not a type synonym"
+failing "Prelude.Basics.id is not a type constructor name"
 
   total
   traverable : Traversable Prelude.id
