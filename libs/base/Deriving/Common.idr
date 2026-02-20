@@ -36,12 +36,37 @@ isFreeOf x ty
 ------------------------------------------------------------------------------
 -- Being a (data) type
 
-public export
-record IsType where
-  constructor MkIsType
-  typeConstructor  : Name
-  parameterNames   : List (Argument Name, Nat)
-  dataConstructors : List (Name, TTImp)
+mutual
+  public export
+  data TypeParameter
+    = MkTPLocal Name
+    | MkTPPrim Constant
+    | MkTPType IsType
+    | MkTPIType
+
+  public export
+  record IsType where
+    constructor MkIsType
+    typeConstructor  : Name
+    typeParameters   : List (Argument TypeParameter, Nat)
+    dataConstructors : List (Name, TTImp)
+
+Show a => Show (Argument a) where
+  show (Arg fc a) = "Arg _ (\{show a})"
+  show (NamedArg fc nm a) = "NamedArg _ (\{show nm}) (\{show a})"
+  show (AutoArg fc a) = "AutoArg _ (\{show a})"
+
+mutual
+  export
+  Show TypeParameter where
+    show (MkTPLocal a) = "MkTPLocal \{show a}"
+    show (MkTPPrim c) = "MkTPPrim \{show c}"
+    show (MkTPType i) = "MkTPType \{assert_total $ show i}"
+    show MkTPIType = "MkTPIType"
+
+  export
+  Show IsType where
+    show (MkIsType ctor params dcons) = "MkIsType (\{show ctor}) (\{show params}) (\{show dcons})"
 
 wording : NameType -> String
 wording Bound = "a bound variable"
@@ -70,8 +95,8 @@ checkAccessToDefinition g c = do
     isParentOf (MkNS ms) (MkNS ns)
       = List.isSuffixOf ms ns
 
-normalizeTypeFunction : Elaboration m => FC -> Name -> m Name
-normalizeTypeFunction fc typeFunName = do
+normaliseTypeFunction : Elaboration m => FC -> Name -> m Name
+normaliseTypeFunction fc typeFunName = do
   [(_, typeFun)] <- getType typeFunName
     | _ => do
       logMsg "derive.common.isTypeCon" 100 "failAt: \{show typeFunName} is ambiguous"
@@ -79,24 +104,24 @@ normalizeTypeFunction fc typeFunName = do
 
   Just typedFun <- catch $ check {expected = Type} typeFun
     | _ => do
-      logMsg "derive.common.normalizeTypeFunction" 100 "failAt: \{show typeFunName} (\{show typeFun}) is not a Type declaration"
+      logMsg "derive.common.normaliseTypeFunction" 100 "failAt: \{show typeFunName} (\{show typeFun}) is not a Type declaration"
       failAt fc "\{show typeFunName} is not a Type declaration"
 
   quotedTypedFun <- quote typedFun
-  logMsg "derive.common.normalizeTypeFunction" 100 "\{show typeFunName} has detected type: \{show quotedTypedFun}"
+  logMsg "derive.common.normaliseTypeFunction" 100 "\{show typeFunName} has detected type: \{show quotedTypedFun}"
 
   Just checkedTy <- catch $ check {expected = typedFun} $ IVar fc typeFunName
     | _ => failAt fc "\{show typeFunName} has a different type than checked: \{show quotedTypedFun}"
 
-  normalizedTy <- quote checkedTy
-  logMsg "derive.common.isTypeCon" 100 "\{show typeFunName} (\{show typeFun}) is normalized to: \{show normalizedTy}"
+  normalisedTy <- quote checkedTy
+  logMsg "derive.common.isTypeCon" 100 "\{show typeFunName} (\{show typeFun}) is normalised to: \{show normalisedTy}"
 
-  let tyq@(_, Just typeName) = getHeadName normalizedTy
+  let tyq@(_, Just typeName) = getHeadName normalisedTy
     | (broken, _) => do
-      logMsg "derive.common.isTypeCon" 100 "failAt: Failed to extract a type name from normalized form \{show typeFunName} (\{show normalizedTy}) at \{show broken}"
-      failAt fc "Failed to extract a type name from normalized form \{show typeFunName} (\{show normalizedTy}) at \{show broken}"
+      logMsg "derive.common.isTypeCon" 100 "failAt: Failed to extract a type name from normalised form \{show typeFunName} (\{show normalisedTy}) at \{show broken}"
+      failAt fc "Failed to extract a type name from normalised form \{show typeFunName} (\{show normalisedTy}) at \{show broken}"
 
-  logMsg "derive.common.normalizeTypeFunction" 100 "\{show typeFunName} is normalized to a function name \{show typeName}"
+  logMsg "derive.common.normaliseTypeFunction" 100 "\{show typeFunName} is normalised to a function name \{show typeName}"
 
   [(_, MkNameInfo (TyCon _ _))] <- getInfo typeName
     | _ => failAt fc "\{show typeName} is not a type constructor name"
@@ -150,12 +175,12 @@ isTypeCon fc ty = do
       when (not !(checkAccessToDefinition fullName currentName)) $
         failAt fc "Make sure \{show fullName} has public export visibility"
 
-      normalizedTypeName <- normalizeTypeFunction fc fullName
+      normalisedTypeName <- normaliseTypeFunction fc fullName
 
-      when (not !(checkAccessToDefinition normalizedTypeName fullName)) $
-        failAt fc "Make sure \{show normalizedTypeName} has public export visibility"
+      when (not !(checkAccessToDefinition normalisedTypeName fullName)) $
+        failAt fc "Make sure \{show normalisedTypeName} has public export visibility"
 
-      getDCons normalizedTypeName
+      getDCons normalisedTypeName
       where
         first : SnocList Name -> Maybe Name
         first [<]       = Nothing
@@ -164,28 +189,32 @@ isTypeCon fc ty = do
 
 export
 isType : Elaboration m => TTImp -> m IsType
-isType = go Z [] where
-
-  go : Nat -> List (Argument Name, Nat) -> TTImp -> m IsType
+isType t = do
+  logMsg "derive.common.isType" 100 "Attempt to run over: \{show t}"
+  ist <- go Z [] t
+  logMsg "derive.common.isType" 100 "Result received for \{show t}: \{show ist}"
+  pure ist
+where
+  go : Nat -> List (Argument TypeParameter, Nat) -> TTImp -> m IsType
   go idx acc (IVar fc n) = MkIsType n (map (map (minus idx . S)) acc) <$> isTypeCon fc n
-  go idx acc (IApp _ t arg) = case arg of
-    IVar _ nm => case nm of
-      -- Unqualified: that's a local variable
-      UN (Basic _) => go (S idx) ((Arg emptyFC nm, idx) :: acc) t
-      _ => go (S idx) acc t
-    _ => go (S idx) acc t
-  go idx acc (INamedApp _ t nm arg) = case arg of
-    IVar _ nm' => case nm' of
-      -- Unqualified: that's a local variable
-      UN (Basic _) => go (S idx) ((NamedArg emptyFC nm nm', idx) :: acc) t
-      _ => go (S idx) acc t
-    _ => go (S idx) acc t
-  go idx acc (IAutoApp _ t arg) = case arg of
-    IVar _ nm' => case nm' of
-      -- Unqualified: that's a local variable
-      UN (Basic _) => go (S idx) ((AutoArg emptyFC nm', idx) :: acc) t
-      _ => go (S idx) acc t
-    _ => go (S idx) acc t
+  go idx acc (IApp fc t arg) = case arg of
+    IType fc => go (S idx) ((Arg fc $ MkTPIType, idx) :: acc) t
+    IPrimVal fc c => go (S idx) ((Arg fc $ MkTPPrim c, idx) :: acc) t
+    -- Unqualified: that's a local variable
+    IVar fc nm@(UN (Basic _)) => go (S idx) ((Arg fc $ MkTPLocal nm, idx) :: acc) t
+    _ => go (S idx) ((Arg fc $ MkTPType !(isType arg), idx) :: acc) t
+  go idx acc (INamedApp fc t nm arg) = case arg of
+    IType fc => go (S idx) ((NamedArg fc nm $ MkTPIType, idx) :: acc) t
+    IPrimVal fc c => go (S idx) ((NamedArg fc nm $ MkTPPrim c, idx) :: acc) t
+    -- Unqualified: that's a local variable
+    IVar fc nm'@(UN (Basic _)) => go (S idx) ((NamedArg fc nm $ MkTPLocal nm', idx) :: acc) t
+    _ => go (S idx) ((NamedArg fc nm $ MkTPType !(isType arg), idx) :: acc) t
+  go idx acc (IAutoApp fc t arg) = case arg of
+    IType fc => go (S idx) ((AutoArg fc $ MkTPIType, idx) :: acc) t
+    IPrimVal fc c => go (S idx) ((AutoArg fc $ MkTPPrim c, idx) :: acc) t
+    -- Unqualified: that's a local variable
+    IVar fc nm'@(UN (Basic _)) => go (S idx) ((AutoArg fc $ MkTPLocal nm', idx) :: acc) t
+    _ => go (S idx) ((AutoArg fc $ MkTPType !(isType arg), idx) :: acc) t
   go idx acc t = failAt (getFC t) "Expected a type constructor, got: \{show t}"
 
 ------------------------------------------------------------------------------
@@ -222,7 +251,7 @@ constructorView f = do
 -- convenience functions.
 
 export
-withParams : FC -> (Nat -> Maybe TTImp) -> List (Argument Name, Nat) -> TTImp -> TTImp
+withParams : FC -> (Nat -> Maybe TTImp) -> List (Argument TypeParameter, Nat) -> TTImp -> TTImp
 withParams fc params nms t = go nms where
 
   addConstraint : Maybe TTImp -> Name -> TTImp -> TTImp
@@ -231,13 +260,16 @@ withParams fc params nms t = go nms where
      let ty = IApp fc cst (IVar fc nm) in
      IPi fc MW AutoImplicit Nothing ty
 
-  go : List (Argument Name, Nat) -> TTImp
+  go : List (Argument TypeParameter, Nat) -> TTImp
   go [] = t
-  go ((arg, pos) :: nms)
-    = let nm = unArg arg in
+  go ((arg, pos) :: nms) with (unArg arg)
+    go ((arg, pos) :: nms) | MkTPLocal nm =
       IPi fc M0 ImplicitArg (Just nm) (Implicit fc True)
-    $ addConstraint (params pos) nm
-    $ go nms
+      $ addConstraint (params pos) nm
+      $ go nms
+    go ((arg, pos) :: nms) | MkTPPrim _ = go nms
+    go ((arg, pos) :: nms) | MkTPType _ = go nms
+    go ((arg, pos) :: nms) | MkTPIType  = go nms
 
 ||| Type of proofs that something has a given type
 export
@@ -292,7 +324,7 @@ hasImplementation c t = do
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
                          "Could not quote constraint"
   Just ty <- catch $ check {expected = Type} $
-               withParams emptyFC (const Nothing) prf.parameterNames `(~(intf) ~(t))
+               withParams emptyFC (const Nothing) prf.typeParameters `(~(intf) ~(t))
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
                          "\{show (`(~(intf) ~(t)))} is checked as not a Type"
 
@@ -327,8 +359,14 @@ cleanup = \case
 
 ||| Create fresh names
 export
-freshName : List Name -> String -> String
-freshName ns a = assert_total $ go (basicNames ns) Nothing where
+freshName : List TypeParameter -> String -> String
+freshName ns a = assert_total $ go (basicNames $ concatMap typeParameterNames ns) Nothing where
+  typeParameterNames : TypeParameter -> List Name
+  typeParameterNames (MkTPLocal a) = pure a
+  typeParameterNames (MkTPPrim c) = []
+  typeParameterNames (MkTPType (MkIsType n tp _)) = assert_total
+    $ [n] ++ concatMap (typeParameterNames . unArg . fst) tp
+  typeParameterNames MkTPIType = []
 
   basicNames : List Name -> List String
   basicNames = mapMaybe $ \ nm => case dropNS nm of
