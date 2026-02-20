@@ -41,12 +41,12 @@ mutual
   data TypeParameter
     = MkTPLocal Name
     | MkTPPrim Constant
-    | MkTPType IsType
+    | MkTPType IsFamily
     | MkTPIType
 
   public export
-  record IsType where
-    constructor MkIsType
+  record IsFamily where
+    constructor MkIsFamily
     typeConstructor  : Name
     typeParameters   : List (Argument TypeParameter, Nat)
     dataConstructors : List (Name, TTImp)
@@ -65,8 +65,8 @@ mutual
     show MkTPIType = "MkTPIType"
 
   export
-  Show IsType where
-    show (MkIsType ctor params dcons) = "MkIsType (\{show ctor}) (\{show params}) (\{show dcons})"
+  Show IsFamily where
+    show (MkIsFamily ctor params dcons) = "MkIsFamily (\{show ctor}) (\{show params}) (\{show dcons})"
 
 wording : NameType -> String
 wording Bound = "a bound variable"
@@ -99,7 +99,7 @@ normaliseTypeFunction : Elaboration m => FC -> Name -> m Name
 normaliseTypeFunction fc typeFunName = do
   [(_, typeFun)] <- getType typeFunName
     | _ => do
-      logMsg "derive.common.isTypeCon" 100 "failAt: \{show typeFunName} is ambiguous"
+      logMsg "derive.common.isFamilyCon" 100 "failAt: \{show typeFunName} is ambiguous"
       failAt fc "\{show typeFunName} is ambiguous"
 
   Just typedFun <- catch $ check {expected = Type} typeFun
@@ -114,11 +114,11 @@ normaliseTypeFunction fc typeFunName = do
     | _ => failAt fc "\{show typeFunName} has a different type than checked: \{show quotedTypedFun}"
 
   normalisedTy <- quote checkedTy
-  logMsg "derive.common.isTypeCon" 100 "\{show typeFunName} (\{show typeFun}) is normalised to: \{show normalisedTy}"
+  logMsg "derive.common.isFamilyCon" 100 "\{show typeFunName} (\{show typeFun}) is normalised to: \{show normalisedTy}"
 
   let tyq@(_, Just typeName) = getHeadName normalisedTy
     | (broken, _) => do
-      logMsg "derive.common.isTypeCon" 100 "failAt: Failed to extract a type name from normalised form \{show typeFunName} (\{show normalisedTy}) at \{show broken}"
+      logMsg "derive.common.isFamilyCon" 100 "failAt: Failed to extract a type name from normalised form \{show typeFunName} (\{show normalisedTy}) at \{show broken}"
       failAt fc "Failed to extract a type name from normalised form \{show typeFunName} (\{show normalisedTy}) at \{show broken}"
 
   logMsg "derive.common.normaliseTypeFunction" 100 "\{show typeFunName} is normalised to a function name \{show typeName}"
@@ -138,31 +138,31 @@ normaliseTypeFunction fc typeFunName = do
     getHeadName (ILam _ _ _ _ _ retTy) = getHeadName retTy
     getHeadName t = (t, Nothing)
 
-isTypeCon : Elaboration m => FC -> Name -> m (List (Name, TTImp))
-isTypeCon fc ty = do
+isFamilyCon : Elaboration m => FC -> Name -> m (List (Name, TTImp))
+isFamilyCon fc ty = do
     [(_, MkNameInfo (TyCon _ _))] <- getInfo ty
       | [(fullName, MkNameInfo Func)] => analyzeFunctionName fullName
       | [] => do
-        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} out of scope"
+        logMsg "derive.common.isFamilyCon" 100 "failAt: \{show ty} out of scope"
         failAt fc "\{show ty} out of scope"
       | [(_, MkNameInfo nt)] => do
-        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is \{wording nt} rather than a type constructor"
+        logMsg "derive.common.isFamilyCon" 100 "failAt: \{show ty} is \{wording nt} rather than a type constructor"
         failAt fc "\{show ty} is \{wording nt} rather than a type constructor"
       | _ => do
-        logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is ambiguous"
+        logMsg "derive.common.isFamilyCon" 100 "failAt: \{show ty} is ambiguous"
         failAt fc "\{show ty} is ambiguous"
 
     getDCons ty
   where
     getDCons : Name -> m (List (Name, TTImp))
     getDCons ty = do
-      logMsg "derive.common.isTypeCon" 100 "Attempt to getCons over \{show ty}"
+      logMsg "derive.common.isFamilyCon" 100 "Attempt to getCons over \{show ty}"
       cs <- getCons ty
-      logMsg "derive.common.isTypeCon" 100 "getCons success for \{show ty}: \{show cs}"
+      logMsg "derive.common.isFamilyCon" 100 "getCons success for \{show ty}: \{show cs}"
       for cs $ \ n => do
         [(_, ty')] <- getType n
           | _ => do
-            logMsg "derive.common.isTypeCon" 100 "failAt: \{show ty} is ambiguous"
+            logMsg "derive.common.isFamilyCon" 100 "failAt: \{show ty} is ambiguous"
             failAt fc "\{show n} is ambiguous"
         pure (n, ty')
 
@@ -188,33 +188,33 @@ isTypeCon fc ty = do
         first (xs :< _) = first xs
 
 export
-isType : Elaboration m => TTImp -> m IsType
-isType t = do
-  logMsg "derive.common.isType" 100 "Attempt to run over: \{show t}"
+isFamily : Elaboration m => TTImp -> m IsFamily
+isFamily t = do
+  logMsg "derive.common.isFamily" 100 "Attempt to run over: \{show t}"
   ist <- go Z [] t
-  logMsg "derive.common.isType" 100 "Result received for \{show t}: \{show ist}"
+  logMsg "derive.common.isFamily" 100 "Result received for \{show t}: \{show ist}"
   pure ist
 where
-  go : Nat -> List (Argument TypeParameter, Nat) -> TTImp -> m IsType
-  go idx acc (IVar fc n) = MkIsType n (map (map (minus idx . S)) acc) <$> isTypeCon fc n
+  go : Nat -> List (Argument TypeParameter, Nat) -> TTImp -> m IsFamily
+  go idx acc (IVar fc n) = MkIsFamily n (map (map (minus idx . S)) acc) <$> isFamilyCon fc n
   go idx acc (IApp fc t arg) = case arg of
     IType fc => go (S idx) ((Arg fc $ MkTPIType, idx) :: acc) t
     IPrimVal fc c => go (S idx) ((Arg fc $ MkTPPrim c, idx) :: acc) t
     -- Unqualified: that's a local variable
     IVar fc nm@(UN (Basic _)) => go (S idx) ((Arg fc $ MkTPLocal nm, idx) :: acc) t
-    _ => go (S idx) ((Arg fc $ MkTPType !(isType arg), idx) :: acc) t
+    _ => go (S idx) ((Arg fc $ MkTPType !(isFamily arg), idx) :: acc) t
   go idx acc (INamedApp fc t nm arg) = case arg of
     IType fc => go (S idx) ((NamedArg fc nm $ MkTPIType, idx) :: acc) t
     IPrimVal fc c => go (S idx) ((NamedArg fc nm $ MkTPPrim c, idx) :: acc) t
     -- Unqualified: that's a local variable
     IVar fc nm'@(UN (Basic _)) => go (S idx) ((NamedArg fc nm $ MkTPLocal nm', idx) :: acc) t
-    _ => go (S idx) ((NamedArg fc nm $ MkTPType !(isType arg), idx) :: acc) t
+    _ => go (S idx) ((NamedArg fc nm $ MkTPType !(isFamily arg), idx) :: acc) t
   go idx acc (IAutoApp fc t arg) = case arg of
     IType fc => go (S idx) ((AutoArg fc $ MkTPIType, idx) :: acc) t
     IPrimVal fc c => go (S idx) ((AutoArg fc $ MkTPPrim c, idx) :: acc) t
     -- Unqualified: that's a local variable
     IVar fc nm'@(UN (Basic _)) => go (S idx) ((AutoArg fc $ MkTPLocal nm', idx) :: acc) t
-    _ => go (S idx) ((AutoArg fc $ MkTPType !(isType arg), idx) :: acc) t
+    _ => go (S idx) ((AutoArg fc $ MkTPType !(isFamily arg), idx) :: acc) t
   go idx acc t = failAt (getFC t) "Expected a type constructor, got: \{show t}"
 
 ------------------------------------------------------------------------------
@@ -317,7 +317,7 @@ export
 hasImplementation : Elaboration m => (intf : a -> Type) -> (t : TTImp) ->
                     m (Maybe (HasImplementation intf t))
 hasImplementation c t = do
-  Just prf <- catch $ isType t
+  Just prf <- catch $ isFamily t
     | _ => Nothing <$ logMsg "derive.common.hasImplementation" 100
                          "\{show t} is derived as not a Type"
   Just intf <- catch $ quote c
@@ -364,7 +364,7 @@ freshName ns a = assert_total $ go (basicNames $ concatMap typeParameterNames ns
   typeParameterNames : TypeParameter -> List Name
   typeParameterNames (MkTPLocal a) = pure a
   typeParameterNames (MkTPPrim c) = []
-  typeParameterNames (MkTPType (MkIsType n tp _)) = assert_total
+  typeParameterNames (MkTPType (MkIsFamily n tp _)) = assert_total
     $ [n] ++ concatMap (typeParameterNames . unArg . fst) tp
   typeParameterNames MkTPIType = []
 
