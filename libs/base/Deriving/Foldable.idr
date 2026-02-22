@@ -59,7 +59,7 @@ data Error : Type where
   InvalidGoal : Error
   ConfusingReturnType : Error
   -- Contextual information
-  WhenCheckingConstructor : Name -> Error -> Error
+  WhenCheckingConstructor : DataConName -> Error -> Error
   WhenCheckingArg : TTImp -> Error -> Error
 
 export
@@ -77,7 +77,7 @@ Show Error where
     go acc (NotAnUnconstrainedValue rig) = acc <>> ["Cannot fold over a \{enunciate rig} value"]
     go acc InvalidGoal = acc <>> ["Expected a goal of the form `Foldable f`"]
     go acc ConfusingReturnType = acc <>> ["Confusing telescope"]
-    go acc (WhenCheckingConstructor nm err) = go (acc :< "When checking constructor \{show nm}") err
+    go acc (WhenCheckingConstructor (MkDataConName nm) err) = go (acc :< "When checking constructor \{show nm}") err
     go acc (WhenCheckingArg s err) = go (acc :< "When checking argument of type \{show s}") err
 
 record Parameters where
@@ -113,7 +113,7 @@ isFreeOf' x ty = case isFreeOf x ty of
 ||| The inductive type delivers a proof that x can be folded over in ty,
 ||| assuming that t also is foldable.
 public export
-data IsFoldableIn : (t, x : Name) -> (ty : TTImp) -> Type where
+data IsFoldableIn : (t : TyConName) -> (x : Name) -> (ty : TTImp) -> Type where
   ||| The type variable x occurs alone
   FIVar : IsFoldableIn t x (IVar fc x)
   ||| There is a recursive subtree of type (t a1 ... an u) and u is Foldable in x.
@@ -121,8 +121,8 @@ data IsFoldableIn : (t, x : Name) -> (ty : TTImp) -> Type where
   ||| like the following:
   |||   data Full a = Leaf a | Node (Full (a, a))
   |||   data Term a = Var a | App (Term a) (Term a) | Lam (Term (Maybe a))
-  FIRec : (0 _ : IsAppView (_, t) _ f) -> IsFoldableIn t x arg ->
-          IsFoldableIn t x (IApp fc f arg)
+  FIRec : (0 _ : IsAppView (_, t) _ f) -> IsFoldableIn (MkTyConName t) x arg ->
+          IsFoldableIn (MkTyConName t) x (IApp fc f arg)
   ||| The subterm is delayed (Lazy only, we can't fold over infinite structures)
   FIDelayed : IsFoldableIn t x ty -> IsFoldableIn t x (IDelayed fc LLazy ty)
   ||| There are nested subtrees somewhere inside a 3rd party type constructor
@@ -142,7 +142,7 @@ parameters
   {auto elab : Elaboration m}
   {auto error : MonadError Error m}
   {auto cs : MonadState Parameters m}
-  (t : Name)
+  (t : TyConName)
   (ps : List (Name, Nat))
   (x : Name)
 
@@ -183,7 +183,7 @@ parameters
       Left sp => do
         let Just (MkAppView (_, hd) ts prf) = appView f
            | _ => throwError (NotAnApplication f)
-        case decEq t hd of
+        case decEq t (MkTyConName hd) of
           Yes Refl => pure $ Left (FIRec prf sp)
           No diff => case !(hasImplementation Foldable f) of
             Just prf => pure (Left (FIFold isFO prf sp))
@@ -324,12 +324,12 @@ namespace Foldable
     logMsg "derive.foldable" 1 "Deriving Foldable for \{showPrec App $ mapTTImp cleanup t}"
     MkIsFamily f params cs <- isFamily t
     logMsg "derive.foldable.constructors" 1 $
-      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n} : \{show $ mapTTImp cleanup ty}") cs
+      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n.name} : \{show $ mapTTImp cleanup ty}") cs
 
     -- Generate a clause for each data constructor
     let fc = emptyFC
     let un = UN . Basic
-    let foldMapName = un ("foldMap" ++ show (dropNS f))
+    let foldMapName = un ("foldMap" ++ show (dropNS f.name))
     let funName = un "f"
     let fun  = IVar fc funName
     (ns, cls) <- runStateT {m = m} initParameters $ for cs $ \ (cName, ty) =>
@@ -339,7 +339,7 @@ namespace Foldable
               | _ => throwError ConfusingReturnType
         let paras = paraz <>> []
         logMsg "derive.foldable.clauses" 10 $
-          "\{showPrefix True (dropNS cName)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
+          "\{showPrefix True (dropNS cName.name)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
         let vars = map (map (IVar fc . un . ("x" ++) . show . (`minus` 1)))
                  $ zipWith (<$) [1..length args] (map snd args)
         recs <- for (zip vars args) $ \ (v, (rig, arg)) => do
@@ -360,7 +360,7 @@ namespace Foldable
                                      Just (v, Nothing)
         let (vars, recs) = unzip (catMaybes recs)
         pure $ PatClause fc
-          (apply fc (IVar fc foldMapName) [ fun, apply (IVar fc cName) vars])
+          (apply fc (IVar fc foldMapName) [ fun, apply (IVar fc cName.name) vars])
           (case catMaybes recs of
              [] => `(neutral)
              (x :: xs) => foldr1 (\v, vs => `(~(v) <+> ~(vs))) (x ::: xs))

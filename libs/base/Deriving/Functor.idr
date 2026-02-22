@@ -35,7 +35,7 @@ data Error : Type where
   InvalidGoal : Error
   ConfusingReturnType : Error
   -- Contextual information
-  WhenCheckingConstructor : Name -> Error -> Error
+  WhenCheckingConstructor : DataConName -> Error -> Error
   WhenCheckingArg : TTImp -> Error -> Error
 
 export
@@ -52,7 +52,7 @@ Show Error where
     go acc (UnsupportedType s) = acc <>> ["Unsupported type \{show s}"]
     go acc InvalidGoal = acc <>> ["Expected a goal of the form `Functor f`"]
     go acc ConfusingReturnType = acc <>> ["Confusing telescope"]
-    go acc (WhenCheckingConstructor nm err) = go (acc :< "When checking constructor \{show nm}") err
+    go acc (WhenCheckingConstructor (MkDataConName nm) err) = go (acc :< "When checking constructor \{show nm}") err
     go acc (WhenCheckingArg s err) = go (acc :< "When checking argument of type \{show s}") err
 
 ------------------------------------------------------------------------------
@@ -86,7 +86,7 @@ not Negative = Positive
 ||| The inductive type delivers a proof that x occurs positively in ty,
 ||| assuming that t also is positive.
 public export
-data IsFunctorialIn : (pol : Polarity) -> (t, x : Name) -> (ty : TTImp) -> Type where
+data IsFunctorialIn : (pol : Polarity) -> (t : TyConName) -> (x : Name) -> (ty : TTImp) -> Type where
   ||| The type variable x occurs alone
   FIVar : IsFunctorialIn Positive t x (IVar fc x)
   ||| There is a recursive subtree of type (t a1 ... an u) and u is functorial in x.
@@ -94,8 +94,8 @@ data IsFunctorialIn : (pol : Polarity) -> (t, x : Name) -> (ty : TTImp) -> Type 
   ||| like the following:
   |||   data Full a = Leaf a | Node (Full (a, a))
   |||   data Term a = Var a | App (Term a) (Term a) | Lam (Term (Maybe a))
-  FIRec : (0 _ : IsAppView (_, t) _ f) -> IsFunctorialIn pol t x arg ->
-          IsFunctorialIn Positive t x (IApp fc f arg)
+  FIRec : (0 _ : IsAppView (_, t) _ f) -> IsFunctorialIn pol (MkTyConName t) x arg ->
+          IsFunctorialIn Positive (MkTyConName t) x (IApp fc f arg)
   ||| The subterm is delayed (either Inf or Lazy)
   FIDelayed : IsFunctorialIn pol t x ty -> IsFunctorialIn pol t x (IDelayed fc lr ty)
   ||| There are nested subtrees somewhere inside a 3rd party type constructor
@@ -131,7 +131,7 @@ parameters
   {auto elab : Elaboration m}
   {auto error : MonadError Error m}
   {auto cs : MonadState Parameters m}
-  (t : Name)
+  (t : TyConName)
   (ps : List (Name, Nat))
   (x : Name)
 
@@ -172,10 +172,10 @@ parameters
       Left sp => do
         let Just (MkAppView (_, hd) ts prf) = appView f
            | _ => throwError (NotAnApplication f)
-        case decEq t hd of
+        case decEq t (MkTyConName hd) of
           Yes Refl => case pol of
             Positive => pure $ Left (FIRec prf sp)
-            Negative => throwError (NegativeOccurrence t (IApp fc f arg))
+            Negative => throwError (NegativeOccurrence t.name (IApp fc f arg))
           No diff => case !(hasImplementation Functor f) of
             Just prf => do
               logMsg "derive.functor.search" 50 $ "Found a (Functor \{show f}) instance"
@@ -338,12 +338,12 @@ namespace Functor
     logMsg "derive.functor" 1 "Deriving Functor for \{showPrec App $ mapTTImp cleanup t}"
     MkIsFamily f params cs <- isFamily t
     logMsg "derive.functor.constructors" 1 $
-      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n} : \{show $ mapTTImp cleanup ty}") cs
+      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n.name} : \{show $ mapTTImp cleanup ty}") cs
 
     -- Generate a clause for each data constructor
     let fc = emptyFC
     let un = UN . Basic
-    let mapName = un ("map" ++ show (dropNS f))
+    let mapName = un ("map" ++ show (dropNS f.name))
     let funName = un "f"
     let fun  = IVar fc funName
     (ns, cls) <- runStateT {m = m} initParameters $ for cs $ \ (cName, ty) =>
@@ -353,7 +353,7 @@ namespace Functor
               | _ => throwError ConfusingReturnType
         let paras = paraz <>> []
         logMsg "derive.functor.clauses" 10 $
-          "\{showPrefix True (dropNS cName)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
+          "\{showPrefix True (dropNS cName.name)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
         let vars = map (map (IVar fc . un . ("x" ++) . show . (`minus` 1)))
                  $ zipWith (<$) [1..length args] (map snd args)
 
@@ -372,8 +372,8 @@ namespace Functor
                                      pure (v, v)
         let (vars, recs) = unzip (catMaybes recs)
         pure $ PatClause fc
-          (apply fc (IVar fc mapName) [ fun, apply (IVar fc cName) vars])
-          (apply (IVar fc cName) recs)
+          (apply fc (IVar fc mapName) [ fun, apply (IVar fc cName.name) vars])
+          (apply (IVar fc cName.name) recs)
 
     -- Generate the type of the mapping function
     let paramNames = unArg . fst <$> params

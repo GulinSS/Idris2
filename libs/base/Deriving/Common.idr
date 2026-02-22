@@ -2,6 +2,7 @@ module Deriving.Common
 
 import Data.SnocList
 import Data.Maybe
+import Decidable.Equality
 import Language.Reflection
 
 %default total
@@ -37,12 +38,36 @@ isFreeOf x ty
 -- Being a (data) type
 
 public export
-TyConName : Type
-TyConName = Name
+record TyConName where
+  constructor MkTyConName
+  name : Name
+
+export
+Injective MkTyConName where injective Refl = Refl
+
+export
+DecEq TyConName where
+  decEq (MkTyConName n1) (MkTyConName n2) = decEqCong $ decEq n1 n2
+
+export
+Show TyConName where
+  show (MkTyConName n) = "MkTyConName \{show n}"
 
 public export
-DataConName : Type
-DataConName = Name
+record DataConName where
+  constructor MkDataConName
+  name : Name
+
+export
+Injective MkDataConName where injective Refl = Refl
+
+export
+DecEq DataConName where
+  decEq (MkDataConName n1) (MkDataConName n2) = decEqCong $ decEq n1 n2
+
+export
+Show DataConName where
+  show (MkDataConName n) = "MkDataConName \{show n}"
 
 mutual
   public export
@@ -149,7 +174,7 @@ getDCons fc ty = do
     [(_, ty')] <- getType n
       | _ => logMsg "derive.common.getDCons" 100 "failAt: \{show n} is ambiguous"
              *> failAt fc "\{show n} is ambiguous"
-    pure (n, ty')
+    pure (MkDataConName n, ty')
 
 analyzeFunctionName : Elaboration m => FC -> Name -> m (List (DataConName, TTImp))
 analyzeFunctionName fc fullName = do
@@ -201,7 +226,7 @@ mutual
     pure ist <* logMsg "derive.common.isFamily" 100 "Result for \{show t}: \{show ist}"
   where
     go : Nat -> List (Argument TypeParameter, Nat) -> TTImp -> m IsFamily
-    go idx acc (IVar fc n) = MkIsFamily n (map (map (minus idx . S)) acc) <$> isFamilyCon fc n
+    go idx acc (IVar fc n) = MkIsFamily (MkTyConName n) (map (map (minus idx . S)) acc) <$> isFamilyCon fc n
     go idx acc (IApp fc t arg) = go (S idx) ((Arg fc !(toTypeParameter arg), idx) :: acc) t
     go idx acc (INamedApp fc t nm arg) = go (S idx) ((NamedArg fc nm !(toTypeParameter arg), idx) :: acc) t
     go idx acc (IAutoApp fc t arg) = go (S idx) ((AutoArg fc !(toTypeParameter arg), idx) :: acc) t
@@ -355,7 +380,7 @@ freshName ns a = assert_total $ go (basicNames $ concatMap typeParameterNames ns
   typeParameterNames (MkTPLocal a) = [a]
   typeParameterNames (MkTPPrim c) = []
   typeParameterNames (MkTPType (MkIsFamily n tp _)) = assert_total
-    $ n :: concatMap (typeParameterNames . unArg . fst) tp
+    $ n.name :: concatMap (typeParameterNames . unArg . fst) tp
   typeParameterNames MkTPIType = []
 
   basicNames : List Name -> List String
