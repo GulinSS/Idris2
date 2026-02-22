@@ -38,7 +38,7 @@ data Error : Type where
   InvalidGoal : Error
   ConfusingReturnType : Error
   -- Contextual information
-  WhenCheckingConstructor : Name -> Error -> Error
+  WhenCheckingConstructor : DataConName -> Error -> Error
   WhenCheckingArg : TTImp -> Error -> Error
 
 export
@@ -56,7 +56,7 @@ Show Error where
     go acc (NotAnUnconstrainedValue rig) = acc <>> ["Cannot traverse a \{enunciate rig} value"]
     go acc InvalidGoal = acc <>> ["Expected a goal of the form `Traversable f`"]
     go acc ConfusingReturnType = acc <>> ["Confusing telescope"]
-    go acc (WhenCheckingConstructor nm err) = go (acc :< "When checking constructor \{show nm}") err
+    go acc (WhenCheckingConstructor (MkDataConName nm) err) = go (acc :< "When checking constructor \{show nm}") err
     go acc (WhenCheckingArg s err) = go (acc :< "When checking argument of type \{show s}") err
 
 record Parameters where
@@ -92,7 +92,7 @@ isFreeOf' x ty = case isFreeOf x ty of
 ||| The inductive type delivers a proof that x can be traversed over in ty,
 ||| assuming that t also is traversable.
 public export
-data IsTraversableIn : (t, x : Name) -> (ty : TTImp) -> Type where
+data IsTraversableIn : (t : TyConName) -> (x : Name) -> (ty : TTImp) -> Type where
   ||| The type variable x occurs alone
   TIVar : IsTraversableIn t x (IVar fc x)
   ||| There is a recursive subtree of type (t a1 ... an u) and u is Traversable in x.
@@ -100,8 +100,8 @@ data IsTraversableIn : (t, x : Name) -> (ty : TTImp) -> Type where
   ||| like the following:
   |||   data Full a = Leaf a | Node (Full (a, a))
   |||   data Term a = Var a | App (Term a) (Term a) | Lam (Term (Maybe a))
-  TIRec : (0 _ : IsAppView (_, t) _ f) -> IsTraversableIn t x arg ->
-          IsTraversableIn t x (IApp fc f arg)
+  TIRec : (0 _ : IsAppView (_, t) _ f) -> IsTraversableIn (MkTyConName t) x arg ->
+          IsTraversableIn (MkTyConName t) x (IApp fc f arg)
   ||| The subterm is delayed (Lazy only, we can't traverse infinite structures)
   TIDelayed : IsTraversableIn t x ty -> IsTraversableIn t x (IDelayed fc LLazy ty)
   ||| There are nested subtrees somewhere inside a 3rd party type constructor
@@ -121,7 +121,7 @@ parameters
   {auto elab : Elaboration m}
   {auto error : MonadError Error m}
   {auto cs : MonadState Parameters m}
-  (t : Name)
+  (t : TyConName)
   (ps : List (Name, Nat))
   (x : Name)
 
@@ -162,7 +162,7 @@ parameters
       Left sp => do
         let Just (MkAppView (_, hd) ts prf) = appView f
            | _ => throwError (NotAnApplication f)
-        case decEq t hd of
+        case decEq t (MkTyConName hd) of
           Yes Refl => pure $ Left (TIRec prf sp)
           No diff => case !(hasImplementation Traversable f) of
             Just prf => pure (Left (TIFold isFO prf sp))
@@ -348,12 +348,12 @@ namespace Traversable
     logMsg "derive.traversable" 1 "Deriving Traversable for \{showPrec App $ mapTTImp cleanup t}"
     MkIsFamily f params cs <- isFamily t
     logMsg "derive.traversable.constructors" 1 $
-      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n} : \{show $ mapTTImp cleanup ty}") cs
+      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n.name} : \{show $ mapTTImp cleanup ty}") cs
 
     -- Generate a clause for each data constructor
     let fc = emptyFC
     let un = UN . Basic
-    let traverseName = un ("traverse" ++ show (dropNS f))
+    let traverseName = un ("traverse" ++ show (dropNS f.name))
     let funName = un "f"
     let fun  = IVar fc funName
     (ns, cls) <- runStateT {m = m} initParameters $ for cs $ \ (cName, ty) =>
@@ -363,7 +363,7 @@ namespace Traversable
               | _ => throwError ConfusingReturnType
         let paras = paraz <>> []
         logMsg "derive.traversable.clauses" 10 $
-          "\{showPrefix True (dropNS cName)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
+          "\{showPrefix True (dropNS cName.name)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
         let vars = map (map (IVar fc . un . ("x" ++) . show . (`minus` 1)))
                  $ zipWith (<$) [1..length args] (map snd args)
         recs <- for (zip vars args) $ \ (v, (rig, arg)) => do
@@ -384,8 +384,8 @@ namespace Traversable
                                      Just (v, Right (unArg v))
         let (vars, recs) = unzip (catMaybes recs)
         pure $ PatClause fc
-          (apply fc (IVar fc traverseName) [ fun, apply (IVar fc cName) vars])
-          (applyA fc (IVar fc cName) recs)
+          (apply fc (IVar fc traverseName) [ fun, apply (IVar fc cName.name) vars])
+          (applyA fc (IVar fc cName.name) recs)
 
     -- Generate the type of the mapping function
     let paramNames = unArg . fst <$> params

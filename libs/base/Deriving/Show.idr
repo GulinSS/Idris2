@@ -38,7 +38,7 @@ data Error : Type where
   InvalidGoal : Error
   ConfusingReturnType : Error
   -- Contextual information
-  WhenCheckingConstructor : Name -> Error -> Error
+  WhenCheckingConstructor : DataConName -> Error -> Error
   WhenCheckingArg : TTImp -> Error -> Error
 
 export
@@ -52,7 +52,7 @@ Show Error where
     go acc (NotAnUnconstrainedValue rig) = acc <>> ["Cannot show a \{enunciate rig} value"]
     go acc InvalidGoal = acc <>> ["Expected a goal of the form `Show t`"]
     go acc ConfusingReturnType = acc <>> ["Confusing telescope"]
-    go acc (WhenCheckingConstructor nm err) = go (acc :< "When checking constructor \{show nm}") err
+    go acc (WhenCheckingConstructor (MkDataConName nm) err) = go (acc :< "When checking constructor \{show nm}") err
     go acc (WhenCheckingArg s err) = go (acc :< "When checking argument of type \{show s}") err
 
 record Parameters where
@@ -216,12 +216,12 @@ namespace Show
     logMsg "derive.show" 1 "Deriving Show for \{showPrec App $ mapTTImp cleanup t}"
     MkIsFamily f params cs <- isFamily t
     logMsg "derive.show.constructors" 1 $
-      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n} : \{show $ mapTTImp cleanup ty}") cs
+      joinBy "\n" $ "" :: map (\ (n, ty) => "  \{showPrefix True $ dropNS n.name} : \{show $ mapTTImp cleanup ty}") cs
 
     -- Generate a clause for each data constructor
     let fc = emptyFC
     let un = UN . Basic
-    let showName = un ("showPrec" ++ show (dropNS f))
+    let showName = un ("showPrec" ++ show (dropNS f.name))
     let precName = un "d"
     let prec = IVar fc precName
     (ns, cls) <- runStateT {m = m} initParameters $ for cs $ \ (cName, ty) =>
@@ -230,14 +230,14 @@ namespace Show
         let Just (MkConstructorView paraz args) = constructorView ty
               | _ => throwError ConfusingReturnType
         logMsg "derive.show.clauses" 10 $
-          "\{showPrefix True (dropNS cName)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
+          "\{showPrefix True (dropNS cName.name)} (\{joinBy ", " (map (showPrec Dollar . mapTTImp cleanup . unArg . snd) args)})"
         -- Only keep the visible arguments
         let args = mapMaybe (bitraverse pure (map snd . isExplicit)) args
         -- Special case for constructors with no argument
         let (_ :: _) = args
           | [] => pure $ PatClause fc
-                    (apply fc (IVar fc showName) [ prec, IVar fc cName])
-                    (IPrimVal fc (Str (showPrefix True (dropNS cName))))
+                    (apply fc (IVar fc showName) [ prec, IVar fc cName.name])
+                    (IPrimVal fc (Str (showPrefix True (dropNS cName.name))))
 
         let vars = zipWith (const . IVar fc . un . ("x" ++) . show . (`minus` 1)) [1..length args] args
         recs <- for (zip vars args) $ \ (v, (rig, ty)) => do
@@ -248,16 +248,16 @@ namespace Show
                   -- try to reduce the type before analysis
                   ty <- try (check {expected=Type} ty >>= \x => quote x) (pure ty)
                   res <- withError (WhenCheckingArg (mapTTImp cleanup ty)) $ do
-                           typeView f (paraz <>> []) ty
+                           typeView f.name (paraz <>> []) ty
                   pure $ Just (showPrecFun fc mutualWith res v)
 
         let args = catMaybes recs
         let asList = foldr (\ a, as => apply fc (IVar fc `{Prelude.(::)}) [a,as]) `(Prelude.Nil)
         pure $ PatClause fc
-          (apply fc (IVar fc showName) [ prec, apply fc (IVar fc cName) vars])
+          (apply fc (IVar fc showName) [ prec, apply fc (IVar fc cName.name) vars])
           (apply fc (IVar fc (un "showCon"))
             [ prec
-            , IPrimVal fc (Str (showPrefix True (dropNS cName)))
+            , IPrimVal fc (Str (showPrefix True (dropNS cName.name)))
             , case args of
                 [a] => a
                 _ => IApp fc (IVar fc (un "concat")) (asList args)
