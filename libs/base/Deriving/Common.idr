@@ -179,7 +179,7 @@ getDCons fc ty = do
 analyzeFunctionName : Elaboration m => FC -> Name -> m (List (DataConName, TTImp))
 analyzeFunctionName fc fullName = do
   currentFn <- getCurrentFn
-  let (Just currentName) = first currentFn
+  let (Just currentName) = leftMost currentFn
     | _ => failAt fc "Deriving requires a function declaration, not a top level"
 
   unless !(checkAccessToDefinition fullName currentName) $
@@ -191,11 +191,6 @@ analyzeFunctionName fc fullName = do
     failAt fc "Make sure \{show normalisedTypeName} has public export visibility"
 
   getDCons fc normalisedTypeName
-  where
-    first : SnocList Name -> Maybe Name
-    first [<]       = Nothing
-    first [<x]      = Just x
-    first (xs :< _) = first xs
 
 isFamilyCon : Elaboration m => FC -> Name -> m (List (DataConName, TTImp))
 isFamilyCon fc ty = do
