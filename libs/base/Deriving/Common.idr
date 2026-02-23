@@ -187,7 +187,7 @@ analyzeFunctionName fc fullName = do
 
   normalisedTypeName <- normaliseTypeFunction fc fullName
 
-  when (not !(checkAccessToDefinition normalisedTypeName fullName)) $
+  unless !(checkAccessToDefinition normalisedTypeName fullName) $
     failAt fc "Make sure \{show normalisedTypeName} has public export visibility"
 
   getDCons fc normalisedTypeName
