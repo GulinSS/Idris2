@@ -182,7 +182,7 @@ analyzeFunctionName fc fullName = do
   let (Just currentName) = first currentFn
     | _ => failAt fc "Deriving requires a function declaration, not a top level"
 
-  when (not !(checkAccessToDefinition fullName currentName)) $
+  unless !(checkAccessToDefinition fullName currentName) $
     failAt fc "Make sure \{show fullName} has public export visibility"
 
   normalisedTypeName <- normaliseTypeFunction fc fullName
