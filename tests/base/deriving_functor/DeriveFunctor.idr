@@ -292,7 +292,7 @@ failing "Prelude.Basics.id is not a type constructor name"
   functor : Functor Prelude.id
   functor = %runElab derive
 
-failing "Prelude.Basics.id is not a type constructor name"
+failing "id is not a type constructor name"
 
   total
   functor : Functor id
@@ -361,3 +361,187 @@ namespace FunctionTypeNonPublic
   failing "Make sure DeriveFunctor.FunctionTypeNonPublic.ExportNonPublic.WithD has public export visibility"
     withDF : Functor WithD
     withDF = %runElab derive
+
+namespace DataConstructorValue
+  data TypedContainer : Nat -> Type -> Type where
+    Nil : TypedContainer p v
+    (::) : v -> TypedContainer p v -> TypedContainer p v
+
+  namespace General
+    namespace Manual
+      Functor (TypedContainer a) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Multiple solutions found in search of: Functor (TypedContainer 2)"
+        Functor (TypedContainer 2) where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Multiple solutions found in search of: Functor (TypedContainer (S (S x)))"
+        Functor (TypedContainer $ 2 + x) where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+      Functor (TypedContainer $ y + x) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+    namespace Derivied
+      derivedF : Functor (TypedContainer a)
+      derivedF = %runElab derive
+
+      derivedF2 : Functor (TypedContainer $ a + b)
+      derivedF2 = %runElab derive
+
+  namespace Specific
+    namespace Manual
+      Functor (TypedContainer 2) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      Functor (TypedContainer $ 2 + x) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Can't find an implementation for Functor (TypedContainer (y + x))"
+        Functor (TypedContainer $ y + x) where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+    namespace Derivied
+      derivedF : Functor (TypedContainer 2)
+      derivedF = %runElab derive
+
+      derivedF2 : Functor (TypedContainer $ 2 + x)
+      derivedF2 = %runElab derive
+
+namespace PrimValue
+  data TypedContainer : String -> Type -> Type where
+    Nil : TypedContainer p v
+    (::) : v -> TypedContainer p v -> TypedContainer p v
+
+  namespace General
+    namespace Manual
+      Functor (TypedContainer a) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Multiple solutions found in search of: Functor (TypedContainer \"Hello\")"
+        Functor (TypedContainer "Hello") where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+      Functor (TypedContainer $ "Hello" ++ world) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      Functor (TypedContainer $ hello ++ world) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      namespace Derivied
+        derivedF : Functor (TypedContainer a)
+        derivedF = %runElab derive
+
+        derivedF2 : Functor (TypedContainer $ "Hello" ++ world)
+        derivedF2 = %runElab derive
+
+  namespace Specific
+    namespace Manual
+      Functor (TypedContainer "Hello") where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Can't find an implementation for Functor (TypedContainer (\"Hello\" ++ world))"
+        Functor (TypedContainer $ "Hello" ++ world) where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+      failing "Can't find an implementation for Functor (TypedContainer (hello ++ world))"
+        Functor (TypedContainer $ hello ++ world) where
+          map _ Nil = Nil
+          map f (v1 :: v2) = f v1 :: (map f v2)
+
+    namespace Derivied
+      derivedF : Functor (TypedContainer "Hello")
+      derivedF = %runElab derive
+
+      derivedF2 : Functor (TypedContainer $ "Hello" ++ world)
+      derivedF2 = %runElab derive
+
+namespace DepType
+  data TypedContainer : Nat -> Type -> Type where
+    Nil : TypedContainer Z v
+    -- (::) : v -> TypedContainer (S p) v -> TypedContainer p v
+    (::) : v -> TypedContainer p v -> TypedContainer (S p) v
+
+  namespace General
+    namespace Manual
+      Functor (TypedContainer a) where
+        map _ Nil = Nil
+        map f (v1 :: v2) = f v1 :: (map f v2)
+
+      Functor (TypedContainer $ a + b) where
+        map = map
+
+      failing "Multiple solutions found"
+        Functor (TypedContainer 2) where
+          map = map
+
+      mapTypedContainer : {0 a0, b : Type} -> (a0 -> b) -> TypedContainer 2 a0 -> TypedContainer 2 b
+      mapTypedContainer = map
+
+      %hint
+      mapTypedContainerF : Functor (TypedContainer 2)
+      mapTypedContainerF = MkFunctor mapTypedContainer
+
+    namespace Derivied
+      derivedF : Functor (TypedContainer a)
+      derivedF = %runElab derive
+
+      -- TODO: Not implemented yet
+      failing "Mismatch between: 0 and 2"
+        derived2F : Functor (TypedContainer 2)
+        derived2F = %runElab derive
+
+      -- TODO: Not implemented yet
+      failing "Can't solve constraint between: 0 and plus a b"
+        derived3F : Functor (TypedContainer $ a + b)
+        derived3F = %runElab derive
+
+  namespace Sliced
+    Functor (TypedContainer Z) where
+      map _ Nil = Nil
+      map f (v1 :: v2) impossible
+
+    (Functor (TypedContainer p)) => Functor (TypedContainer (S p)) where
+      map _ Nil impossible
+      map f (v1 :: v2) = f v1 :: (map f v2)
+
+    namespace Manual
+      failing "Can't find an implementation for Functor (TypedContainer (a + b))"
+        Functor (TypedContainer $ a + b) where
+          map f = map f
+
+      failing "Multiple solutions found"
+        Functor (TypedContainer 2) where
+          map = map
+
+      mapTypedContainer : {0 a0, b : Type} -> (a0 -> b) -> TypedContainer 2 a0 -> TypedContainer 2 b
+      mapTypedContainer = map
+
+      %hint
+      mapTypedContainerF : Functor (TypedContainer 2)
+      mapTypedContainerF = MkFunctor mapTypedContainer
+
+    namespace Derivied
+      -- TODO: Not implemented yet
+      failing "Mismatch between: 0 and 2"
+        derived2F : Functor (TypedContainer 2)
+        derived2F = %runElab derive
+
+      -- TODO: Not implemented yet
+      failing "Can't solve constraint between: 0 and plus a b"
+        derived3F : Functor (TypedContainer $ a + b)
+        derived3F = %runElab derive
