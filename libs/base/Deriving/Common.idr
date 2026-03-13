@@ -56,6 +56,9 @@ record IsFamily where
   parameterNames   : List (Argument TypeParameter, Nat)
   dataConstructors : List (Name, TTImp)
 
+Show IsFamily where
+  show (MkIsFamily ctor params dcons) = "MkIsFamily (\{show ctor}) (\{show (map (mapFst unArg) params)}) (\{show dcons})"
+
 wording : NameType -> String
 wording Bound = "a bound variable"
 wording Func = "a function name"
@@ -91,10 +94,12 @@ normaliseName fc n = do
     | _ => failAt fc "\{show n} has a different type than checked: \{show !(quote typedFun)}"
 
   normalisedTy <- quote checkedTy
+  logMsg "derive.common.normaliseName" 100 "\{show n} normalised to: \{show normalisedTy}"
 
   -- nn is meaning "normalised name"
   let tyq@(_, Just nn) = getHeadName normalisedTy
-    | (broken, _) => failAt fc "Failed to extract type name from \{show n} (\{show normalisedTy}) at \{show broken}"
+    | (broken, _) => logMsg "derive.common.normaliseName" 100 "failAt: Failed to extract type name from \{show n} (\{show normalisedTy}) at \{show broken}"
+                     *> failAt fc "Failed to extract type name from \{show n} (\{show normalisedTy}) at \{show broken}"
 
   pure $ if dropNS nn == dropNS n
     then Nothing
@@ -124,7 +129,9 @@ isTypeCon currentFnName fc ty = do
       | [] => failAt fc "\{show ty} out of scope"
       | [(_, MkNameInfo nt)] => failAt fc "\{show ty} is \{wording nt} rather than a type constructor"
       | _ => failAt fc "\{show ty} is ambiguous"
+    logMsg "derive.common.isTypeCon" 100 "Fetching constructors for \{show ty}"
     cs <- getCons ty
+    logMsg "derive.common.isTypeCon" 100 "Found constructors for \{show ty}: \{show cs}"
     res <- for cs $ \ n => do
       [(_, ty)] <- getType n
          | _ => failAt fc "\{show n} is ambiguous"
@@ -143,7 +150,11 @@ toTypeParameter arg with (appView arg)
     pure $ MkTPApp (h, typedArgs)
 
 isFamily' : Elaboration m => Name -> TTImp -> m IsFamily
-isFamily' currentFnName = go Z [] where
+isFamily' currentFnName t = do
+  logMsg "derive.common.isFamily'" 100 "Analyzing type family: \{show t}"
+  ist <- go Z [] t
+  pure ist <* logMsg "derive.common.isFamily'" 100 "Result for \{show t}: \{show ist}"
+where
   go : Nat -> List (Argument TypeParameter, Nat) -> TTImp -> m IsFamily
   go idx acc (IVar fc n) = do
     case !(isTypeCon currentFnName fc n) of
