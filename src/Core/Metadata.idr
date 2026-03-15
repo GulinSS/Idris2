@@ -360,8 +360,8 @@ normaliseTypes
     nfType : Defs -> (NonEmptyFC, (Name, Nat, ClosedTerm)) ->
              Core (NonEmptyFC, (Name, Nat, ClosedTerm))
     nfType defs (loc, (n, len, ty))
-      -- See nfKeepLet at elabTermSub of TTImp.Elab
-       = pure (loc, (n, len, !(quote ScopeEmpty !(nfKeepLet ScopeEmpty ty))))
+      -- See nfHolesArgs at elabTermSub of TTImp.Elab
+       = pure (loc, (n, len, !(quote ScopeEmpty !(nfHolesArgs ScopeEmpty ty))))
 
 record TTMFile where
   constructor MkTTMFile
