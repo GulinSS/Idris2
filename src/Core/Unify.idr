@@ -335,12 +335,15 @@ unifySpineMetaArg mode fc env [<] [<] = pure success
 unifySpineMetaArg mode fc env (cxs :< ex) (cys :< ey)
     = do -- We might know more about cx and cy now, so normalise again to
          -- reduce any newly solved holes
-         cx' <- nf env !(quote env !(value ex))
-         cy' <- nf env !(quote env !(value ey))
+         cx' <- logQuiet $ do nf env !(quote env !(value ex))
+         cy' <- logQuiet $ do nf env !(quote env !(value ey))
+         logNF "unify.application" 20 "unifySpineMetaArg cx'" env cx'
+         logNF "unify.application" 20 "unifySpineMetaArg cy'" env cy'
 
          res <- unifySpineEntry (lower mode) cx' cy'
+         log "unify.application" 20 "unifySpineMetaArg res \{show res}"
 
-         cs <- unifySpineMetaArg mode fc env cxs cys
+         cs <- logDepth $ unifySpineMetaArg mode fc env cxs cys
          pure (union cs res)
     where
       unifySpineEntry : UnifyInfo -> Glued vars -> Glued vars -> Core UnifyResult
@@ -352,24 +355,24 @@ unifySpineMetaArg mode fc env (cxs :< ex) (cys :< ey)
                      (VMeta {}, VMeta {})
                          => unify mode fc env xnf ynf
                      (VMeta {}, _)
-                         => do ytm <- quote env ynf
+                         => do ytm <- logQuiet $ quote env ynf
                                put Ctxt empty
                                ynf' <- nf env ytm
                                put Ctxt defs
                                logC "unify" 20 $
-                                 do xtm <- quote env xnf
+                                 do xtm <- logQuiet $ quote env xnf
                                     pure $ "Don't reduce at all (left): " ++ show xtm ++ " and " ++ show ytm
                                cs <- unify mode fc env xnf ynf'
                                case constraints cs of
                                    [] => pure cs
                                    _  => unify mode fc env xnf ynf
                      (_, VMeta {})
-                         => do xtm <- quote env xnf
+                         => do xtm <- logQuiet $ quote env xnf
                                put Ctxt empty
                                xnf' <- nf env xtm
                                put Ctxt defs
                                logC "unify" 20 $
-                                 do ytm <- quote env ynf
+                                 do ytm <- logQuiet $ quote env ynf
                                     pure $ "Don't reduce at all (right): " ++ show {ty=Term _} ytm ++ " and " ++ show xtm
                                cs <- unify mode fc env xnf' ynf
                                case constraints cs of
