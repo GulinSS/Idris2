@@ -40,6 +40,7 @@ Show Strategy where
 getNS : Strategy -> Maybe (List Namespace)
 getNS (NF ns) = ns
 getNS (HNF ns) = ns
+getNS (OnePi ns) = Just ns
 getNS _ = Nothing
 
 {-
@@ -201,7 +202,7 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
            pure $ applySpine (Ref fc nt n) sp'
   quoteGen bounds env v@(VApp fc nt n sp val) s
       = do -- Reduce if it's visible in the current namespace
-           logC "eval.ref" 50 $ do pure "quoteGen VApp \{show v}"
+           logC "eval.ref" 50 $ do pure "quoteGen VApp \{show !(toFullNames v)}"
            True <- case getNS s of
                         Nothing => pure True
                         Just ns => do full_name <- toFullNames n
