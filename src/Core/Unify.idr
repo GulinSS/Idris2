@@ -1352,7 +1352,8 @@ mutual
   -- If the values convert already, we're done
   unifyExpandApps lazy mode fc env x@(VApp fcx ntx nx spx _) y@(VApp fcy nty ny spy _)
       = if nx == ny
-           then do logC "unify.equal" 10 $
+           then do inf <- getInfPos nx
+                   logC "unify.equal" 10 $
                                 do x <- toFullNames nx
                                    y <- toFullNames ny
                                    xs' <- logQuiet $ traverse value spx
@@ -1360,7 +1361,9 @@ mutual
                                    yx' <- logQuiet $ traverse value spy
                                    ys <- logQuiet $ traverse (quote env) yx'
                                    pure $ "Attempt to convertSpine (func equal already): \{show x} (\{show !(toFullNames xs)}) \n and \{show y} (\{show !(toFullNames ys)})"
-                   c <- convertSpine fc env spx spy
+                   let spx' = dropInf (length spx `minus` 1) 0 inf spx
+                   let spy' = dropInf (length spy `minus` 1) 0 inf spy
+                   c <- convertSpine fc env spx' spy'
                    if c
                       then
                         do logC "unify.equal" 10 $
