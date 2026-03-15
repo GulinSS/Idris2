@@ -96,7 +96,7 @@ elabScript rig fc nest env script@(VDCon nfc nm t ar args) exp
     = do defs <- get Ctxt
          fnm <- toFullNames nm
          log "reflection.reify" 10 $ "elabScript fnm: \{show fnm}"
-         flip traverse_ args $ \v => logNF "reflection.reify" 10 "  " env !(v.value)
+         flip traverse_ args $ \v => logNF "reflection.reify" 10 "fnm arg \{show fnm}" env !(v.value)
          case fnm of
               NS ns (UN (Basic n))
                  => if ns == reflectionNS

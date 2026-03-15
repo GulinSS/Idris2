@@ -74,17 +74,23 @@ expand' mode v@(VApp fc nt n sp val)
     blockedApp _ = pure False
 
 expand' mode@Full v@(VCase fc t r sc ty alts)
-    = do sc' <- expand' mode sc
+    = do sc' <- logDepth $ expand' mode sc
+         logC "eval.def.stuck" 50 $ pure "expand try VCase \{show t} \{show !(toFullNames sc)} (\{show !(toFullNames sc')}) alts: \{show !(toFullNames alts)}"
          Just res <- tryAlts sc' alts
-              | Nothing => pure $ VCase fc t r sc' ty alts
+              | Nothing =>
+                do logC "eval.def.stuck" 50 $ pure "expand failed VCase \{show t} \{show !(toFullNames sc)} (\{show !(toFullNames sc')}) alts: \{show !(toFullNames alts)}"
+                   pure $ VCase fc t r sc' ty alts
+         logC "eval.def.stuck" 50 $ pure "expand \{show !(toFullNames v)} to \{show !(toFullNames res)}"
          expand' mode res
   where
     caseScope : {vars: _} -> SnocList (Core (Glued vars)) -> (args : SnocList (RigCount, Name)) -> VCaseScope args vars ->
                     Core (Glued vars)
     caseScope [<] [<] scope
-      = pure $ snd !scope
+      = do logC "eval.def.stuck" 50 $ pure "Begin Expand VCaseScope"
+           pure $ snd !scope
     caseScope (vars :< v) (as :< (r, a)) scope
-      = caseScope vars as (scope v)
+      = do logC "eval.def.stuck" 50 $ pure "Put arg to Expand VCaseScope \{show a}"
+           caseScope vars as (scope v)
     caseScope vars _ scope
       = do vars <- sequence (toList vars)
            throw (GenericMsg fc "Stuck to expand VCaseScope: \{show vars}")
@@ -116,9 +122,11 @@ expand' mode@Full v@(VCase fc t r sc ty alts)
 
 expand' mode@Full (VPrimOp fc op args)
     = do args' <- traverseVect (expand' mode) args
-         pure $ case getOp op args' of
-           Just res => res
-           Nothing => VPrimOp fc op args
+         case getOp op args' of
+           Just res => do logC "eval.def.stuck" 50 $ pure "Reduced full VPrimOp op: \{show op} to \{show !(toFullNames res)}"
+                          pure res
+           Nothing => do logC "eval.def.stuck" 50 $ pure "Reduced only args VPrimOp op: \{show op} \{show $ !(traverse toFullNames $ toList args')}"
+                         pure $ VPrimOp fc op args
 expand' mode (VErased fc (Dotted t))
     = do t' <- expand' mode t
          pure (VErased fc (Dotted t'))
@@ -147,7 +155,9 @@ export
 expand : {auto c : Ref Ctxt Defs} ->
          {vars: _} ->
          Value f vars -> Core (NF vars)
-expand v = expand' OnlyVisible v
+expand v = do
+  logNF "eval.def.stuck" 50 "Begin Expand OnlyVisible for" v
+  logDepth $ expand' OnlyVisible v
 
 export
 expandCases : {auto c : Ref Ctxt Defs} ->
@@ -161,7 +171,9 @@ export
 expandFull : {auto c : Ref Ctxt Defs} ->
              {vars: _} ->
              Value f vars -> Core (NF vars)
-expandFull v = expand' Full v
+expandFull v = do
+  logNF "eval.def.stuck" 50 "Begin Expand Full for" v
+  logDepth $ expand' Full v
 
 export
 spineVal : {auto c : Ref Ctxt Defs} ->
