@@ -25,7 +25,7 @@ data Strategy
                                 -- reduce 'export' names
   | HNF (Maybe (List Namespace)) -- head normal form (block under constructors)
   | Binders -- block after going under all the binders
-  | OnePi -- block after getting the top level Pi binder
+  | OnePi (List Namespace) -- block after getting the top level Pi binder
   | BlockApp -- block all applications
   | ExpandHoles -- block all applications except holes
 
@@ -34,7 +34,7 @@ Show Strategy where
   show (HNF _) = "HNF"
   show Binders = "Binders"
   show BlockApp = "BlockApp"
-  show OnePi = "OnePi"
+  show (OnePi _) = "OnePi"
   show ExpandHoles = "Holes"
 
 getNS : Strategy -> Maybe (List Namespace)
@@ -168,7 +168,7 @@ parameters {auto c : Ref Ctxt Defs} {auto q : Ref QVar Int}
                          _ => s
            b' <- quoteBinder s' bounds env b
            let s' = case s of
-                         OnePi => BlockApp
+                         OnePi _ => BlockApp
                          _ => s
            sc' <- quoteGen (Add x var bounds) env
                              !(sc (mkTmpVar fc var)) s'
@@ -359,7 +359,9 @@ parameters {auto c : Ref Ctxt Defs}
   -- Keep quoting while we're still going under binders
   export
   quoteOnePi : { vars : _ } -> Env Term vars -> Value f vars -> Core (Term vars)
-  quoteOnePi = quoteStrategy OnePi
+  quoteOnePi env val
+      = do defs <- get Ctxt
+           quoteStrategy (OnePi (currentNS defs :: nestedNS defs)) env val
 
   export
   quoteHoles : { vars : _ } -> Env Term vars -> Value f vars -> Core (Term vars)
