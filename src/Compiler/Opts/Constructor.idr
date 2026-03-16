@@ -96,6 +96,7 @@ natHack =
     ]
 
 -- get all builtin transformations
+export
 builtinMagic : forall vars. CExp vars -> Maybe (CExp vars)
 builtinMagic = magic natHack
 
@@ -122,6 +123,7 @@ getZBranch [] = Nothing
 getZBranch (x :: xs) = tryZBranch x <|> getZBranch xs
 
 -- Rewrite case trees on Nat to be case trees on Integer
+export
 nat : {auto s : Ref NextMN Int} -> CExp vars -> Core (Maybe (CExp vars))
 nat (CCon fc _ ZERO _ []) = pure $ Just $ CPrimVal fc (BI 0)
 nat (CCon fc _ SUCC _ [x]) = pure $ Just $ COp fc (Add IntegerType) [CPrimVal fc (BI 1), x]
@@ -146,12 +148,14 @@ nat _ = pure Nothing
 =========
 -}
 
+export
 enumTag : Nat -> Int -> Constant
 enumTag k i =
   if      k <= 0xff   then B8 (cast i)
   else if k <= 0xffff then B16 (cast i)
   else                     B32 (cast i)
 
+export
 enum : CExp vars -> Maybe (CExp vars)
 enum (CCon fc _ (ENUM n) (Just tag) []) = Just (CPrimVal fc (enumTag n tag))
 enum (CConCase fc sc alts def) = do
@@ -164,19 +168,6 @@ enum (CConCase fc sc alts def) = do
     toEnum _ = Nothing
 enum t = Nothing
 
-enumTree : CExp vars -> CExp vars
-enumTree (CConCase fc sc alts def)
-   = let x = traverse toEnum alts
-         Just alts' = x
-              | Nothing => CConCase fc sc alts def in
-         CConstCase fc sc alts' def
-  where
-    toEnum : CConAlt vars -> Maybe (CConstAlt vars)
-    toEnum (MkConAlt nm (ENUM n) (Just tag) (CRHS sc))
-        = pure $ MkConstAlt (enumTag n tag) sc
-    toEnum _ = Nothing
-enumTree t = t
-
 {-
 ========
   Unit
@@ -184,6 +175,7 @@ enumTree t = t
 -}
 
 -- remove pattern matches on unit
+export
 unitTree : Ref NextMN Int => CExp vars -> Core (Maybe (CExp vars))
 unitTree exp@(CConCase fc sc alts def) =
     let [MkConAlt _ UNIT _ (CRHS e)] = alts
@@ -285,6 +277,7 @@ parameters (try : forall vars. CExp vars -> Core (CExp vars))
     rewriteCConAlt (MkConAlt n ci t e) = MkConAlt n ci t <$> rewriteScope e
     rewriteCConstAlt (MkConstAlt x e) = MkConstAlt x <$> rewriteCExp e
 
+export
 sequence : List (forall vars. CExp vars -> Core (Maybe (CExp vars))) -> CExp vars -> Core (CExp vars)
 sequence [] e = pure e
 sequence (x :: xs) e = do

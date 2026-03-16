@@ -13,9 +13,11 @@ import Core.TT.Var
 
 import Data.List
 import Data.SnocList
+import Data.Vect
 
 import Libraries.Data.List.SizeOf
 import Libraries.Data.SnocList.SizeOf
+import Libraries.Data.SnocList.LengthMatch
 
 %default total
 
@@ -97,18 +99,22 @@ Traversable WhyErased where
   traverse f Impossible = pure Impossible
   traverse f (Dotted x) = Dotted <$> f x
 
+-- A 'Case' arises either from a top level pattern match, or a 'case' block,
+-- and it's useful to know the difference so we know when to stop reducing due
+-- to a blocked top level function
+public export
+data CaseType = PatMatch | CaseBlock Name
+
+export
+Show CaseType where
+  show PatMatch = "(pat)"
+  show (CaseBlock n) = "(block " ++ show n ++ ")"
 
 ------------------------------------------------------------------------
 -- Core Terms
 
 public export
 data CaseAlt : SnocList Name -> Type
-
--- A 'Case' arises either from a top level pattern match, or a 'case' block,
--- and it's useful to know the difference so we know when to stop reducing due
--- to a blocked top level function
-public export
-data CaseType = PatMatch | CaseBlock Name
 
 public export
 data Term : Scoped where
@@ -140,6 +146,8 @@ data Term : Scoped where
      TDelay : FC -> LazyReason -> (ty : Term vars) -> (arg : Term vars) -> Term vars
      TForce : FC -> LazyReason -> Term vars -> Term vars
      PrimVal : FC -> (c : Constant) -> Term vars
+     PrimOp : {arity : _} ->
+              FC -> PrimFn arity -> Vect arity (Term vars) -> Term vars
      Erased : FC -> WhyErased (Term vars) -> Term vars
      Unmatched : FC -> String -> Term vars -- error from a partialmatch
      TType : FC -> Name -> -- universe variable
@@ -153,7 +161,9 @@ ClosedTerm = Term [<]
 
 public export
 data CaseScope : Scope -> Type where
-     RHS : Term vars -> CaseScope vars
+     RHS : List (Var vars, Term vars) -> -- Forced equalities
+           Term vars -> -- RHS
+           CaseScope vars
      Arg : RigCount -> (x : Name) -> CaseScope (vars :< x) -> CaseScope vars
 
 ||| Case alternatives. Unlike arbitrary patterns, they can be at most
@@ -205,6 +215,8 @@ insertNames out ns (TDelay fc r ty tm)
     = TDelay fc r (insertNames out ns ty) (insertNames out ns tm)
 insertNames out ns (TForce fc r tm) = TForce fc r (insertNames out ns tm)
 insertNames out ns (PrimVal fc c) = PrimVal fc c
+insertNames out ns (PrimOp fc x xs)
+    = PrimOp fc x (assert_total (map (insertNames out ns) xs))
 insertNames out ns (Erased fc Impossible) = Erased fc Impossible
 insertNames out ns (Erased fc Placeholder) = Erased fc Placeholder
 insertNames out ns (Erased fc (Dotted t)) = Erased fc (Dotted (insertNames out ns t))
@@ -214,7 +226,10 @@ insertNames out ns (TType fc u) = TType fc u
 insertNamesScope : forall outer . SizeOf outer -> SizeOf ns ->
               CaseScope (inner ++ outer) ->
               CaseScope (inner ++ ns ++ outer)
-insertNamesScope out ns (RHS tm) = RHS (insertNames out ns tm)
+insertNamesScope out ns (RHS fs tm)
+    = RHS (map (\ (n, tm) => (insertVarNames out ns n,
+                              insertNames out ns tm)) fs)
+          (insertNames out ns tm)
 insertNamesScope out ns (Arg r x sc) = Arg r x (insertNamesScope (suc out) ns sc)
 
 insertNamesAlt out sns (ConCase fc n t scope)
@@ -279,8 +294,12 @@ shrinkTaggedTerms ts th
   $ traverse @{Compose} (\ t => shrinkTerm t th) ts
 
 shrinkScope : Shrinkable CaseScope
-shrinkScope (RHS tm) prf = RHS <$> shrinkTerm tm prf
-shrinkScope (Arg r x sc) prf = Arg r x <$> shrinkScope sc (Keep prf)
+shrinkScope (RHS fs tm) prf
+    = Just (RHS !(traverse shrinkForcedEq fs) !(shrinkTerm tm prf))
+  where
+    shrinkForcedEq : (Var xs, Term xs) -> Maybe (Var ys, Term ys)
+    shrinkForcedEq (MkVar v, tm) = Just (!(shrinkIsVar v prf), !(shrinkTerm tm prf))
+shrinkScope (Arg r x sc) prf = Just (Arg r x !(shrinkScope sc (Keep prf)))
 
 shrinkAlt : Shrinkable CaseAlt
 shrinkAlt (ConCase fc x tag sc) prf
@@ -312,6 +331,8 @@ shrinkTerm (TDelay fc x t y) prf
 shrinkTerm (TForce fc r x) prf
     = Just (TForce fc r !(shrinkTerm x prf))
 shrinkTerm (PrimVal fc c) prf = Just (PrimVal fc c)
+shrinkTerm (PrimOp fc fn args) prf
+    = Just (PrimOp fc fn !(assert_total $ (traverse (\arg => shrinkTerm arg prf) args)))
 shrinkTerm (Erased fc Placeholder) prf = Just (Erased fc Placeholder)
 shrinkTerm (Erased fc Impossible) prf = Just (Erased fc Impossible)
 shrinkTerm (Erased fc (Dotted t)) prf = Erased fc . Dotted <$> shrinkTerm t prf
@@ -334,12 +355,20 @@ thinTerms : Thinnable (List . Term)
 thinTerms ts th = assert_total $ map (\ t => thinTerm t th) ts
 
 export
+thinVect : forall a. Thinnable (Vect a . Term)
+thinVect ts th = assert_total $ map (\ t => thinTerm t th) ts
+
+export
 thinTaggedTerms : Thinnable (List . (RigCount,) . Term)
 thinTaggedTerms ts th = assert_total $ map @{Compose} (\ t => thinTerm t th) ts
 
 thinScope : Thinnable CaseScope
-thinScope (RHS tm) th = RHS (thinTerm tm th)
-thinScope (Arg c x sc) th = Arg c x (thinScope sc (Keep th))
+thinScope (RHS fs tm) th
+  = RHS (thinForcedEq <$> fs) (thinTerm tm th)
+  where
+    thinForcedEq : (Var xs, Term xs) -> (Var ys, Term ys)
+    thinForcedEq (MkVar v, tm) = (thinIsVar v th, thinTerm tm th)
+thinScope (Arg r x sc) prf = Arg r x (thinScope sc (Keep prf))
 
 thinAlt : Thinnable CaseAlt
 thinAlt (ConCase fc n t sc) th = ConCase fc n t (thinScope sc th)
@@ -368,6 +397,8 @@ thinTerm (Case fc t r sc scTy alts) th
    = Case fc t r (thinTerm sc th) (thinTerm scTy th) (thinAlts alts th)
 thinTerm (TForce fc r x) th = TForce fc r (thinTerm x th)
 thinTerm (PrimVal fc c) th = PrimVal fc c
+thinTerm (PrimOp fc x args) th
+    = PrimOp fc x (thinVect args th)
 thinTerm (Erased fc Impossible) th = Erased fc Impossible
 thinTerm (Erased fc Placeholder) th = Erased fc Placeholder
 thinTerm (Erased fc (Dotted t)) th = Erased fc (Dotted (thinTerm t th))
@@ -460,6 +491,33 @@ export
 getArgs : Term vars -> (List (Term vars))
 getArgs = snd . getFnArgs
 
+export
+varExtend : IsVar x idx xs -> IsVar x idx (ys ++ xs)
+-- What Could Possibly Go Wrong?
+-- This relies on the runtime representation of the term being the same
+-- after embedding! It is just an identity function at run time, though, and
+-- we don't need its definition at compile time, so let's do it...
+varExtend p = believe_me p
+
+export
+renameVars : CompatibleVars xs ys -> Term xs -> Term ys
+renameVars compat tm = believe_me tm -- no names in term, so it's identity
+
+export
+renameNTopVar : (ms : SnocList Name) ->
+             LengthMatch ns ms ->
+             Var (vars ++ ns) -> Var (vars ++ ms)
+renameNTopVar ms ok v = believe_me v
+
+export
+renameNTop : (ms : SnocList Name) ->
+             LengthMatch ns ms ->
+             Term (vars ++ ns) -> Term (vars ++ ms)
+renameNTop ms ok tm = believe_me tm
+
+export
+renameTop : (m : Name) -> Term (vars :< n) -> Term (vars :< m)
+renameTop m tm = renameNTop {ns = [<n]} [<m] (SnocMatch LinMatch) tm
 
 ------------------------------------------------------------------------
 -- Namespace manipulations
@@ -563,6 +621,7 @@ getLoc (TDelayed fc _ _) = fc
 getLoc (TDelay fc _ _ _) = fc
 getLoc (TForce fc _ _) = fc
 getLoc (PrimVal fc _) = fc
+getLoc (PrimOp fc _ _) = fc
 getLoc (Erased fc i) = fc
 getLoc (Unmatched fc _) = fc
 getLoc (TType fc _) = fc
@@ -617,7 +676,7 @@ eqTerm (Case _ _ _ sc ty alts) (Case _ _ _ sc' ty' alts')
           assert_total (all (uncurry eqAlt) (zip alts alts'))
   where
     eqScope : forall vs, vs' . CaseScope vs -> CaseScope vs' -> Bool
-    eqScope (RHS tm) (RHS tm') = eqTerm tm tm'
+    eqScope (RHS _ tm) (RHS _ tm') = eqTerm tm tm'
     eqScope (Arg _ _ sc) (Arg _ _ sc') = eqScope sc sc'
     eqScope _ _ = False
 
@@ -654,7 +713,9 @@ resolveNamesTerms : (vars : Scope) -> List (RigCount, Term vars) -> List (RigCou
 resolveNamesTerms vars ts = assert_total $ map @{Compose} (resolveNames vars) ts
 
 resolveScope : (vars : SnocList Name) -> CaseScope vars -> CaseScope vars
-resolveScope vars (RHS tm) = RHS (resolveNames vars tm)
+resolveScope vars (RHS fs tm)
+    = RHS (map (\ (n, t) => (n, resolveNames vars t)) fs)
+          (resolveNames vars tm)
 resolveScope vars (Arg c x sc) = Arg c x (resolveScope (vars :< x) sc)
 
 resolveAlt : (vars : SnocList Name) -> CaseAlt vars -> CaseAlt vars
@@ -704,7 +765,7 @@ export
 export
 covering
 {vars : _} -> Show (CaseScope vars) where
-    show (RHS rhs) = " => " ++ show rhs
+    show (RHS fs rhs) = " => " ++ show fs ++ " " ++ show rhs
     show (Arg r nm sc) = " " ++ show nm ++ show sc
 
 export

@@ -2,10 +2,9 @@ module TTImp.Reflect
 
 import Core.Context
 import Core.Env
-import Core.Normalise
 import Core.Reflect
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
 
 import TTImp.TTImp
 import Libraries.Data.WithDefault
@@ -16,10 +15,10 @@ import Data.SnocList
 
 export
 Reify BindMode where
-  reify defs val@(NDCon _ n _ _ args)
-      = case (dropAllNS !(full (gamma defs) n), map value args) of
-             (UN (Basic "PI"), [<c])
-                 => do c' <- reify defs !(evalClosure defs c)
+  reify defs val@(VDCon _ n _ _ args)
+      = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+             (UN (Basic "PI"), [c])
+                 => do c' <- reify defs !(expand c)
                        pure (PI c')
              (UN (Basic "PATTERN"), _) => pure PATTERN
              (UN (Basic "COVERAGE"), _) => pure COVERAGE
@@ -41,7 +40,7 @@ Reflect BindMode where
 
 export
 Reify UseSide where
-  reify defs val@(NDCon _ n _ _ args)
+  reify defs val@(VDCon _ n _ _ args)
       = case (dropAllNS !(full (gamma defs) n), args) of
              (UN (Basic "UseLeft"), _) => pure UseLeft
              (UN (Basic "UseRight"), _) => pure UseRight
@@ -57,7 +56,7 @@ Reflect UseSide where
 
 export
 Reify DotReason where
-  reify defs val@(NDCon _ n _ _ args)
+  reify defs val@(VDCon _ n _ _ args)
       = case (dropAllNS !(full (gamma defs) n), args) of
              (UN (Basic "NonLinearVar"), _) => pure NonLinearVar
              (UN (Basic "VarApplied"), _) => pure VarApplied
@@ -90,242 +89,253 @@ Reflect DotReason where
 mutual
   export
   Reify RawImp where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "IVar"), [<fc, n])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          n' <- reify defs !(evalClosure defs n)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "IVar"), [fc, n])
+                    => do fc' <- reify defs !(expand fc)
+                          n' <- reify defs !(expand n)
                           pure (IVar fc' n')
-               (UN (Basic "IPi"), [<fc, c, p, mn, aty, rty])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          c' <- reify defs !(evalClosure defs c)
-                          p' <- reify defs !(evalClosure defs p)
-                          mn' <- reify defs !(evalClosure defs mn)
-                          aty' <- reify defs !(evalClosure defs aty)
-                          rty' <- reify defs !(evalClosure defs rty)
+               (UN (Basic "IPi"), [fc, c, p, mn, aty, rty])
+                    => do fc' <- reify defs !(expand fc)
+                          c' <- reify defs !(expand c)
+                          p' <- reify defs !(expand p)
+                          mn' <- reify defs !(expand mn)
+                          aty' <- reify defs !(expand aty)
+                          rty' <- reify defs !(expand rty)
                           pure (IPi fc' c' p' mn' aty' rty')
-               (UN (Basic "ILam"), [<fc, c, p, mn, aty, lty])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          c' <- reify defs !(evalClosure defs c)
-                          p' <- reify defs !(evalClosure defs p)
-                          mn' <- reify defs !(evalClosure defs mn)
-                          aty' <- reify defs !(evalClosure defs aty)
-                          lty' <- reify defs !(evalClosure defs lty)
+               (UN (Basic "ILam"), [fc, c, p, mn, aty, lty])
+                    => do fc' <- reify defs !(expand fc)
+                          c' <- reify defs !(expand c)
+                          p' <- reify defs !(expand p)
+                          mn' <- reify defs !(expand mn)
+                          aty' <- reify defs !(expand aty)
+                          lty' <- reify defs !(expand lty)
                           pure (ILam fc' c' p' mn' aty' lty')
-               (UN (Basic "ILet"), [<fc, lhsFC, c, n, ty, val, sc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          lhsFC' <- reify defs !(evalClosure defs lhsFC)
-                          c' <- reify defs !(evalClosure defs c)
-                          n' <- reify defs !(evalClosure defs n)
-                          ty' <- reify defs !(evalClosure defs ty)
-                          val' <- reify defs !(evalClosure defs val)
-                          sc' <- reify defs !(evalClosure defs sc)
+               (UN (Basic "ILet"), [fc, lhsFC, c, n, ty, val, sc])
+                    => do fc' <- reify defs !(expand fc)
+                          lhsFC' <- reify defs !(expand lhsFC)
+                          c' <- reify defs !(expand c)
+                          n' <- reify defs !(expand n)
+                          ty' <- reify defs !(expand ty)
+                          val' <- reify defs !(expand val)
+                          sc' <- reify defs !(expand sc)
                           pure (ILet fc' lhsFC' c' n' ty' val' sc')
-               (UN (Basic "ICase"), [<fc, opts, sc, ty, cs])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          opts' <- reify defs !(evalClosure defs opts)
-                          sc' <- reify defs !(evalClosure defs sc)
-                          ty' <- reify defs !(evalClosure defs ty)
-                          cs' <- reify defs !(evalClosure defs cs)
+               (UN (Basic "ICase"), [fc, opts, sc, ty, cs])
+                    => do fc' <- reify defs !(expand fc)
+                          opts' <- reify defs !(expand opts)
+                          sc' <- reify defs !(expand sc)
+                          ty' <- reify defs !(expand ty)
+                          cs' <- reify defs !(expand cs)
                           pure (ICase fc' opts' sc' ty' cs')
-               (UN (Basic "ILocal"), [<fc, ds, sc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          ds' <- reify defs !(evalClosure defs ds)
-                          sc' <- reify defs !(evalClosure defs sc)
+               (UN (Basic "ILocal"), [fc, ds, sc])
+                    => do fc' <- reify defs !(expand fc)
+                          ds' <- reify defs !(expand ds)
+                          sc' <- reify defs !(expand sc)
                           pure (ILocal fc' ds' sc')
-               (UN (Basic "IUpdate"), [<fc, ds, sc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          ds' <- reify defs !(evalClosure defs ds)
-                          sc' <- reify defs !(evalClosure defs sc)
+               (UN (Basic "IUpdate"), [fc, ds, sc])
+                    => do fc' <- reify defs !(expand fc)
+                          ds' <- reify defs !(expand ds)
+                          sc' <- reify defs !(expand sc)
                           pure (IUpdate fc' ds' sc')
-               (UN (Basic "IApp"), [<fc, f, a])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          f' <- reify defs !(evalClosure defs f)
-                          a' <- reify defs !(evalClosure defs a)
+               (UN (Basic "IApp"), [fc, f, a])
+                    => do fc' <- reify defs !(expand fc)
+                          f' <- reify defs !(expand f)
+                          a' <- reify defs !(expand a)
                           pure (IApp fc' f' a')
-               (UN (Basic "INamedApp"), [<fc, f, m, a])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          f' <- reify defs !(evalClosure defs f)
-                          m' <- reify defs !(evalClosure defs m)
-                          a' <- reify defs !(evalClosure defs a)
+               (UN (Basic "INamedApp"), [fc, f, m, a])
+                    => do fc' <- reify defs !(expand fc)
+                          f' <- reify defs !(expand f)
+                          m' <- reify defs !(expand m)
+                          a' <- reify defs !(expand a)
                           pure (INamedApp fc' f' m' a')
-               (UN (Basic "IAutoApp"), [<fc, f, a])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          f' <- reify defs !(evalClosure defs f)
-                          a' <- reify defs !(evalClosure defs a)
+               (UN (Basic "IAutoApp"), [fc, f, a])
+                    => do fc' <- reify defs !(expand fc)
+                          f' <- reify defs !(expand f)
+                          a' <- reify defs !(expand a)
                           pure (IAutoApp fc' f' a')
-               (UN (Basic "IWithApp"), [<fc, f, a])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          f' <- reify defs !(evalClosure defs f)
-                          a' <- reify defs !(evalClosure defs a)
+               (UN (Basic "IWithApp"), [fc, f, a])
+                    => do fc' <- reify defs !(expand fc)
+                          f' <- reify defs !(expand f)
+                          a' <- reify defs !(expand a)
                           pure (IWithApp fc' f' a')
-               (UN (Basic "ISearch"), [<fc, d])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          d' <- reify defs !(evalClosure defs d)
+               (UN (Basic "ISearch"), [fc, d])
+                    => do fc' <- reify defs !(expand fc)
+                          d' <- reify defs !(expand d)
                           pure (ISearch fc' d')
-               (UN (Basic "IAlternative"), [<fc, t, as])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
-                          as' <- reify defs !(evalClosure defs as)
+               (UN (Basic "IAlternative"), [fc, t, as])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
+                          as' <- reify defs !(expand as)
                           pure (IAlternative fc' t' as')
-               (UN (Basic "IRewrite"), [<fc, t, sc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
-                          sc' <- reify defs !(evalClosure defs sc)
+               (UN (Basic "IRewrite"), [fc, t, sc])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
+                          sc' <- reify defs !(expand sc)
                           pure (IRewrite fc' t' sc')
-               (UN (Basic "IBindHere"), [<fc, t, sc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
-                          sc' <- reify defs !(evalClosure defs sc)
+               (UN (Basic "IBindHere"), [fc, t, sc])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
+                          sc' <- reify defs !(expand sc)
                           pure (IBindHere fc' t' sc')
-               (UN (Basic "IBindVar"), [<fc, n])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          n' <- reify defs !(evalClosure defs n)
+               (UN (Basic "IBindVar"), [fc, n])
+                    => do fc' <- reify defs !(expand fc)
+                          n' <- reify defs !(expand n)
                           pure (IBindVar fc' n')
-               (UN (Basic "IAs"), [<fc, nameFC, s, n, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          nameFC' <- reify defs !(evalClosure defs nameFC)
-                          s' <- reify defs !(evalClosure defs s)
-                          n' <- reify defs !(evalClosure defs n)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IAs"), [fc, nameFC, s, n, t])
+                    => do fc' <- reify defs !(expand fc)
+                          nameFC' <- reify defs !(expand nameFC)
+                          s' <- reify defs !(expand s)
+                          n' <- reify defs !(expand n)
+                          t' <- reify defs !(expand t)
                           pure (IAs fc' nameFC' s' n' t')
-               (UN (Basic "IMustUnify"), [<fc, r, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          r' <- reify defs !(evalClosure defs r)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IMustUnify"), [fc, r, t])
+                    => do fc' <- reify defs !(expand fc)
+                          r' <- reify defs !(expand r)
+                          t' <- reify defs !(expand t)
                           pure (IMustUnify fc' r' t')
-               (UN (Basic "IDelayed"), [<fc, r, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          r' <- reify defs !(evalClosure defs r)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IDelayed"), [fc, r, t])
+                    => do fc' <- reify defs !(expand fc)
+                          r' <- reify defs !(expand r)
+                          t' <- reify defs !(expand t)
                           pure (IDelayed fc' r' t')
-               (UN (Basic "IDelay"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IDelay"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IDelay fc' t')
-               (UN (Basic "IForce"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IForce"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IForce fc' t')
-               (UN (Basic "IQuote"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IQuote"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IQuote fc' t')
-               (UN (Basic "IQuoteName"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IQuoteName"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IQuoteName fc' t')
-               (UN (Basic "IQuoteDecl"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IQuoteDecl"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IQuoteDecl fc' t')
-               (UN (Basic "IUnquote"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IUnquote"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IUnquote fc' t')
-               (UN (Basic "IPrimVal"), [<fc, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IPrimVal"), [fc, t])
+                    => do fc' <- reify defs !(expand fc)
+                          t' <- reify defs !(expand t)
                           pure (IPrimVal fc' t')
-               (UN (Basic "IType"), [<fc])
-                    => do fc' <- reify defs !(evalClosure defs fc)
+               (UN (Basic "IType"), [fc])
+                    => do fc' <- reify defs !(expand fc)
                           pure (IType fc')
-               (UN (Basic "IHole"), [<fc, n])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          n' <- reify defs !(evalClosure defs n)
+               (UN (Basic "IHole"), [fc, n])
+                    => do fc' <- reify defs !(expand fc)
+                          n' <- reify defs !(expand n)
                           pure (IHole fc' n')
-               (UN (Basic "Implicit"), [<fc, n])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          n' <- reify defs !(evalClosure defs n)
+               (UN (Basic "Implicit"), [fc, n])
+                    => do fc' <- reify defs !(expand fc)
+                          n' <- reify defs !(expand n)
                           pure (Implicit fc' n')
-               (UN (Basic "IWithUnambigNames"), [<fc, ns, t])
-                    => do fc' <- reify defs !(evalClosure defs fc)
-                          ns' <- reify defs !(evalClosure defs ns)
-                          t' <- reify defs !(evalClosure defs t)
+               (UN (Basic "IWithUnambigNames"), [fc, ns, t])
+                    => do fc' <- reify defs !(expand fc)
+                          ns' <- reify defs !(expand ns)
+                          t' <- reify defs !(expand t)
                           pure (IWithUnambigNames fc' ns' t')
                _ => cantReify val "TTImp"
     reify defs val = cantReify val "TTImp"
 
   export
   Reify IFieldUpdate where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "ISetField"), [<x, y])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "ISetField"), [x, y])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
                           pure (ISetField x' y')
-               (UN (Basic "ISetFieldApp"), [<x, y])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
+               (UN (Basic "ISetFieldApp"), [x, y])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
                           pure (ISetFieldApp x' y')
                _ => cantReify val "IFieldUpdate"
     reify defs val = cantReify val "IFieldUpdate"
 
   export
   Reify AltType where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
                (UN (Basic "FirstSuccess"), _)
                     => pure FirstSuccess
                (UN (Basic "Unique"), _)
                     => pure Unique
-               (UN (Basic "UniqueDefault"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "UniqueDefault"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (UniqueDefault x')
                _ => cantReify val "AltType"
     reify defs val = cantReify val "AltType"
 
   export
   Reify FnOpt where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
                (UN (Basic "Inline"), _) => pure Inline
                (UN (Basic "Unsafe"), _) => pure Unsafe
                (UN (Basic "NoInline"), _) => pure NoInline
                (UN (Basic "Deprecate"), _) => pure Deprecate
                (UN (Basic "TCInline"), _) => pure TCInline
-               (UN (Basic "Hint"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "Hint"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (Hint x')
-               (UN (Basic "GlobalHint"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "GlobalHint"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (GlobalHint x')
                (UN (Basic "ExternFn"), _) => pure ExternFn
-               (UN (Basic "ForeignFn"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "ForeignFn"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (ForeignFn x')
-               (UN (Basic "ForeignExport"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "ForeignExport"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (ForeignExport x')
                (UN (Basic "Invertible"), _) => pure Invertible
-               (UN (Basic "Totality"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "Totality"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (Totality x')
                (UN (Basic "Macro"), _) => pure Macro
-               (UN (Basic "SpecArgs"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "SpecArgs"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (SpecArgs x')
                _ => cantReify val "FnOpt"
     reify defs val = cantReify val "FnOpt"
 
   export
+  { a: Reify b } -> Reify (WithFC b) where
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkFCVal"), [w, y])
+                    => do w' <- reify defs !(expand w)
+                          y' <- reify defs !(expand y)
+                          pure (MkFCVal w' y')
+               _ => cantReify val "WithFC"
+    reify defs val = cantReify val "WithFC"
+
+  export
   Reify ImpTy where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "MkTy"), [<w, y, z])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkTy"), [w, y, z])
+                    => do w' <- reify defs !(expand w)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (MkImpTy w' y' z')
                _ => cantReify val "ITy"
     reify defs val = cantReify val "ITy"
 
   export
   Reify DataOpt where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "SearchBy"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "SearchBy"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (SearchBy x')
                (UN (Basic "NoHints"), _) => pure NoHints
                (UN (Basic "UniqueSearch"), _) => pure UniqueSearch
@@ -336,147 +346,147 @@ mutual
 
   export
   Reify ImpData where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "MkData"), [<v,w,x,y,z])
-                    => do v' <- reify defs !(evalClosure defs v)
-                          w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkData"), [v,w,x,y,z])
+                    => do v' <- reify defs !(expand v)
+                          w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (MkImpData v' w' x' y' z')
-               (UN (Basic "MkLater"), [<x,y,z])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+               (UN (Basic "MkLater"), [x,y,z])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (MkImpLater x' y' z')
                _ => cantReify val "Data"
     reify defs val = cantReify val "Data"
 
   export
   Reify IField where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "MkIField"), [<v,w,x,y,z])
-                    => do v' <- reify defs !(evalClosure defs v)
-                          w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkIField"), [v,w,x,y,z])
+                    => do v' <- reify defs !(expand v)
+                          w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (MkIField v' w' x' y' z')
                _ => cantReify val "IField"
     reify defs val = cantReify val "IField"
 
   export
   Reify ImpRecord where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "MkRecord"), [<v,w,x,y,z,a])
-                    => do v' <- reify defs !(evalClosure defs v)
-                          w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
-                          a' <- reify defs !(evalClosure defs a)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkRecord"), [v,w,x,y,z,a])
+                    => do v' <- reify defs !(expand v)
+                          w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
+                          a' <- reify defs !(expand a)
                           pure (MkImpRecord v' w' x' y' z' a')
                _ => cantReify val "Record"
     reify defs val = cantReify val "Record"
 
   export
   Reify WithFlag where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "Syntactic"), [<])
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "Syntactic"), [])
                     => pure Syntactic
                _ => cantReify val "WithFlag"
     reify defs val = cantReify val "WithFlag"
 
   export
   Reify ImpClause where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "PatClause"), [<x,y,z])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "PatClause"), [x,y,z])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (PatClause x' y' z')
-               (UN (Basic "WithClause"), [<u,v,w,x,y,z,a])
-                    => do u' <- reify defs !(evalClosure defs u)
-                          v' <- reify defs !(evalClosure defs v)
-                          w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
-                          a' <- reify defs !(evalClosure defs a)
+               (UN (Basic "WithClause"), [u,v,w,x,y,z,a])
+                    => do u' <- reify defs !(expand u)
+                          v' <- reify defs !(expand v)
+                          w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
+                          a' <- reify defs !(expand a)
                           pure (WithClause u' v' w' x' y' z' a')
-               (UN (Basic "ImpossibleClause"), [<x,y])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
+               (UN (Basic "ImpossibleClause"), [x,y])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
                           pure (ImpossibleClause x' y')
                _ => cantReify val "Clause"
     reify defs val = cantReify val "Clause"
 
   export
   Reify (IClaimData Name) where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "MkIClaimData"), [<w,x,y,z])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "MkIClaimData"), [w,x,y,z])
+                    => do w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (MkIClaimData w' x' y' z')
                _ => cantReify val "IClaimData"
     reify defs val = cantReify val "IClaimData"
 
   export
   Reify ImpDecl where
-    reify defs val@(NDCon _ n _ _ args)
-        = case (dropAllNS !(full (gamma defs) n), map value args) of
-               (UN (Basic "IClaim"), [<v])
-                    => do v' <- reify defs !(evalClosure defs v)
+    reify defs val@(VDCon _ n _ _ args)
+        = case (dropAllNS !(full (gamma defs) n), !(spine args)) of
+               (UN (Basic "IClaim"), [v])
+                    => do v' <- reify defs !(expand v)
                           pure (IClaim v')
-               (UN (Basic "IData"), [<x, y, z, w])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
-                          w' <- reify defs !(evalClosure defs w)
+               (UN (Basic "IData"), [x,y,z,w])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
+                          w' <- reify defs !(expand w)
                           pure (IData x' y' z' w')
-               (UN (Basic "IDef"), [<x,y,z])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+               (UN (Basic "IDef"), [x,y,z])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (IDef x' y' z')
-               (UN (Basic "IParameters"), [<x,y,z])
-                    => do x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+               (UN (Basic "IParameters"), [x,y,z])
+                    => do x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (IParameters x' y' z')
-               (UN (Basic "IRecord"), [<w,x,y,z,u])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
-                          u' <- reify defs !(evalClosure defs u)
+               (UN (Basic "IRecord"), [w,x,y,z,u])
+                    => do w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
+                          u' <- reify defs !(expand u)
                           pure (IRecord w' x' y' z' u')
-               (UN (Basic "IFail"), [<w,x,y])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
+               (UN (Basic "IFail"), [w,x,y])
+                    => do w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
                           pure (IFail w' x' y')
-               (UN (Basic "INamespace"), [<w,x,y])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
+               (UN (Basic "INamespace"), [w,x,y])
+                    => do w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
                           pure (INamespace w' x' y')
-               (UN (Basic "ITransform"), [<w,x,y,z])
-                    => do w' <- reify defs !(evalClosure defs w)
-                          x' <- reify defs !(evalClosure defs x)
-                          y' <- reify defs !(evalClosure defs y)
-                          z' <- reify defs !(evalClosure defs z)
+               (UN (Basic "ITransform"), [w,x,y,z])
+                    => do w' <- reify defs !(expand w)
+                          x' <- reify defs !(expand x)
+                          y' <- reify defs !(expand y)
+                          z' <- reify defs !(expand z)
                           pure (ITransform w' x' y' z')
-               (UN (Basic "ILog"), [<x])
-                    => do x' <- reify defs !(evalClosure defs x)
+               (UN (Basic "ILog"), [x])
+                    => do x' <- reify defs !(expand x)
                           pure (ILog x')
                _ => cantReify val "Decl"
     reify defs val = cantReify val "Decl"
@@ -692,6 +702,13 @@ mutual
     reflect fc defs lhs env (SpecArgs r)
         = do r' <- reflect fc defs lhs env r
              appConTop fc defs (reflectionttimp "SpecArgs") [r']
+
+  export
+  { a: Reflect b } -> Reflect (WithFC b) where
+    reflect fc defs lhs env (MkFCVal w x)
+        = do w' <- reflect fc defs lhs env w
+             x' <- reflect fc defs lhs env x
+             appConTop fc defs (reflectionttimp "MkFCVal") [w', x']
 
   export
   Reflect ImpTy where

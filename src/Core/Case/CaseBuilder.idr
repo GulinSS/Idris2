@@ -6,10 +6,12 @@ import Core.Context
 import Core.Context.Log
 import Core.Core
 import Core.Env
-import Core.Normalise
 import Core.Options
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate
 
 import Idris.Pretty.Annotations
 
@@ -123,20 +125,21 @@ updatePats : {vars, todo : _} ->
              Env Term vars ->
              NF vars -> NamedPats todo vars -> Core (NamedPats todo vars)
 updatePats env nf [] = pure []
-updatePats {todo = pvar :: ns} env (NBind fc _ (Pi _ c _ farg) fsc) (p :: ps)
+updatePats {todo = pvar :: ns} env (VBind fc _ (Pi _ c _ farg) fsc) (p :: ps)
   = case argType p of
          Unknown =>
             do defs <- get Ctxt
                empty <- clearDefs defs
-               pure ({ argType := Known c !(quote empty env farg) } p
-                          :: !(updatePats env !(fsc defs (toClosure defaultOpts env (Ref fc Bound pvar))) ps))
+               fsc' <- expand !(fsc (pure (vRef fc Bound pvar)))
+               pure ({ argType := Known c !(quote env farg) } p
+                          :: !(updatePats env fsc' ps))
          _ => pure (p :: ps)
 updatePats env nf (p :: ps)
   = case argType p of
          Unknown =>
             do defs <- get Ctxt
                empty <- clearDefs defs
-               pure ({ argType := Stuck !(quote empty env nf) } p :: ps)
+               pure ({ argType := Stuck !(quote env nf) } p :: ps)
          _ => pure (p :: ps)
 
 substInPatInfo : {pvar, vars, todo : _} ->
@@ -148,9 +151,13 @@ substInPatInfo {pvar} {vars} fc n tm p ps
     = case argType p of
            Known c ty =>
                 do defs <- get Ctxt
-                   tynf <- nf defs (mkEnv fc _) ty
+                   tynf <- nf (mkEnv fc _) ty
                    case tynf of
-                        NApp _ _ _ =>
+                        VApp{} =>
+                           pure ({ argType := Known c (substName zero n tm ty) } p, ps)
+                        VMeta{} =>
+                           pure ({ argType := Known c (substName zero n tm ty) } p, ps)
+                        VLocal{} =>
                            pure ({ argType := Known c (substName zero n tm ty) } p, ps)
                         -- Got a concrete type, and that's all we need, so stop
                         _ => pure (p, ps)
@@ -158,12 +165,11 @@ substInPatInfo {pvar} {vars} fc n tm p ps
              do defs <- get Ctxt
                 empty <- clearDefs defs
                 let env = mkEnv fc vars
-                case !(nf defs env (substName zero n tm fty)) of
-                     NBind pfc _ (Pi _ c _ farg) fsc =>
-                       pure ({ argType := Known c !(quote empty env farg) } p,
-                                 !(updatePats env
-                                       !(fsc defs (toClosure defaultOpts env
-                                             (Ref pfc Bound pvar))) ps))
+                case !(nf env (substName zero n tm fty)) of
+                     VBind pfc _ (Pi _ c _ farg) fsc =>
+                       do fsc' <- expand !(fsc (pure (vRef pfc Bound pvar)))
+                          pure ({ argType := Known c !(quote env farg) } p,
+                                 !(updatePats env fsc' ps))
                      _ => pure (p, ps)
            Unknown => pure (p, ps)
 
@@ -456,23 +462,15 @@ nextName root
          put PName (x + 1)
          pure (MN root x)
 
--- Copied from
--- https://github.com/gallais/Idris2/blob/4efcf27bbc542bf9991ebaf75415644af7135b5d/src/Core/Case/CaseBuilder.idr
 getArgTys : {vars : _} ->
             {auto c : Ref Ctxt Defs} ->
-            Env Term vars -> List Name -> Maybe (NF vars) -> Core (List (ArgType vars))
-getArgTys {vars} env (n :: ns) (Just t@(NBind pfc _ (Pi _ c _ fargc) fsc))
-    = do defs <- get Ctxt
-         empty <- clearDefs defs
-         argty <- case !(evalClosure defs fargc) of
-           NErased _ _ => pure Unknown
-           farg => Known c <$> quote empty env farg
-         scty <- fsc defs (toClosure defaultOpts env (Ref pfc Bound n))
-         rest <- getArgTys env ns (Just scty)
-         pure (argty :: rest)
-getArgTys env (_ :: _) (Just t)
-    = do empty <- clearDefs =<< get Ctxt
-         pure [Stuck !(quote empty env t)]
+            Env Term vars -> List Name -> NF vars -> Core (List (ArgType vars))
+getArgTys env (n :: ns) (VBind pfc _ (Pi _ c _ farg) fsc)
+    = do rest <- getArgTys env ns !(expand !(fsc (pure (vRef pfc Bound n))))
+         pure (Known c !(quote env farg) :: rest)
+getArgTys env (n :: ns) t
+      -- pad with 'Unknown' so we have the right arity
+    = pure (Stuck !(quote env t) :: map (const Unknown) ns)
 getArgTys _ _ _ = pure []
 
 nextNames' : RigCount ->
@@ -493,13 +491,13 @@ nextNames' rig ((c, p) :: pats) (n :: ns) (ConsMatch prf) as
 nextNames : {vars : _} ->
             {auto i : Ref PName Int} ->
             {auto c : Ref Ctxt Defs} ->
-            RigCount -> FC -> String -> List (RigCount, Pat) -> Maybe (NF vars) ->
+            RigCount -> FC -> String -> List (RigCount, Pat) -> NF vars ->
             Core (args ** (SizeOf args, NamedPats args (vars <>< args)))
 nextNames _ _ _ [] _ = pure ([] ** (zero, []))
-nextNames {vars} rig fc root pats m_nty
+nextNames {vars} rig fc root pats nty
      = do (Element args p) <- mkNames pats
           let env = mkEnv fc vars
-          argTys <- getArgTys env args m_nty
+          argTys <- getArgTys env args nty
           pure $ nextNames' rig pats args p argTys
   where
     mkNames : (vars : List a) -> Core $ Subset (List Name) (LengthMatch vars)
@@ -567,14 +565,14 @@ groupCons fc fn pvars cs
     -- the same name in each of the clauses
     addConG {vars'} {todo'} rig n tag pargs pats pid rhs []
         = do cty <- if n == UN (Basic "->")
-                      then pure $ NBind fc (MN "_" 0) (Pi fc top Explicit (MkNFClosure defaultOpts (mkEnv fc vars') (NType fc (MN "top" 0)))) $
-                              (\d, a => pure $ NBind fc (MN "_" 1) (Pi fc top Explicit (MkNFClosure defaultOpts (mkEnv fc vars') (NErased fc Placeholder)))
-                                (\d, a => pure $ NType fc (MN "top" 0)))
+                      then pure $ VBind fc (MN "_" 0) (Pi fc top Explicit (VType fc (MN "top" 0))) $
+                              (\a => pure $ VBind fc (MN "_" 1) (Pi fc top Explicit (VErased fc Placeholder))
+                                (\a => pure $ VType fc (MN "top" 0)))
                       else do defs <- get Ctxt
                               Just t <- lookupTyExact n (gamma defs)
-                                   | Nothing => pure (NErased fc Placeholder)
-                              nf defs (mkEnv fc vars') (embed t)
-             (patnames ** (l, newargs)) <- nextNames {vars=vars'} rig fc "e" pargs (Just cty)
+                                   | Nothing => pure (VErased fc Placeholder)
+                              expand !(nf (mkEnv fc vars') (embed t))
+             (patnames ** (l, newargs)) <- nextNames {vars=vars'} rig fc "e" pargs cty
              -- Update non-linear names in remaining patterns (to keep
              -- explicit dependencies in types accurate)
              let pats' = updatePatNames (updateNames (zip patnames (map snd pargs)))
@@ -608,13 +606,11 @@ groupCons fc fn pvars cs
                 (acc : List (Group todo' vars')) ->
                 Core (List (Group todo' vars'))
     addDelayG {vars'} {todo'} pty parg pats pid rhs []
-        = do let dty = NBind fc (MN "a" 0) (Pi fc erased Explicit (MkNFClosure defaultOpts (mkEnv fc vars') (NType fc (MN "top" 0)))) $
-                        (\d, a =>
-                            do a' <- evalClosure d a
-                               pure (NBind fc (MN "x" 0) (Pi fc top Explicit a)
-                                       (\dv, av => pure (NDelayed fc LUnknown a'))))
-             ([tyname, argname] ** (l, newargs)) <- nextNames {vars=vars'} top fc "e" [(top, pty), (top, parg)]
-                                                  (Just dty)
+        = do let dty = VBind fc (MN "a" 0) (Pi fc erased Explicit (VType fc (MN "top" 0))) $
+                        (\a => do a'<- a
+                                  pure (VBind fc (MN "x" 0) (Pi fc top Explicit a')
+                                           (\av => pure (VDelayed fc LUnknown a'))))
+             ([tyname, argname] ** (l, newargs)) <- nextNames {vars=vars'} top fc "e" [(top, pty), (top, parg)] dty
                 | _ => throw (InternalError "Error compiling Delay pattern match")
              let pats' = updatePatNames (updateNames [(tyname, pty), (argname, parg)])
                                         (weakensN l pats)
@@ -846,7 +842,7 @@ sameType {ns} fc phase fn env (p :: xs)
     = do defs <- get Ctxt
          case getFirstArgType p of
               Known _ t => sameTypeAs phase
-                                      !(nf defs env t)
+                                      !(expand !(nf env t))
                                       (map getFirstArgType xs)
               ty => throw (CaseCompile fc fn DifferingTypes)
   where
@@ -854,20 +850,21 @@ sameType {ns} fc phase fn env (p :: xs)
     firstPat (pinf :: _) = pat pinf
 
     headEq : NF ns -> NF ns -> Phase -> Bool
-    headEq (NBind _ _ (Pi _ _ _ _) _) (NBind _ _ (Pi _ _ _ _) _) _ = True
-    headEq (NTCon _ n _ _) (NTCon _ n' _ _) _ = n == n'
-    headEq (NPrimVal _ c) (NPrimVal _ c') _ = c == c'
-    headEq (NType _ _) (NType _ _) _ = True
-    headEq (NApp _ (NRef _ n) _) (NApp _ (NRef _ n') _) RunTime = n == n'
-    headEq (NErased _ _) _ RunTime = True
-    headEq _ (NErased _ _) RunTime = True
+    headEq (VBind _ _ (Pi _ _ _ _) _) (VBind _ _ (Pi _ _ _ _) _) _ = True
+    headEq (VTCon _ n _ _) (VTCon _ n' _ _) _ = n == n'
+    headEq (VCase _ _ _ _ _ _) (VCase _ _ _ _ _ _) _ = True
+    headEq (VPrimVal _ c) (VPrimVal _ c') _ = c == c'
+    headEq (VType _ _) (VType _ _) _ = True
+    headEq (VApp _ _ n _ _) (VApp _ _ n' _ _) RunTime = n == n'
+    headEq (VErased _ _) _ RunTime = True
+    headEq _ (VErased _ _) RunTime = True
     headEq _ _ _ = False
 
     sameTypeAs : Phase -> NF ns -> List (ArgType ns) -> Core ()
     sameTypeAs _ ty [] = pure ()
     sameTypeAs ph ty (Known r t :: xs) =
          do defs <- get Ctxt
-            if headEq ty !(nf defs env t) phase
+            if headEq ty !(expand !(nf env t)) phase
                then sameTypeAs ph ty xs
                else throw (CaseCompile fc fn DifferingTypes)
     sameTypeAs p ty _ = throw (CaseCompile fc fn DifferingTypes)
@@ -1188,10 +1185,10 @@ mkPatClause fc fn args s ty pid (ps, rhs)
     = maybe (throw (CaseCompile fc fn DifferingArgNumbers))
             (\eq =>
                do defs <- get Ctxt
-                  nty <- nf defs ScopeEmpty ty
+                  nty <- expand !(nf ScopeEmpty ty)
                   -- The arguments are in reverse order, so we need to
                   -- read what we know off 'nty', and reverse it
-                  argTys <- getArgTys ScopeEmpty args (Just nty)
+                  argTys <- getArgTys ScopeEmpty args nty
                   ns <- mkNames args ps eq s.hasLength argTys
                   log "compile.casetree" 20 $
                     "Make pat clause for names " ++ show ns
@@ -1310,8 +1307,8 @@ identifyUnreachableDefaults : {auto c : Ref Ctxt Defs} ->
                               Core (SortedSet Int)
 -- Leave it alone if it's a primitive type though, since we need the catch
 -- all case there
-identifyUnreachableDefaults fc defs (NPrimVal _ _) cs = pure empty
-identifyUnreachableDefaults fc defs (NType _ _) cs = pure empty
+identifyUnreachableDefaults fc defs (VPrimVal _ _) cs = pure empty
+identifyUnreachableDefaults fc defs (VType _ _) cs = pure empty
 identifyUnreachableDefaults fc defs nfty cs
     = do cs' <- traverse rep cs
          let (cs'', extraClauseIdxs) = dropRep (concat cs') empty
@@ -1358,7 +1355,7 @@ findExtraDefaults : {auto c : Ref Ctxt Defs} ->
                     Core (List Int)
 findExtraDefaults defs ctree@(TCase fc _ idx el ty altsIn)
   = do let fenv = mkEnv fc _
-       nfty <- nf defs fenv ty
+       nfty <- expand !(nf fenv ty)
        extraCases <- identifyUnreachableDefaults fc defs nfty altsIn
        extraCases' <- concat <$> traverse findExtraAlts altsIn
        pure (Prelude.toList extraCases ++ extraCases')
@@ -1387,12 +1384,12 @@ makePMDef : {auto c : Ref Ctxt Defs} ->
 makePMDef fc ct phase fn ty []
     = do log "compile.casetree.getpmdef" 20 "getPMDef: No clauses!"
          defs <- get Ctxt
-         pure (!(getArgs 0 !(nf defs [<] ty)) ** (Unmatched fc "No clauses", []))
+         pure (!(getArgs 0 !(expand !(nf [<] ty))) ** (Unmatched fc "No clauses", []))
   where
     getArgs : Int -> NF [<] -> Core (SnocList Name)
-    getArgs i (NBind fc x (Pi _ _ _ _) sc)
+    getArgs i (VBind fc x (Pi _ _ _ _) sc)
         = do defs <- get Ctxt
-             sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+             sc' <- expand !(sc (pure (VErased fc Placeholder)))
              pure (!(getArgs i sc') :< MN "arg" i)
     getArgs i _ = pure [<]
 makePMDef fc ct phase fn ty clauses

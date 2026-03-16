@@ -4,7 +4,7 @@ import Compiler.CompileExpr
 import Core.Context
 import Core.Context.Log
 import Core.Primitives
-import Core.Value
+import Core.Evaluate.Value
 import Core.Name
 import Data.List
 import Data.SnocList
@@ -14,6 +14,7 @@ import Data.List.HasLength
 import Libraries.Data.List.SizeOf
 import Libraries.Data.SnocList.SizeOf
 
+import Core.Evaluate.Value
 
 findConstAlt : Constant -> List (CConstAlt vars) ->
                Maybe (CExp vars) -> Maybe (CExp vars)
@@ -141,11 +142,11 @@ constFold rho (COp {arity} fc fn xs) =
     toNF (CPrimVal fc (I _)) = Nothing
     toNF (CPrimVal fc (Db _)) = Nothing
     -- Fold the rest
-    toNF (CPrimVal fc c) = Just $ NPrimVal fc c
+    toNF (CPrimVal fc c) = Just $ VPrimVal fc c
     toNF _ = Nothing
 
     fromNF : NF vars' -> Maybe (CExp vars')
-    fromNF (NPrimVal fc c) = Just $ CPrimVal fc c
+    fromNF (VPrimVal fc c) = Just $ CPrimVal fc c
     fromNF _ = Nothing
 
     commutative : PrimType -> Bool

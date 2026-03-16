@@ -2,7 +2,7 @@ module Core.Case.Util
 
 import Core.Case.CaseTree
 import Core.Context
-import Core.Value
+import Core.Evaluate.Value
 
 import Data.SnocList
 import Libraries.Data.SnocList.Extra
@@ -23,7 +23,7 @@ export
 getCons : {auto c : Ref Ctxt Defs} ->
           {vars : _} ->
           Defs -> NF vars -> Core (List DataCon)
-getCons defs (NTCon _ tn _ _)
+getCons defs (VTCon fc tn _ _)
     = case !(lookupDefExact tn (gamma defs)) of
            Just (TCon _ _ _ _ _ cons _) =>
                 do cs' <- traverse addTy (fromMaybe [] cons)
@@ -71,7 +71,7 @@ emptyRHSTm fc (Case cfc ct c sc scTy alts)
     = Case cfc ct c sc scTy (map emptyRHSalt alts)
   where
     emptyRHSscope : forall vars . FC -> CaseScope vars -> CaseScope vars
-    emptyRHSscope fc (RHS tm) = RHS (emptyRHSTm fc tm)
+    emptyRHSscope fc (RHS fs tm) = RHS fs (emptyRHSTm fc tm)
     emptyRHSscope fc (Arg c x sc) = Arg c x (emptyRHSscope fc sc)
 
     emptyRHSalt : forall vars . CaseAlt vars -> CaseAlt vars
@@ -90,7 +90,7 @@ mkAltTm fc sc (MkDataCon cn t ar qs)
   where
     mkScope : SizeOf more -> List RigCount -> SnocList Name ->
               CaseScope (vars ++ more)
-    mkScope s _ [<] = RHS (weakenNs s (emptyRHSTm fc sc))
+    mkScope s _ [<] = RHS [] (weakenNs s (emptyRHSTm fc sc))
     mkScope s [] (vs :< v) = Arg top v (mkScope (suc s) [] vs)
     mkScope s (q :: qs) (vs :< v) = Arg q v (mkScope (suc s) qs vs)
 

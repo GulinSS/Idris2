@@ -3,9 +3,9 @@ module TTImp.Elab.Utils
 import Core.Context
 import Core.Core
 import Core.Env
-import Core.Normalise
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import TTImp.Elab.Check
 import TTImp.TTImp
@@ -16,32 +16,32 @@ import Data.SnocList
 
 detagSafe : {auto c : Ref Ctxt Defs} ->
             Defs -> ClosedNF -> Core Bool
-detagSafe defs (NTCon _ n _ args)
+detagSafe defs (VTCon _ n _ args)
     = do Just (TCon _ _ _ _ _ _ (Just detags)) <- lookupDefExact n (gamma defs)
               | _ => pure False
-         args' <- traverse (evalClosure defs . value) args
-         pure $ notErased 0 detags (toList args')
+         args' <- traverseSnocList spineVal (reverse args)
+         pure $ notErased 0 detags args'
   where
     -- if any argument positions are in the detaggable set, and unerased, then
     -- detagging is safe
-    notErased : Nat -> List Nat -> List ClosedNF -> Bool
+    notErased : Nat -> List Nat -> SnocList (NF [<]) -> Bool
     notErased i [] _ = True -- Don't need an index available
-    notErased i ns [] = False
-    notErased i ns (NErased _ Impossible :: rest)
+    notErased i ns [<] = False
+    notErased i ns (rest :< VErased _ Impossible)
         = notErased (i + 1) ns rest -- Can't detag here, look elsewhere
-    notErased i ns (_ :: rest) -- Safe to detag via this argument
+    notErased i ns (rest :< _) -- Safe to detag via this argument
         = elem i ns || notErased (i + 1) ns rest
 detagSafe defs _ = pure False
 
 findErasedFrom : {auto c : Ref Ctxt Defs} ->
-                 Defs -> Nat -> ClosedNF -> Core (List Nat, List Nat)
-findErasedFrom defs pos (NBind fc x (Pi _ c _ aty) scf)
-    = do -- In the scope, use 'Erased fc Impossible' to mean 'argument is erased'.
+                 Defs -> Nat -> NF [<] -> Core (List Nat, List Nat)
+findErasedFrom defs pos (VBind fc x (Pi _ c _ aty) scf)
+    = do -- In the scope, use 'Erased fc True' to mean 'argument is erased'.
          -- It's handy here, because we can use it to tell if a detaggable
          -- argument position is available
-         sc <- scf defs (toClosure defaultOpts ScopeEmpty (Erased fc (ifThenElse (isErased c) Impossible Placeholder)))
-         (erest, dtrest) <- findErasedFrom defs (1 + pos) sc
-         let dt' = if !(detagSafe defs !(evalClosure defs aty))
+         sc <- scf (pure (VErased fc (ifThenElse (isErased c) Impossible Placeholder)))
+         (erest, dtrest) <- findErasedFrom defs (1 + pos) !(expand sc)
+         let dt' = if !(detagSafe defs !(expand aty))
                       then (pos :: dtrest) else dtrest
          pure $ if isErased c
                    then (pos :: erest, dt')
@@ -55,8 +55,8 @@ findErased : {auto c : Ref Ctxt Defs} ->
              ClosedTerm -> Core (List Nat, List Nat)
 findErased tm
     = do defs <- get Ctxt
-         tmnf <- nf defs ScopeEmpty tm
-         findErasedFrom defs 0 tmnf
+         tmnf <- nf [<] tm
+         findErasedFrom defs 0 !(expand tmnf)
 
 export
 updateErasable : {auto c : Ref Ctxt Defs} ->

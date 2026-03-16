@@ -5,10 +5,10 @@ import Core.Context.Log
 import Core.Core
 import Core.Env
 import Core.Metadata
-import Core.Normalise
 import Core.TT
 import Core.UnifyState
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
 
 import Idris.REPL.Opts
 import Idris.Syntax
@@ -74,9 +74,9 @@ findTyName : {vars : _} ->
 findTyName defs env n (Bind _ x b@(PVar _ c p ty) sc)
       -- Take the first one, which is the most recently bound
     = if n == x
-         then do tynf <- nf defs env ty
+         then do tynf <- nf env ty
                  case tynf of
-                      NTCon _ tyn _ _ => pure $ Just tyn
+                      VTCon _ tyn _ _ => pure $ Just tyn
                       _ => pure Nothing
          else findTyName defs (env :< b) n sc
 findTyName defs env n (Bind _ x b sc) = findTyName defs (env :< b) n sc
@@ -123,18 +123,19 @@ findAllVars (Bind _ x (PLet _ _ _ _) sc)
 findAllVars t = toList (dropNS <$> getDefining t)
 
 export
-explicitlyBound : Defs -> ClosedNF -> Core (List Name)
-explicitlyBound defs (NBind fc x (Pi _ _ _ _) sc)
+explicitlyBound : {auto c : Ref Ctxt Defs} ->
+                  Defs -> ClosedNF -> Core (List Name)
+explicitlyBound defs (VBind fc x (Pi _ _ _ _) sc)
     = pure $ x :: !(explicitlyBound defs
-                    !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))))
+                    !(expand !(sc (pure (VErased fc Placeholder)))))
 explicitlyBound defs _ = pure []
 
 export
 getEnvArgNames : {auto c : Ref Ctxt Defs} ->
                  Defs -> Nat -> ClosedNF -> Core (List String)
-getEnvArgNames defs Z sc = getArgNames defs !(explicitlyBound defs sc) [] ScopeEmpty sc
-getEnvArgNames defs (S k) (NBind fc n _ sc)
-    = getEnvArgNames defs k !(sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder)))
+getEnvArgNames defs Z sc = getArgNames defs !(explicitlyBound defs sc) [] [<] sc
+getEnvArgNames defs (S k) (VBind fc n _ sc)
+    = getEnvArgNames defs k !(expand !(sc (pure (VErased fc Placeholder))))
 getEnvArgNames defs n ty = pure []
 
 expandCon : {auto c : Ref Ctxt Defs} ->
@@ -146,7 +147,7 @@ expandCon fc usedvars con
          pure (apply (IVar fc con)
                 (map (IBindVar fc)
                      !(getArgNames defs [] usedvars ScopeEmpty
-                                   !(nf defs ScopeEmpty ty))))
+                                   !(expand !(nf [<] ty)))))
 
 updateArg : {auto c : Ref Ctxt Defs} ->
             List Name -> -- all the variable names
@@ -291,9 +292,8 @@ mkCase {c} {u} fn orig lhs_raw
                   put UST ust
                   case err of
                        WhenUnifying _ gam env l r err
-                         => do let defs = { gamma := gam } defs
-                               if !(impossibleOK defs !(nf defs env l)
-                                                      !(nf defs env r))
+                         => do if !(impossibleOK !(expand !(nf env l))
+                                                 !(expand !(nf env r)))
                                   then pure (Impossible lhs_raw)
                                   else pure Invalid
                        _ => pure Invalid)

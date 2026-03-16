@@ -15,6 +15,7 @@ import public Idris.REPL.Common
 import Data.List
 import Data.Maybe
 import Data.String
+import Data.Vect
 import Libraries.Data.List.Extra
 import Libraries.Data.String.Extra
 import Libraries.Data.WithDefault
@@ -135,12 +136,14 @@ fuzzySearch expr = do
   doFind ns (TForce fc r x) = doFind ns x
   doFind ns (PrimVal fc c) =
     fromMaybe [] ((:: []) <$> parseNameOrConst (PPrimVal fc c)) ++ ns
+  doFind ns (PrimOp fc fn args) =
+    foldl doFind ns (toList args)
   doFind ns (Erased fc i) = ns
   doFind ns (Unmatched fc str) = ns
   doFind ns (TType fc _) = AType :: ns
 
   doFindScope : List NameOrConst -> CaseScope vars -> List NameOrConst
-  doFindScope ns (RHS tm) = doFind ns tm
+  doFindScope ns (RHS _ tm) = doFind ns tm
   doFindScope ns (Arg c x tm) = doFindScope ns tm
 
   doFindAlt ns (ConCase _ n t sc) = doFindScope ns sc

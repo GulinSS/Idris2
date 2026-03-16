@@ -4,6 +4,7 @@ import Core.Core
 import Core.Context
 import Core.Env
 import Core.Options
+import Core.Evaluate
 
 import Idris.Doc.String
 import Idris.REPL.Opts
@@ -153,8 +154,7 @@ pshow : {vars : _} ->
         {auto s : Ref Syn SyntaxInfo} ->
         Env Term vars -> Term vars -> Core (Doc IdrisAnn)
 pshow env tm
-    = do defs <- get Ctxt
-         ntm <- normaliseHoles defs env tm
+    = do ntm <- normaliseHoles env tm
          itm <- resugar env ntm
          pure (pShowMN ntm env $ prettyBy Syntax itm)
 

@@ -2,6 +2,7 @@ module Idris.IDEMode.Holes
 
 import Core.Env
 import Core.Context.Log
+import Core.Evaluate
 
 import Data.String
 
@@ -95,21 +96,21 @@ export
 extractHoleData : {vars : _} ->
           {auto c : Ref Ctxt Defs} ->
           {auto s : Ref Syn SyntaxInfo} ->
-          Defs -> Env Term vars -> Name -> Nat -> Term vars ->
+          Env Term vars -> Name -> Nat -> Term vars ->
           Core Holes.Data
-extractHoleData defs env fn (S args) (Bind fc x (Let _ c val ty) sc)
-  = extractHoleData defs env fn args (subst val sc)
-extractHoleData defs env fn (S args) (Bind fc x b sc)
-  = do rest <- extractHoleData defs (env :< b) fn args sc
+extractHoleData env fn (S args) (Bind fc x (Let _ c val ty) sc)
+  = extractHoleData env fn args (subst val sc)
+extractHoleData env fn (S args) (Bind fc x b sc)
+  = do rest <- extractHoleData (env :< b) fn args sc
        let True = showName x
          | False => do log "ide-mode.hole" 10 $ "Not showing name: " ++ show x
                        pure rest
        log "ide-mode.hole" 10 $ "Showing name: " ++ show x
-       ity <- resugar env !(normalise defs env (binderType b))
+       ity <- resugar env !(normalise env (binderType b))
        let premise = MkHolePremise x ity (multiplicity b) (isImplicit b)
        pure $ { context $= (premise ::)  } rest
-extractHoleData defs env fn args ty
-  = do nty <- normalise defs env ty
+extractHoleData env fn args ty
+  = do nty <- normalise env ty
        ity <- resugar env nty
        log "ide-mode.hole" 20 $
           "Return type: " ++ show !(toFullNames ty)
@@ -122,11 +123,11 @@ export
 holeData : {vars : _} ->
            {auto c : Ref Ctxt Defs} ->
            {auto s : Ref Syn SyntaxInfo} ->
-           Defs -> Env Term vars -> Name -> Nat -> Term vars ->
+           Env Term vars -> Name -> Nat -> Term vars ->
            Core Holes.Data
 
-holeData gam env fn args ty
-  = do hdata <- extractHoleData gam env fn args ty
+holeData env fn args ty
+  = do hdata <- extractHoleData env fn args ty
        pp <- getPPrint
        pure $ if showImplicits pp
               then hdata
@@ -155,18 +156,18 @@ getUserHolesData
          traverse (\n_gdef_args =>
                      -- Inference can't deal with this for now :/
                      let (n, gdef, args) = the (Name, GlobalDef, Nat) n_gdef_args in
-                     holeData defs ScopeEmpty n args (type gdef))
+                     holeData ScopeEmpty n args (type gdef))
                   holesWithArgs
 
 export
 showHole : {vars : _} ->
           {auto c : Ref Ctxt Defs} ->
           {auto s : Ref Syn SyntaxInfo} ->
-          Defs -> Env Term vars -> Name -> Nat -> Term vars ->
+          Env Term vars -> Name -> Nat -> Term vars ->
           Core String
 
-showHole defs env fn args ty
-    = do hdata <- holeData defs env fn args ty
+showHole env fn args ty
+    = do hdata <- holeData env fn args ty
          case hdata.context of
            [] => pure $ show (hdata.name) ++ " : " ++ show hdata.type
            _  => pure $
@@ -178,10 +179,10 @@ export
 prettyHole : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto s : Ref Syn SyntaxInfo} ->
-             Defs -> Env Term vars -> Name -> Nat -> Term vars ->
+             Env Term vars -> Name -> Nat -> Term vars ->
              Core (Doc IdrisSyntax)
-prettyHole defs env fn args ty
-  = do hdata <- holeData defs env fn args ty
+prettyHole env fn args ty
+  = do hdata <- holeData env fn args ty
        case hdata.context of
          [] => pure $ pretty0 hdata.name <++> colon <++> pretty hdata.type
          _  => pure $ indent 1 (vsep $ map pretty hdata.context) <+> hardline

@@ -2,9 +2,10 @@ module TTImp.Impossible
 
 import Core.Context
 import Core.Env
-import Core.Normalise
 import Core.TT
-import Core.Value
+import Core.Evaluate.Value
+import Core.Evaluate.Normalise
+import Core.Evaluate.Convert
 
 import TTImp.TTImp
 import TTImp.Elab.App
@@ -25,20 +26,20 @@ match : {auto c : Ref Ctxt Defs} ->
         ClosedNF -> (Name, Int, ClosedTerm) -> Core Bool
 match nty (n, i, rty)
     = do defs <- get Ctxt
-         rtynf <- nf defs ScopeEmpty rty
+         rtynf <- expand !(nf ScopeEmpty rty)
          sameRet nty rtynf
   where
     sameRet : ClosedNF -> ClosedNF -> Core Bool
-    sameRet _ (NApp _ _ _) = pure True
-    sameRet _ (NErased _ _) = pure True
-    sameRet (NApp _ _ _) _ = pure True
-    sameRet (NErased _ _) _ = pure True
-    sameRet (NTCon _ n _ _) (NTCon _ n' _ _) = pure (n == n')
-    sameRet (NPrimVal _ c) (NPrimVal _ c') = pure (c == c')
-    sameRet (NType _ _) (NType _ _) = pure True
-    sameRet nf (NBind fc _ (Pi _ _ _ _) sc)
+    sameRet _ (VApp{}) = pure True
+    sameRet _ (VErased{}) = pure True
+    sameRet (VApp{}) _ = pure True
+    sameRet (VErased{}) _ = pure True
+    sameRet (VTCon _ n _ _) (VTCon _ n' _ _) = pure (n == n')
+    sameRet (VPrimVal _ c) (VPrimVal _ c') = pure (c == c')
+    sameRet (VType{}) (VType{}) = pure True
+    sameRet nf (VBind fc _ (Pi _ _ _ _) sc)
         = do defs <- get Ctxt
-             sc' <- sc defs (toClosure defaultOpts ScopeEmpty (Erased fc Placeholder))
+             sc' <- expand !(sc (pure (VErased fc Placeholder)))
              sameRet nf sc'
     sameRet _ _ = pure False
 
@@ -49,6 +50,8 @@ dropNoMatch Nothing ts = pure ts
 dropNoMatch (Just nty) ts
     = -- if the return type of a thing in ts doesn't match nty, drop it
       filterM (match nty . map (map type)) ts
+
+data QVar : Type where
 
 nextVar : {auto q : Ref QVar Int} ->
           FC -> Core ClosedTerm
@@ -72,47 +75,47 @@ mutual
                 (namedargs : List (Name, RawImp)) ->
                 Core ClosedTerm
   -- unnamed takes priority
-  processArgs fn (NBind fc x (Pi _ c Explicit ty) sc) (e :: exps) autos named
+  processArgs fn (VBind fc x (Pi _ c Explicit ty) sc) (e :: exps) autos named
      = do e' <- mkTerm e (Just ty) [] [] []
           defs <- get Ctxt
-          processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+          processArgs (App fc fn c e') !(expand !(sc (nf [<] e')))
                       exps autos named
-  processArgs fn (NBind fc x (Pi _ c Explicit ty) sc) [] autos named
+  processArgs fn (VBind fc x (Pi _ c Explicit ty) sc) [] autos named
      = do defs <- get Ctxt
           case findNamed x named of
             Just ((_, e), named') =>
                do e' <- mkTerm e (Just ty) [] [] []
-                  processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                  processArgs (App fc fn c e') !(expand !(sc (nf [<] e')))
                               [] autos named'
             Nothing => badClause fn [] autos named
-  processArgs fn (NBind fc x (Pi _ c Implicit ty) sc) exps autos named
+  processArgs fn (VBind fc x (Pi _ c Implicit ty) sc) exps autos named
      = do defs <- get Ctxt
           case findNamed x named of
             Nothing => do e' <- nextVar fc
                           processArgs (App fc fn c e')
-                                      !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                                      !(expand !(sc (nf [<] e')))
                                       exps autos named
             Just ((_, e), named') =>
                do e' <- mkTerm e (Just ty) [] [] []
-                  processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                  processArgs (App fc fn c e') !(expand !(sc (nf [<] e')))
                               exps autos named'
-  processArgs fn (NBind fc x (Pi _ c AutoImplicit ty) sc) exps autos named
+  processArgs fn (VBind fc x (Pi _ c AutoImplicit ty) sc) exps autos named
      = do defs <- get Ctxt
           case autos of
                (e :: autos') => -- unnamed takes priority
                    do e' <- mkTerm e (Just ty) [] [] []
-                      processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                      processArgs (App fc fn c e') !(expand !(sc (nf [<] e')))
                                   exps autos' named
                [] =>
                   case findNamed x named of
                      Nothing =>
                         do e' <- nextVar fc
                            processArgs (App fc fn c e')
-                                       !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                                       !(expand !(sc (nf [<] e')))
                                        exps [] named
                      Just ((_, e), named') =>
                         do e' <- mkTerm e (Just ty) [] [] []
-                           processArgs (App fc fn c e') !(sc defs (toClosure defaultOpts ScopeEmpty e'))
+                           processArgs (App fc fn c e') !(expand !(sc (nf [<] e')))
                                        exps [] named'
   processArgs fn ty [] [] [] = pure fn
   processArgs fn ty exps autos named
@@ -120,7 +123,7 @@ mutual
 
   buildApp : {auto c : Ref Ctxt Defs} ->
              {auto q : Ref QVar Int} ->
-             FC -> Name -> Maybe ClosedClosure ->
+             FC -> Name -> Maybe (Glued [<]) ->
              (expargs : List RawImp) ->
              (autoargs : List RawImp) ->
              (namedargs : List (Name, RawImp)) ->
@@ -132,9 +135,9 @@ mutual
                throw (InternalError "Can't deal with constants here yet")
 
            gdefs <- lookupNameBy id n (gamma defs)
-           [(n', i, gdef)] <- dropNoMatch !(traverseOpt (evalClosure defs) mty) gdefs
+           [(n', i, gdef)] <- dropNoMatch !(traverseOpt expand mty) gdefs
               | ts => ambiguousName fc n (map fst ts)
-           tynf <- nf defs ScopeEmpty (type gdef)
+           tynf <- expand !(nf ScopeEmpty (type gdef))
            -- #899 we need to make sure that type & data constructors are marked
            -- as such so that the coverage checker actually uses the matches in
            -- `impossible` branches to generate parts of the case tree.
@@ -149,7 +152,7 @@ mutual
 
   mkTerm : {auto c : Ref Ctxt Defs} ->
            {auto q : Ref QVar Int} ->
-           RawImp -> Maybe ClosedClosure ->
+           RawImp -> Maybe (Glued [<]) ->
            (expargs : List RawImp) ->
            (autoargs : List RawImp) ->
            (namedargs : List (Name, RawImp)) ->

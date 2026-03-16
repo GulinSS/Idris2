@@ -3,14 +3,20 @@ module TTImp.Unelab
 import Core.Context
 import Core.Context.Log
 import Core.Env
-import Core.Normalise
-import Core.Value
 import Core.TT
 
 import TTImp.TTImp
 
 import Data.List
 import Data.String
+import Data.Vect
+
+import Core.Evaluate.Value
+import Core.Evaluate.Quote
+import Core.Evaluate.Normalise
+import Core.Evaluate.Convert
+import Core.Evaluate
+import Core.Name.CompatibleVars
 
 import Libraries.Data.List.SizeOf
 import Libraries.Data.SnocList.SizeOf
@@ -30,6 +36,7 @@ used idx (As _ _ _ pat) = used idx pat
 used idx (TDelayed _ _ tm) = used idx tm
 used idx (TDelay _ _ _ tm) = used idx tm
 used idx (TForce _ _ tm) = used idx tm
+used idx (PrimOp _ _ args) = any (used idx) args
 used idx _ = False
 
 public export
@@ -37,11 +44,13 @@ data UnelabMode
      = Full
      | NoSugar Bool -- uniqify names
      | ImplicitHoles
+     | NoImplicits
 
 Eq UnelabMode where
    Full == Full = True
    NoSugar t == NoSugar u = t == u
    ImplicitHoles == ImplicitHoles = True
+   NoImplicits == NoImplicits = True
    _ == _ = False
 
 mutual
@@ -84,7 +93,7 @@ mutual
   unelabTy' umode nest env (Local fc _ idx p)
       = do let nm = nameAt p
            log "unelab.case" 20 $ "Found local name: " ++ show nm
-           let ty = gnf env (binderType (getBinder p env))
+           ty <- nf env (binderType (getBinder p env))
            pure (IVar fc (MkKindedName (Just Bound) nm nm), ty)
   unelabTy' umode nest env (Ref fc nt n)
       = do defs <- get Ctxt
@@ -102,7 +111,7 @@ mutual
                      , "sugared to", show n'
                      ]
 
-           pure (IVar fc (MkKindedName (Just nt) fn n'), gnf env (embed ty))
+           pure (IVar fc (MkKindedName (Just nt) fn n'), !(nf env (embed ty)))
   unelabTy' umode nest env (Meta fc n i args)
       = do defs <- get Ctxt
            let mkn = nameRoot n
@@ -114,19 +123,18 @@ mutual
                | Nothing => case umode of
                                  ImplicitHoles => pure (Implicit fc True, gErased fc)
                                  _ => pure (term, gErased fc)
-           pure (term, gnf env (embed ty))
+           pure (IHole fc mkn, !(nf env (embed ty)))
+
   unelabTy' umode nest env (Bind fc x b sc)
-      = case umode of
-          NoSugar True => do
-            let x' = uniqueLocal vars x
-            let sc : Term (vars :< x') = compat sc
-            (sc', scty) <- unelabTy umode nest (env :< b) sc
-            unelabBinder umode nest fc env x' b
-                         (compat sc) sc'
-                         (compat !(getTerm scty))
-          _ => do
-            (sc', scty) <- unelabTy umode nest (env :< b) sc
-            unelabBinder umode nest fc env x b sc sc' !(getTerm scty)
+      = do let env' = env :< b
+           (sc', scty) <- unelabTy umode nest env' sc
+           case umode of
+                NoSugar True =>
+                   let x' = uniqueLocal vars x in
+                       unelabBinder umode nest fc env x' b
+                                    (renameVars (Ext Pre) sc) sc'
+                                    (renameVars (Ext Pre) !(quote env' scty))
+                _ => unelabBinder umode nest fc env x b sc sc' !(quote env' scty)
     where
       next : Name -> Name
       next (MN n i) = MN n (i + 1)
@@ -139,23 +147,20 @@ mutual
          = if n `elem` vs
               then uniqueLocal vs (next n)
               else n
-  unelabTy' umode nest env tm@(App fc fn _ arg)
+  unelabTy' umode nest env tm@(App fc fn c arg)
       = do (fn', gfnty) <- unelabTy umode nest env fn
            (arg', gargty) <- unelabTy umode nest env arg
-           fnty <- getNF gfnty
-           defs <- get Ctxt
+           fnty <- expand gfnty
            case fnty of
-                NBind _ x (Pi _ rig Explicit ty) sc
-                  => do sc' <- sc defs (toClosure defaultOpts env arg)
-                        pure (IApp fc fn' arg',
-                                glueBack defs env sc')
-                NBind _ x (Pi _ rig p ty) sc
-                  => do sc' <- sc defs (toClosure defaultOpts env arg)
+                VBind _ x (Pi _ rig Explicit ty) sc
+                  => do sc' <- sc (nf env arg)
+                        pure (IApp fc fn' arg', sc')
+                VBind _ x (Pi _ rig p ty) sc
+                  => do sc' <- sc (nf env arg)
                         case umode of
-                             (NoSugar _) => pure (fn', glueBack defs env sc')
-                             ImplicitHoles => pure (fn', glueBack defs env sc')
-                             _ => pure (INamedApp fc fn' x arg', glueBack defs env sc')
-                _ => pure (IApp fc fn' arg', gErased fc)
+                             NoImplicits => pure (fn', sc')
+                             _ => pure (INamedApp fc fn' x arg', sc')
+                _ => pure (IApp fc fn' arg', VErased fc Placeholder)
   unelabTy' umode nest env (As fc s p tm)
       = do (p', _) <- unelabTy' umode nest env p
            (tm', ty) <- unelabTy' umode nest env tm
@@ -175,7 +180,7 @@ mutual
                     FC -> Name -> SnocList (Maybe Name, Name) ->
                     Env Term vars -> NF [<] ->
                     CaseScope vars -> Core IImpClause
-      unelabScope fc n args env _ (RHS tm)
+      unelabScope fc n args env _ (RHS _ tm)
           = do (tm', _) <- unelabTy' umode nest env tm
                let n' = MkKindedName (Just Bound) n n
                pure (PatClause fc (applySpine (IVar fc n') args) tm')
@@ -191,25 +196,24 @@ mutual
                         ImplicitHoles => applySpine fn args
                         _ => INamedApp fc (applySpine fn args) n (IVar fc arg')
 
-      unelabScope fc n args env (NBind _ v (Pi _ rig p ty) tsc) (Arg c x sc)
-          = do defs <- get Ctxt
-               p' <- the (Core (PiInfo (Term [<]))) $ case p of
+      unelabScope fc n args env (VBind _ v (Pi _ rig p ty) tsc) (Arg c x sc)
+          = do p' <- the (Core (PiInfo (Term [<]))) $ case p of
                           Explicit => pure Explicit
                           Implicit => pure Implicit
                           AutoImplicit => pure AutoImplicit
-                          DefImplicit t => pure $ DefImplicit !(quote defs [<] t)
-               vty <- quote defs [<] ty
+                          DefImplicit t => pure $ DefImplicit !(quote [<] t)
+               vty <- quote [<] ty
                let env' = env :< PVar fc rig (map embed p') (embed vty)
                -- We only need the type to make sure we're getting the plicities
                -- right, so use an explicit name to feed to the scope type
-               tsc' <- tsc defs (toClosure defaultOpts [<] (Ref fc Bound n))
+               tsc' <- expand !(tsc (pure (vRef fc Bound n)))
                let xn = case p' of
                              Explicit => Nothing
                              _ => Just v
                unelabScope fc n (args :< (xn, x)) env' tsc' sc
       unelabScope fc n args env ty (Arg c x sc)
           = do let env' = env :< PVar fc top Explicit (Erased fc Placeholder)
-               unelabScope fc n (args :< (Nothing, x)) env' (NErased fc Placeholder) sc
+               unelabScope fc n (args :< (Nothing, x)) env' (VErased fc Placeholder) sc
 
       unelabAlt : CaseAlt vars -> Core IImpClause
       unelabAlt (ConCase fc n t sc)
@@ -218,7 +222,7 @@ mutual
                let ty = case nty of
                              Nothing => Erased fc Placeholder
                              Just t => t
-               unelabScope fc !(getFullName n) [<] env !(nf defs [<] ty) sc
+               unelabScope fc !(getFullName n) [<] env !(expand !(nf [<] ty)) sc
       unelabAlt (DelayCase fc t a tm)
           = do let env' = env :<
                        PVar fc top Explicit (Erased fc Placeholder) :<
@@ -246,6 +250,9 @@ mutual
            defs <- get Ctxt
            pure (IForce fc tm', gErased fc)
   unelabTy' umode nest env (PrimVal fc c) = pure (IPrimVal fc c, gErased fc)
+  unelabTy' umode nest env (PrimOp fc fn args)
+      = -- If we ever see this in output, we've overevaluated
+        pure (Implicit fc True, gErased fc)
   unelabTy' umode nest env (Erased fc (Dotted t))
     = unelabTy' umode nest env t
   unelabTy' umode nest env (Erased fc _) = pure (Implicit fc True, gErased fc)
@@ -277,12 +284,12 @@ mutual
       = do (ty', _) <- unelabTy umode nest env ty
            p' <- unelabPi umode nest env p
            pure (ILam fc rig p' (Just x) ty' sc,
-                    gnf env (Bind fc x (Pi fc' rig p ty) scty))
+                    !(nf env (Bind fc x (Pi fc' rig p ty) scty)))
   unelabBinder umode nest fc env x (Let fc' rig val ty) sctm sc scty
       = do (val', vty) <- unelabTy umode nest env val
            (ty', _) <- unelabTy umode nest env ty
            pure (ILet fc EmptyFC rig x ty' val' sc,
-                    gnf env (Bind fc x (Let fc' rig val ty) scty))
+                    !(nf env (Bind fc x (Let fc' rig val ty) scty)))
   unelabBinder umode nest fc env x (Pi _ rig p ty) sctm sc scty
       = do (ty', _) <- unelabTy umode nest env ty
            p' <- unelabPi umode nest env p
@@ -301,12 +308,12 @@ mutual
       isDefImp _ = False
   unelabBinder umode nest fc env x (PVar fc' rig _ ty) sctm sc scty
       = do (ty', _) <- unelabTy umode nest env ty
-           pure (sc, gnf env (Bind fc x (PVTy fc' rig ty) scty))
+           pure (sc, !(nf env (Bind fc x (PVTy fc' rig ty) scty)))
   unelabBinder umode nest fc env x (PLet fc' rig val ty) sctm sc scty
       = do (val', vty) <- unelabTy umode nest env val
            (ty', _) <- unelabTy umode nest env ty
            pure (ILet fc EmptyFC rig x ty' val' sc,
-                    gnf env (Bind fc x (PLet fc' rig val ty) scty))
+                    !(nf env (Bind fc x (PLet fc' rig val ty) scty)))
   unelabBinder umode nest fc env x (PVTy _ rig ty) sctm sc scty
       = do (ty', _) <- unelabTy umode nest env ty
            pure (sc, gType fc (MN "top" 0))

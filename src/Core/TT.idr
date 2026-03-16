@@ -454,6 +454,8 @@ mkLocals outer bs (TDelay fc x t y)
 mkLocals outer bs (TForce fc r x)
     = TForce fc r (mkLocals outer bs x)
 mkLocals outer bs (PrimVal fc c) = PrimVal fc c
+mkLocals outer bs (PrimOp fc fn args)
+    = PrimOp fc fn (map (mkLocals outer bs) args)
 mkLocals outer bs (Erased fc Impossible) = Erased fc Impossible
 mkLocals outer bs (Erased fc Placeholder) = Erased fc Placeholder
 mkLocals outer bs (Erased fc (Dotted t)) = Erased fc (Dotted (mkLocals outer bs t))
@@ -463,7 +465,11 @@ mkLocals outer bs (TType fc u) = TType fc u
 mkLocalsCaseScope
     : SizeOf outer -> Bounds bound ->
       CaseScope (vars ++ outer) -> CaseScope (vars ++ (bound ++ outer))
-mkLocalsCaseScope outer bs (RHS tm) = RHS (mkLocals outer bs tm)
+mkLocalsCaseScope outer bs (RHS fs tm)
+    = RHS (map (\ (MkVar n, t) =>
+                      (let MkNVar p' = addVars outer bs (MkNVar n) in
+                           MkVar p', mkLocals outer bs t)) fs)
+          (mkLocals outer bs tm)
 mkLocalsCaseScope outer bs (Arg r x scope)
     = Arg r x (mkLocalsCaseScope (suc outer) bs scope)
 
@@ -478,6 +484,10 @@ export
 refsToLocals : Bounds bound -> Term vars -> Term (vars ++ bound)
 refsToLocals None y = y
 refsToLocals bs y = mkLocals zero  bs y
+
+export
+refsToLocalsCaseScope : Bounds bound -> CaseScope vars -> CaseScope (vars ++ bound)
+refsToLocalsCaseScope bs sc = mkLocalsCaseScope zero bs sc
 
 -- Replace any reference to 'x' with a locally bound name 'new'
 export
@@ -530,7 +540,7 @@ addMetas res ns (Case fc t c sc scty alts)
     = addMetaAlts (addMetas res ns sc) alts
   where
     addMetaScope : forall vars . NameMap Bool -> CaseScope vars -> NameMap Bool
-    addMetaScope ns (RHS tm) = addMetas res ns tm
+    addMetaScope ns (RHS _ tm) = addMetas res ns tm
     addMetaScope ns (Arg c x sc) = addMetaScope ns sc
 
     addMetaAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
@@ -547,6 +557,11 @@ addMetas res ns (TDelay fc x t y)
     = addMetas res (addMetas res ns t) y
 addMetas res ns (TForce fc r x) = addMetas res ns x
 addMetas res ns (PrimVal fc c) = ns
+addMetas res ns (PrimOp fc op args) = addMetaArgs ns args
+  where
+    addMetaArgs : NameMap Bool -> Vect n (Term vars) -> NameMap Bool
+    addMetaArgs ns [] = ns
+    addMetaArgs ns (t :: ts) = addMetaArgs (addMetas res ns t) ts
 addMetas res ns (Erased fc i) = foldr (flip $ addMetas res) ns i
 addMetas res ns (Unmatched fc u) = ns
 addMetas res ns (TType fc u) = ns
@@ -587,7 +602,7 @@ addRefs ua at ns (Case fc t c sc scty alts)
           addRefAlts (addRefs ua at ns' sc) alts
   where
     addRefScope : forall vars . NameMap Bool -> CaseScope vars -> NameMap Bool
-    addRefScope ns (RHS tm) = addRefs ua at ns tm
+    addRefScope ns (RHS _ tm) = addRefs ua at ns tm
     addRefScope ns (Arg c x sc) = addRefScope ns sc
 
     addRefAlt : NameMap Bool -> CaseAlt vars -> NameMap Bool
@@ -604,6 +619,11 @@ addRefs ua at ns (TDelay fc x t y)
     = addRefs ua at (addRefs ua at ns t) y
 addRefs ua at ns (TForce fc r x) = addRefs ua at ns x
 addRefs ua at ns (PrimVal fc c) = ns
+addRefs ua at ns (PrimOp fc op args) = addRefArgs ns args
+  where
+    addRefArgs : NameMap Bool -> Vect n (Term vars) -> NameMap Bool
+    addRefArgs ns [] = ns
+    addRefArgs ns (t :: ts) = addRefArgs (addRefs ua at ns t) ts
 addRefs ua at ns (Erased fc i) = foldr (flip $ addRefs ua at) ns i
 addRefs ua at ns (Unmatched fc str) = ns
 addRefs ua at ns (TType fc u) = ns

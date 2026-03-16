@@ -305,15 +305,17 @@ mutual
         = h `hashWithSalt` 9 `hashWithSalt` x
     hashWithSalt h (PrimVal fc c)
         = h `hashWithSalt` 10 `hashWithSalt` (show c)
+    hashWithSalt h (PrimOp fc op t)
+        = h `hashWithSalt` 11 `hashWithSalt` op
     hashWithSalt h (Erased fc _)
-        = hashWithSalt h 11
+        = hashWithSalt h 12
     hashWithSalt h (Unmatched fc u)
         = hashWithSalt h 13 `hashWithSalt` u
     hashWithSalt h (TType fc u)
         = hashWithSalt h 15 `hashWithSalt` u
   export
   Hashable (CaseScope vars) where
-    hashWithSalt h (RHS tm)
+    hashWithSalt h (RHS _ tm)
         = hashWithSalt h 0 `hashWithSalt` tm
     hashWithSalt h (Arg _ x sc)
         = hashWithSalt h 1 `hashWithSalt` x `hashWithSalt` sc
