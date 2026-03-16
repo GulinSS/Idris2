@@ -77,6 +77,7 @@ expandClause loc opts n c
          rhs' <- exprSearchOpts opts loc (Resolved fn) []
          traverse (\rhs' =>
             do let rhsraw = dropLams locs rhs'
+               -- logTermNF "interaction.generate" 5 "Got clause" env lhs
                log "interaction.generate" 5 $ "        = " ++ show rhsraw
                pure [updateRHS c rhsraw]) rhs'
   where

@@ -261,6 +261,7 @@ findLoops s
          -- sense if the position for we can say something are stable under γ.
          -- Hence the following filter:
          let loops = filterEndos (\a => composeChange a.change a.change == a.change) s
+         logC "totality.termination.calc" 7 $ do pure "Loops: \{show loops}"
          let terms = map (foldMap checkNonDesc) loops
          pure terms
     where
@@ -346,7 +347,7 @@ calcTerminating : {auto c : Ref Ctxt Defs} ->
                   FC -> Name -> Core Terminating
 calcTerminating loc n
     = do defs <- get Ctxt
-         logC "totality.termination.calc" 7 $ do pure $ "Calculating termination: " ++ show !(toFullNames n)
+         logC "totality.termination.calc" 7 $ do pure "Calculating termination: \{show !(toFullNames n)}"
          Just def <- lookupCtxtExact n (gamma defs)
             | Nothing => undefinedName loc n
          IsTerminating <- totRefs defs (keys (refersTo def))

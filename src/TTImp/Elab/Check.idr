@@ -786,6 +786,8 @@ checkExp rig elabinfo env fc tm got (Just exp)
                          NoLazy => do logTerm "elab" 5 "Solved" tm
                                       pure (tm, got)
                          AddForce r => do logTerm "elab" 5 "Force" tm
+                                          -- logGlue "elab" 5 "Got" env got
+                                          -- logGlue "elab" 5 "Exp" env exp
                                           pure (TForce fc r tm, exp)
                          AddDelay r => do ty <- quote env got
                                           logTerm "elab" 5 "Delay" tm

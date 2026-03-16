@@ -263,6 +263,7 @@ checkUpdate rig elabinfo nest env fc upds rec expected
                 recty' <- if delayed
                                 then nf env !(quote env exp)
                                 else pure recty
+                -- logGlueNF "elab.record" 5 (show delayed ++ " record type " ++ show rec) env recty'
                 rcase <- recUpdate rig elabinfo fc nest env upds rec recty'
                 log "elab.record" 5 $ "Record update: " ++ show rcase
                 check rig elabinfo nest env rcase expected

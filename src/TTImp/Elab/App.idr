@@ -365,6 +365,10 @@ mutual
             defs <- get Ctxt
             nfargty <- expand argty
             mconsCount <- countConstructors nfargty
+            -- logNF "elab.app.dot" 50
+            --   "Found \{show mconsCount} constructors for type"
+            --   (mkEnv emptyFC vars)
+            --   nfargty
             if mconsCount == Just 1 || mconsCount == Just 0
               then pure tm
               else
@@ -611,6 +615,8 @@ mutual
            let fntm = App fc tm top argv
            fnty <- nf env retTy
            expfnty <- nf env (Bind fc argn (Pi fc top Explicit argTy) (weaken retTy))
+           -- logNF "elab.with" 10 "Expected function type" env expfnty
+           -- whenJust expty (logNF "elab.with" 10 "Expected result type" env)
            res <- checkAppWith' rig elabinfo nest env fc fntm !(expand fnty) (n, 1 + argpos) expargs autoargs namedargs kr expty
            cres <- Check.convert fc elabinfo env (asGlued ty) expfnty
            let [] = constraints cres

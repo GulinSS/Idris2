@@ -123,6 +123,8 @@ searchIfHole fc defaults trying ispair (S depth) def top env arg
 
          argdef <- searchType fc rig defaults trying depth def False top' env
                               !(normaliseScope env (argType arg))
+         -- logTermNF "auto" 5 "Solved arg" env argdef
+         -- logTermNF "auto" 5 "Arg meta" env (snd $ metaApp arg)
          ok <- solveIfUndefined env (snd $ metaApp arg) argdef
          if ok
             then pure ()
@@ -403,12 +405,14 @@ searchName fc rigc defaults trying depth def top env target (n, ndef)
                         TCon arity _ _ _ _ _ _ => TyCon arity
                         _ => Func
          nty <- expand !(nf env (embed ty))
+         -- logNF "auto" 10 ("Searching Name " ++ show n) env nty
          (args, appTy) <- mkArgs fc rigc env nty
          ures <- unify inTerm fc env target appTy
          let [] = constraints ures
              | _ => throw (CantSolveGoal fc (gamma defs) ScopeEmpty top Nothing)
          ispair <- isPairNF env nty
          let candidate = apply fc (Ref fc namety n) (map metaApp args)
+         -- logTermNF "auto" 10 "Candidate " env candidate
          -- Work right to left, because later arguments may solve earlier
          -- dependencies by unification
          traverse_ (searchIfHole fc defaults trying ispair depth def top env)
@@ -456,6 +460,9 @@ concreteDets fc defaults env top pos dets [] = pure ()
 concreteDets {vars} fc defaults env top pos dets (arg :: args)
     = do when (pos `elem` dets) $ do
            argnf <- expand arg
+           -- logNF "auto.determining" 10
+           --   "Checking that the following argument is concrete"
+           --   env argnf
            concrete argnf True
          concreteDets fc defaults env top (1 + pos) dets args
   where
@@ -581,6 +588,7 @@ searchType {vars} fc rigc defaults trying depth def checkdets top env target
                         (do gn <- traverse getFullName g
                             pure ("Search: Trying " ++ show (length gn) ++
                                            " names " ++ show gn))
+                 -- logNF "auto" 5 "For target" env nty
                  tryNoDefaultsFirst $ \d =>
                    searchNames fc rigc d (target :: trying) depth def top env ambigok g nty)
              (\err => tryGroups (Just $ fromMaybe err merr) nty gs)

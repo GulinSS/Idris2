@@ -382,7 +382,9 @@ getToBind {vars} fc elabmode impmode env excepts
                Core (List (Name, ImplBinding vars))
     normImps defs ns [] = pure []
     normImps defs ns ((PV n i, bty) :: ts)
-        = do if PV n i `elem` ns
+        = do -- logTermNF "elab.implicits" 10 ("Implicit pattern var " ++ show (PV n i)) env
+             --           (bindingType bty)
+             if PV n i `elem` ns
                 then normImps defs ns ts
                 else do rest <- normImps defs (PV n i :: ns) ts
                         pure ((PV n i, !(normBindingTy defs bty)) :: rest)

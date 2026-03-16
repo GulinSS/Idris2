@@ -859,6 +859,7 @@ inferAndNormalize emode itm
        defs <- get Ctxt
        let norm = replEval emode
        ntm <- norm ScopeEmpty tm
+       -- logTermNF "repl.eval" 5 "Normalised" ScopeEmpty ntm
        pure $ ntm `WithType` ty
   where
     elabMode : REPLEval -> ElabMode
@@ -915,6 +916,7 @@ process (Check itm)
     = do (tm `WithType` ty) <- inferAndElab InExpr itm ScopeEmpty
          defs <- get Ctxt
          itm <- resugar ScopeEmpty !(normaliseHoles ScopeEmpty tm)
+         -- ty <- quote env gty
          ity <- resugar ScopeEmpty !(normalise ScopeEmpty ty)
          pure (TermChecked itm ity)
 process (CheckWithImplicits itm)

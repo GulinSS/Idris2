@@ -414,6 +414,7 @@ checkLHS {vars} trans mult n opts nest env fc lhs_in
 -- todo: add Pretty RawImp instance
 --         logC "declare.def.lhs" 5 $ do pure $ show $ indent {ann = ()} 2 $ pretty lhs
          log "declare.def.lhs" 10 $ show lhs
+         -- logEnv "declare.def.lhs" 5 "In env" env
          let lhsMode = if trans
                           then InTransform
                           else InLHS mult
@@ -494,6 +495,7 @@ checkClause mult vis totreq hashit n opts nest env (ImpossibleClause fc lhs)
                setUnboundImplicits autoimp
 
                log "declare.def.clause.impossible" 5 $ "Checking " ++ show lhs
+               -- logEnv "declare.def.clause.impossible" 5 "In env" env
                (lhstm, lhstyg) <-
                            elabTerm n (InLHS mult) opts nest env
                                       (IBindHere fc PATTERN lhs) Nothing
@@ -513,6 +515,7 @@ checkClause {vars} mult vis totreq hashit n opts nest env (PatClause fc lhs_in r
              checkLHS False mult n opts nest env fc lhs_in
          let rhsMode = if isErased mult then InType else InExpr
          log "declare.def.clause" 5 $ "Checking RHS " ++ show rhs
+         -- logEnv "declare.def.clause" 5 "In env" env'
 
          rhstm <- logTime 3 ("Check RHS " ++ show fc) $
                     wrapErrorC opts (InRHS fc !(getFullName (Resolved n))) $

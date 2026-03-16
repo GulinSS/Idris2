@@ -51,6 +51,7 @@ posArgs : {auto c : Ref Ctxt Defs} ->
 posArgs tyn [<] = pure IsTerminating
 posArgs tyn (xs :< x)
   = do xNF <- expand x
+       -- logNF "totality.positivity" 50 "Checking parameter for positivity" [<] xNF
        IsTerminating <- posArg tyn xNF
           | err => pure err
        posArgs tyn xs
@@ -58,7 +59,8 @@ posArgs tyn (xs :< x)
 -- a tyn can only appear in the parameter positions of
 -- tc; report positivity failure if it appears anywhere else
 posArg tyns nf@(VTCon loc tc _ args) =
-  do defs <- get Ctxt
+  do -- logNF "totality.positivity" 50 "Found a type constructor" [<] nf
+     defs <- get Ctxt
      testargs <- case !(lookupDefExact tc (gamma defs)) of
                     Just (TCon _ params _ _ _ _ _) => do
                          logC "totality.positivity" 50 $
@@ -90,13 +92,15 @@ posArg tyns nf@(VApp _ _ n args _)
     = do False <- isAssertTotal n
            | True => do -- logNF "totality.positivity" 50 "Trusting an assertion" [<] nf
                         pure IsTerminating
+         -- logNF "totality.positivity" 50 "Found an application" [<] nf
          args <- traverseSnocList spineVal args
          pure $ if !(Core.Core.anyM (nameIn tyns) (cast args))
            then NotTerminating NotStrictlyPositive
            else IsTerminating
 posArg tyn (VDelayed _ _ ty) = posArg tyn !(expand ty)
 posArg tyn nf
-  = pure IsTerminating
+  = do -- logNF "totality.positivity" 50 "Reached the catchall" [<] nf
+       pure IsTerminating
 
 checkPosArgs : {auto c : Ref Ctxt Defs} ->
                List Name -> NF [<] -> Core Terminating
@@ -107,7 +111,8 @@ checkPosArgs tyns (VBind fc x (Pi _ _ e ty) sc)
                   checkPosArgs tyns !(expand !(sc (pure nm)))
            bad => pure bad
 checkPosArgs tyns nf
-  = pure IsTerminating
+  = do -- logNF "totality.positivity" 50 "Giving up on non-Pi type" [<] nf
+       pure IsTerminating
 
 checkCon : {auto c : Ref Ctxt Defs} ->
            List Name -> Name -> Core Terminating
@@ -121,6 +126,7 @@ checkCon tyns cn
              case !(totRefsIn defs ty) of
                 IsTerminating =>
                   do tyNF <- nf [<] ty
+                     -- logNF "totality.positivity" 20 "Checking the type " [<] tyNF
                      checkPosArgs tyns !(expand tyNF)
                 bad => pure bad
 
@@ -152,14 +158,14 @@ calcPositive : {auto c : Ref Ctxt Defs} ->
                FC -> Name -> Core (Terminating, List Name)
 calcPositive loc n
     = do defs <- get Ctxt
-         logC "totality.positivity" 6 $ do pure $ "Calculating positivity: " ++ show !(toFullNames n)
+         logC "totality.positivity" 6 $ do pure $ "Calculating positivity: \{show !(toFullNames n)}"
          case !(lookupDefTyExact n (gamma defs)) of
               Just (TCon _ _ _ _ tns dcons _, ty) =>
                 let dcons = fromMaybe [] dcons in
                   case !(totRefsIn defs ty) of
                        IsTerminating =>
-                            do log "totality.positivity" 30 $
-                                 "Now checking constructors of " ++ show !(toFullNames n)
+                            do logC "totality.positivity" 30 $
+                                 do pure $ "Now checking constructors of \{show !(toFullNames n)}"
                                t <- blockingAssertTotal loc $ checkData (n :: tns) dcons
                                pure (t , dcons)
                        bad => pure (bad, dcons)

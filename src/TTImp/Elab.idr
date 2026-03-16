@@ -135,7 +135,9 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
          dumpConstraints "elab" 4 False
          defs <- get Ctxt
 
+         logTerm "elab" 10 "Term before nfKeepLet" chktm
          chktm <- quote env !(nfKeepLet env chktm)
+         logTerm "elab" 5 "Term after nfKeepLet" chktm
 
          -- Linearity and hole checking.
          -- on the LHS, all holes need to have been solved

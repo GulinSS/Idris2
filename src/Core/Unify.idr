@@ -757,7 +757,9 @@ mutual
   headsConvert mode fc env (Just vs) (Just ns)
       = case (reverse vs, reverse ns) of
              (_ :< v, _ :< n) =>
-                do res <- unify mode fc env v n
+                do -- logNF "unify.head" 10 "Unifying head" env v
+                   -- logNF "unify.head" 10 ".........with" env n
+                   res <- unify mode fc env v n
                    -- If there's constraints, we postpone the whole equation
                    -- so no need to record them
                    pure (isNil (constraints res ))
@@ -803,6 +805,8 @@ mutual
                           (if not swap then
                               do hv <- value h
                                  fv <- value f
+                                 -- logNF "unify.invertible" 10 "Unifying rightmost" env hv
+                                 -- logNF "unify.invertible" 10 "With rightmost...." env fv
                                  ures <- unify mode fc env hv fv
                                  log "unify.invertible" 10 $ "Constraints " ++ show (constraints ures)
                                  uargs <- unify {f=Normal} mode fc env
@@ -1145,6 +1149,7 @@ mutual
                   tx' <- quote env tx
                   x' <- genVarName "x"
                   logTerm "unify.binder" 10 "Unifying arg" tx'
+                  -- logNF "unify.binder" 10 "........with" env ty
                   let env' : Env Term (_ :< nx)
                            = env :< Pi fcy cy Explicit tx'
                   case constraints csarg of
@@ -1153,6 +1158,8 @@ mutual
                             tscy <- scy (mkArg fc x')
                             tmx <- quote env tscx
                             tmy <- quote env tscy
+                            -- logTermNF "unify.binder" 10 "Unifying scope" env tmx
+                            -- logTermNF "unify.binder" 10 "..........with" env tmy
                             unify (lower mode) fc env'
                               (refsToLocals (Add nx x' None) tmx)
                               (refsToLocals (Add nx x' None) tmy)
@@ -1403,6 +1410,11 @@ retry mode c
                => do defs <- get Ctxt
                      x <- nf env xold
                      y <- nf env yold
+                     log "unify" 10 (show loc)
+                     -- logNF "unify" 5 ("Retrying " ++ show c ++ " " ++ show (umode mode))
+                     --       env x
+                     -- logNF "unify" 5 "....with" env y
+
                      catch
                        (do cs <- ifThenElse withLazy
                                     (unifyWithLazy mode loc env x y)
@@ -1479,6 +1491,7 @@ retryGuess mode smode (hid, (loc, hname))
                                     then defaultPI
                                     else reducePI
                          let gdef = { definition := Function pi tm tm Nothing } def
+                         -- logTermNF "unify.retry" 5 ("Solved " ++ show hname) ScopeEmpty tm
                          ignore $ addDef (Resolved hid) gdef
                          removeGuess hid
                          pure True)
@@ -1490,7 +1503,10 @@ retryGuess mode smode (hid, (loc, hname))
                             setInvertible loc (Resolved i)
                             pure False -- progress not made yet!
                        err =>
-                         do case smode of
+                         do -- logTermNF "unify.retry" 5
+                            --           ("Search failed at " ++ show rig ++ " for " ++ show hname)
+                            --           ScopeEmpty (type def)
+                            case smode of
                                  LastChance => throw err
                                  _ => if recoverable err
                                          then pure False -- Postpone again
@@ -1639,6 +1655,8 @@ checkDots
         = do defs <- get Ctxt
              x <- nf env xold
              y <- nf env yold
+             -- logNF "unify.constraint" 10 "Dot" env y
+             -- logNF "unify.constraint" 10 "  =" env x
              -- A dot is okay if the constraint is solvable *without solving
              -- any additional holes*
              ust <- get UST
@@ -1682,6 +1700,7 @@ checkDots
                            do defs <- get Ctxt
                               Just dty <- lookupTyExact n (gamma defs)
                                    | Nothing => undefinedName fc n
+                              -- logTermNF "unify.constraint" 5 "Dot type" [<] dty
                               -- Clear constraints so we don't report again
                               -- later
                               put UST ({ dotConstraints := [] } ust)

@@ -89,6 +89,7 @@ reflectionttimp n = NS reflectionTTImpNS (UN $ Basic n)
 export
 cantReify : Ref Ctxt Defs => {vars : _} -> NF vars -> String -> Core a
 cantReify val ty = do
+  -- logNF "reflection.reify" 10 "Can't reify as \{ty}" (mkEnv emptyFC vars) val
   throw (GenericMsg (getLoc val) ("Can't reify as " ++ ty))
 
 export

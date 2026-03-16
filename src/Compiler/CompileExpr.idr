@@ -417,6 +417,15 @@ toCExp n tm
                         pure $ eraseConArgs arity epos f' args'
                       Arity a =>
                         pure $ expandToArity a f' args'
+                --  Arity a <- numArgs defs f
+                --     | NewTypeBy arity pos =>
+                --           do let res = applyNewType arity pos f' args'
+                --              pure $ builtinMagic res
+                --     | EraseArgs arity epos =>
+                --           do let res = eraseConArgs arity epos f' args'
+                --              pure $ builtinMagic res
+                --  let res = expandToArity a f' args'
+                --  pure $ builtinMagic res
 
 -- Need this for ensuring that argument list matches up to operator arity for
 -- builtins
