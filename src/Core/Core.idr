@@ -942,7 +942,7 @@ allM f (x :: xs)
 namespace SnocList
   export
   allM : (a -> Core Bool) -> SnocList a -> Core Bool
-  allM f [<] = pure False
+  allM f [<] = pure True
   allM f (xs :< x)
       = if !(f x)
          then allM f xs
