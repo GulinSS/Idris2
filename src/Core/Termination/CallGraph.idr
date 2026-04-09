@@ -112,9 +112,11 @@ mutual
              (InDelay, _, args) =>
                  do scs <- traverse (findSC defs env Unguarded pats) args
                     pure (concat scs)
-             (Guarded, Ref fc (DataCon {}) cn, args) =>
+             (Guarded, Ref fc (DataCon {}) cn, args) => do
+                    log "totality" 50 "findSCcall Guarded Ref DataCon \{show !(getFullName cn)}"
                     findSCcall defs env Guarded pats fc cn args
-             (Toplevel, Ref fc (DataCon {}) cn, args) =>
+             (Toplevel, Ref fc (DataCon {}) cn, args) => do
+                    log "totality" 50 "findSCcall Toplevel Ref DataCon \{show !(getFullName cn)}"
                     findSCcall defs env Guarded pats fc cn args
              (_, Ref fc Func fn, args) =>
                  do logC "totality" 50 $
@@ -128,7 +130,8 @@ mutual
         handleCase (Ref fc nt n) args
             = do n' <- toFullNames n
                  if caseFn n'
-                    then Just <$> findSCcall defs env g pats fc n args
+                    then do log "totality" 50 "handleCase findSCcall Toplevel Ref \{show !(getFullName n)}"
+                            Just <$> findSCcall defs env g pats fc n args
                     else pure Nothing
         handleCase _ _ = pure Nothing
 
@@ -365,13 +368,15 @@ mutual
         -- the size change list empty
       = do fn <- getFullName fn_in
            logC "totality.termination.sizechange" 10 $ do pure $ "Looking under " ++ show !(toFullNames fn)
+           for_ (toList args) $ \a =>
+             logTerm "totality" 50 "findSCcall arg" a
            aSmaller <- resolved (gamma defs) (NS builtinNS (UN $ Basic "assert_smaller"))
            if caseFn fn
               then do scs1 <- traverse (findSC defs env g pats) args
                       mps  <- getCasePats defs fn pats args
                       scs2 <- traverse (findInCase defs g) $ fromMaybe [] mps
                       pure (concat (scs1 ++ scs2))
-              else do scs <- traverse (findSC defs env g pats) args
+              else do scs <- traverse (\x => logDepth $ findSC defs env g pats x) args
                       pure $ [MkSCCall fn
                                (fromListList
                                     !(traverse (mkChange defs aSmaller pats) args))
@@ -388,7 +393,7 @@ mutual
                       pure ("Looking in case args " ++ show ps)
           logTermNF "totality" 10 "        =" env tm
           rhs <- normaliseOpts tcOnly defs env tm
-          findSC defs env g pats (delazy defs rhs)
+          logDepth $ findSC defs env g pats (delazy defs rhs)
 
 findCalls : {auto c : Ref Ctxt Defs} ->
             Defs -> (vars ** (Env Term vars, Term vars, Term vars)) ->
@@ -396,7 +401,7 @@ findCalls : {auto c : Ref Ctxt Defs} ->
 findCalls defs (_ ** (env, lhs, rhs_in))
    = do let pargs = getArgs (delazy defs lhs)
         rhs <- normaliseOpts tcOnly defs env rhs_in
-        findSC defs env Toplevel pargs (delazy defs rhs)
+        logDepth $ findSC defs env Toplevel pargs (delazy defs rhs)
 
 getSC : {auto c : Ref Ctxt Defs} ->
         Defs -> Def -> Core (List SCCall)
